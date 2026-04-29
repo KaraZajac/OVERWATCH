@@ -1,0 +1,16 @@
+# Copy this file to local.properties (which is gitignored) and edit the paths
+# for your machine.
+
+# Android SDK location. Required for any Android build.
+# Android Studio's setup wizard installs to ~/Library/Android/sdk by default.
+# Alternative: brew install --cask android-commandlinetools (path would be
+# /usr/local/share/android-commandlinetools or /opt/homebrew/share/android-commandlinetools).
+sdk.dir=/Users/YOUR_USERNAME/Library/Android/sdk
+
+# JDK 21 home. AGP 8.7.x supports JDK 17 / 21 — JDK 26 is too new for AGP.
+# This project's gradle wrapper runs on whatever JAVA_HOME points to.
+# Either:
+#   (a) export JAVA_HOME=/usr/local/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home
+#       in your shell profile
+#   (b) put the line below into ~/.gradle/gradle.properties (NOT project gradle.properties):
+#       org.gradle.java.home=/usr/local/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home

@@ -1,0 +1,24 @@
+package org.soulstone.overwatch.fusion
+
+/**
+ * One observation from one source at one moment.
+ *
+ * @param source which scanner produced this
+ * @param key stable per-device identifier (MAC for BLE/WiFi, OSM id for DeFlock, uuid for Waze)
+ * @param label short human-readable description shown in the drill-down ("Axon body cam", "FS-1A2B")
+ * @param score 0-100 confidence assigned by the engine
+ * @param matchedMethods space-separated short tags for what triggered ("axon_oui mfg_0x09C8 tn_serial")
+ * @param rssi signal strength if applicable (BLE/WiFi); null for map/Waze sources
+ * @param timestampMs wall-clock millis when this event was produced
+ */
+data class DetectionEvent(
+    val source: DetectionSource,
+    val key: String,
+    val label: String,
+    val score: Int,
+    val matchedMethods: String,
+    val rssi: Int? = null,
+    val timestampMs: Long = System.currentTimeMillis()
+) {
+    val level: ThreatLevel get() = ThreatLevel.fromScore(score)
+}

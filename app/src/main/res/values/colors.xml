@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="threat_green">#1FAA59</color>
+    <color name="threat_yellow">#F4C20D</color>
+    <color name="threat_orange">#F26B0F</color>
+    <color name="threat_red">#D7263D</color>
+    <color name="bg_dark">#0B0E12</color>
+    <color name="bg_card">#161A21</color>
+    <color name="text_primary">#F4F6FA</color>
+    <color name="text_secondary">#9AA3B2</color>
+</resources>
