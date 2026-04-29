@@ -109,12 +109,15 @@ class DeflockClient(context: Context) {
             val out = ArrayList<AlprPoint>(arr.length())
             for (i in 0 until arr.length()) {
                 val o = arr.getJSONObject(i)
+                val lat = o.optDouble("lat")
+                val lon = o.optDouble("lon")
+                if (lat.isNaN() || lon.isNaN()) continue
                 val tags = o.optJSONObject("tags")
                 out.add(
                     AlprPoint(
                         id = o.optLong("id", 0L),
-                        lat = o.optDouble("lat"),
-                        lon = o.optDouble("lon"),
+                        lat = lat,
+                        lon = lon,
                         operator = tags?.optString("operator")?.ifBlank { null }
                             ?: tags?.optString("surveillance:operator")?.ifBlank { null },
                         manufacturer = tags?.optString("manufacturer")?.ifBlank { null }

@@ -93,12 +93,15 @@ class WazeClient {
                 val loc = a.optJSONObject("location") ?: continue
                 val uuid = a.optString("uuid")
                 if (uuid.isBlank()) continue
+                val lat = loc.optDouble("y")
+                val lon = loc.optDouble("x")
+                if (lat.isNaN() || lon.isNaN()) continue
                 out.add(
                     Alert(
                         uuid = uuid,
                         subtype = a.optString("subtype").ifBlank { null },
-                        lat = loc.optDouble("y"),
-                        lon = loc.optDouble("x"),
+                        lat = lat,
+                        lon = lon,
                         pubMillis = a.optLong("pubMillis", System.currentTimeMillis()),
                         confidence = a.optInt("confidence", 0),
                         reliability = a.optInt("reliability", 0),

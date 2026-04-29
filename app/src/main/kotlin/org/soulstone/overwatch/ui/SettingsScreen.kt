@@ -13,6 +13,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -35,6 +38,8 @@ import org.soulstone.overwatch.data.settings.Settings
 @Composable
 fun SettingsScreen(
     settings: Settings,
+    isRunning: Boolean,
+    onRestart: () -> Unit,
     onBack: () -> Unit
 ) {
     val ble by settings.bleEnabled.collectAsState()
@@ -74,11 +79,29 @@ fun SettingsScreen(
         SourceToggle("DEFLOCK  •  ALPR map (cdn.deflock.me)", deflock) { settings.setDeflockEnabled(it) }
         SourceToggle("WAZE  •  Live police reports", waze) { settings.setWazeEnabled(it) }
         Spacer(Modifier.height(8.dp))
-        Text(
-            "Source toggles take effect on next Start.",
-            fontSize = 11.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+        if (isRunning) {
+            Button(
+                onClick = onRestart,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    contentColor = MaterialTheme.colorScheme.onSurface
+                ),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = "Restart scan to apply",
+                    fontSize = 13.sp,
+                    fontFamily = FontFamily.Monospace
+                )
+            }
+        } else {
+            Text(
+                "Source toggles take effect on next Start.",
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
         Spacer(Modifier.height(16.dp))
 
         SectionLabel("Proximity thresholds")
