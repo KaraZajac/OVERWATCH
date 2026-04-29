@@ -33,6 +33,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -50,6 +51,7 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 import org.soulstone.overwatch.fusion.DetectionEvent
 import org.soulstone.overwatch.fusion.DetectionSource
+import org.soulstone.overwatch.fusion.SourceHealth
 import org.soulstone.overwatch.fusion.ThreatLevel
 import org.soulstone.overwatch.ui.theme.ThreatColors
 
@@ -272,6 +274,9 @@ private fun SourcesPanel(events: List<DetectionEvent>) {
 
 @Composable
 private fun SourceRow(source: DetectionSource, events: List<DetectionEvent>) {
+    val health by SourceHealth.flowFor(source).collectAsState()
+    val unreachable = health.status == SourceHealth.Status.FAILED
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -294,6 +299,7 @@ private fun SourceRow(source: DetectionSource, events: List<DetectionEvent>) {
                 )
                 val maxScore = events.maxOfOrNull { it.score } ?: 0
                 val statusColor = when {
+                    unreachable -> MaterialTheme.colorScheme.onSurfaceVariant
                     maxScore >= ThreatLevel.RED.minScore -> ThreatColors.Red
                     maxScore >= ThreatLevel.ORANGE.minScore -> ThreatColors.Orange
                     maxScore >= ThreatLevel.YELLOW.minScore -> ThreatColors.Yellow
@@ -306,7 +312,15 @@ private fun SourceRow(source: DetectionSource, events: List<DetectionEvent>) {
                         .background(statusColor)
                 )
             }
-            if (events.isEmpty()) {
+            if (unreachable) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = health.message ?: "Source unavailable",
+                    color = ThreatColors.Orange,
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace
+                )
+            } else if (events.isEmpty()) {
                 Spacer(Modifier.height(4.dp))
                 Text(
                     text = "no detections",

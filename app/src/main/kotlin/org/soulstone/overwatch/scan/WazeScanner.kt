@@ -12,6 +12,7 @@ import org.soulstone.overwatch.fusion.ConfidenceEngine
 import org.soulstone.overwatch.fusion.DetectionEvent
 import org.soulstone.overwatch.fusion.DetectionSource
 import org.soulstone.overwatch.fusion.DetectionStore
+import org.soulstone.overwatch.fusion.SourceHealth
 
 /**
  * Polls Waze every 60s for live POLICE alerts in a small bounding box around the
@@ -59,7 +60,21 @@ class WazeScanner(
     }
 
     private suspend fun pollOnce(fix: Location) {
-        val alerts = client.fetchPoliceNear(fix.latitude, fix.longitude)
+        val result = client.fetchPoliceNear(fix.latitude, fix.longitude)
+        val alerts = when (result) {
+            is WazeClient.FetchResult.Success -> {
+                SourceHealth.record(DetectionSource.WAZE, ok = true)
+                result.alerts
+            }
+            is WazeClient.FetchResult.Failed -> {
+                SourceHealth.record(
+                    DetectionSource.WAZE,
+                    ok = false,
+                    message = "Waze unreachable: ${result.reason}"
+                )
+                return
+            }
+        }
         if (alerts.isEmpty()) return
         val now = System.currentTimeMillis()
         val limit = proximityMeters()

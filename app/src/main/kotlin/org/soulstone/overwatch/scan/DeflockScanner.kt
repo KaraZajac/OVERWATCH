@@ -11,17 +11,16 @@ import org.soulstone.overwatch.fusion.ConfidenceEngine
 import org.soulstone.overwatch.fusion.DetectionEvent
 import org.soulstone.overwatch.fusion.DetectionSource
 import org.soulstone.overwatch.fusion.DetectionStore
+import org.soulstone.overwatch.fusion.SourceHealth
 
 /**
  * DeFlock orchestrator.
  *
- * Subscribes to [LocationProvider]; for each new fix, looks up the matching 20° tile
- * (loaded from [DeflockClient] cache or downloaded once / 24h) and submits a
- * detection event for every ALPR within [PROXIMITY_M].
- *
- * Tile-boundary edge case: at lat ≈ tile_lat or lon ≈ tile_lon ±0.002°, ALPRs across
- * the boundary won't be visible until the user crosses it. Acceptable for v0.1 — a
- * 5-tile fetch (current + 4 neighbours) is a polish item.
+ * Subscribes to [LocationProvider]; when the user has moved more than
+ * [REFETCH_THRESHOLD_M] from the last fetch center (or there is no last
+ * center), runs an Overpass query via [DeflockClient] for the surrounding
+ * 5-km bbox. For each cached ALPR within [proximityMeters], submits a
+ * detection event.
  */
 class DeflockScanner(
     private val store: DetectionStore,
@@ -32,10 +31,12 @@ class DeflockScanner(
 
     companion object {
         private const val TAG = "DeflockScanner"
+        private const val REFETCH_THRESHOLD_M = 1500f
     }
 
     private var job: Job? = null
-    private var lastTile: DeflockClient.TileKey? = null
+    private var lastFetchLat: Double? = null
+    private var lastFetchLon: Double? = null
     private var cachedPoints: List<DeflockClient.AlprPoint> = emptyList()
 
     fun start(scope: CoroutineScope): Boolean {
@@ -52,17 +53,36 @@ class DeflockScanner(
     fun stop() {
         job?.cancel()
         job = null
-        lastTile = null
+        lastFetchLat = null
+        lastFetchLon = null
         cachedPoints = emptyList()
         Log.i(TAG, "DeflockScanner stopped")
     }
 
     private suspend fun handleFix(fix: Location) {
-        val tile = client.tileFor(fix.latitude, fix.longitude)
-        if (tile != lastTile) {
-            cachedPoints = client.fetchTile(tile)
-            lastTile = tile
-            Log.i(TAG, "Loaded tile $tile with ${cachedPoints.size} ALPRs")
+        if (shouldRefetch(fix)) {
+            when (val result = client.fetchAround(fix.latitude, fix.longitude)) {
+                is DeflockClient.FetchResult.Success -> {
+                    cachedPoints = result.points
+                    lastFetchLat = fix.latitude
+                    lastFetchLon = fix.longitude
+                    SourceHealth.record(DetectionSource.DEFLOCK, ok = true)
+                    Log.i(
+                        TAG,
+                        "Loaded ${cachedPoints.size} ALPRs around " +
+                            "(${fix.latitude}, ${fix.longitude})"
+                    )
+                }
+                is DeflockClient.FetchResult.Failed -> {
+                    SourceHealth.record(
+                        DetectionSource.DEFLOCK,
+                        ok = false,
+                        message = "Overpass unreachable: ${result.reason}"
+                    )
+                    Log.w(TAG, "Overpass fetch failed: ${result.reason}")
+                    // Keep using cachedPoints (may be empty on first failure).
+                }
+            }
         }
         if (cachedPoints.isEmpty()) return
 
@@ -90,5 +110,13 @@ class DeflockScanner(
                 )
             )
         }
+    }
+
+    private fun shouldRefetch(fix: Location): Boolean {
+        val lat = lastFetchLat ?: return true
+        val lon = lastFetchLon ?: return true
+        val out = FloatArray(1)
+        Location.distanceBetween(lat, lon, fix.latitude, fix.longitude, out)
+        return out[0] > REFETCH_THRESHOLD_M
     }
 }

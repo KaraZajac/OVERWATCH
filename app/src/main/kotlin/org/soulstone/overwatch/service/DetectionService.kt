@@ -24,6 +24,7 @@ import org.soulstone.overwatch.R
 import org.soulstone.overwatch.data.location.LocationProvider
 import org.soulstone.overwatch.data.settings.Settings
 import org.soulstone.overwatch.fusion.DetectionStore
+import org.soulstone.overwatch.fusion.SourceHealth
 import org.soulstone.overwatch.scan.BleScanner
 import org.soulstone.overwatch.scan.DeflockClient
 import org.soulstone.overwatch.scan.DeflockScanner
@@ -116,6 +117,7 @@ class DetectionService : LifecycleService() {
 
     private fun beginScanning() {
         if (_running.value) return
+        SourceHealth.reset()
         startInForeground()
         if (settings.bleEnabled.value) {
             bleStarted = bleScanner.start()
@@ -157,6 +159,7 @@ class DetectionService : LifecycleService() {
         if (wazeStarted) { wazeScanner.stop(); wazeStarted = false }
         locationProvider.stop()
         store.clear()
+        SourceHealth.reset()
         pruneJob?.cancel()
         pruneJob = null
         _running.value = false
