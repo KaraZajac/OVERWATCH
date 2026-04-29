@@ -20,8 +20,9 @@ camera, or police presence near you.
 | **BLE** | Bluetooth-LE advertisements: vendor MAC OUIs (Axon, Flock Penguin / Raven, XUNTONG mfg id `0x09C8`, "TN" serial pattern), Raven service UUIDs, device-name patterns | Local radio scan (BLE callback API) |
 | **WiFi** | BSSID OUI prefixes for Flock infrastructure (31-prefix superset), `Flock-XXXX` and other generic SSID patterns | `WifiManager.getScanResults()` polled every 35 s (just under the Android 11+ 4-scans/2-min throttle) |
 | **DEFLOCK** | Crowdsourced ALPR locations within configurable proximity (default 200 m) | POST to Overpass API (`overpass.deflock.org` → fallback `overpass-api.de`) for `man_made=surveillance + surveillance:type=ALPR` in a 5 km bbox; 24 h on-disk cache by 0.05° grid cell. Refetches when the user moves > 1.5 km from the last fetch center. |
-| **WAZE** | Live `POLICE` reports within configurable proximity (default 500 m) and < 10 min old | `live-map/api/georss` polled every 60 s with a small bbox around the user. **Note:** Waze added reCAPTCHA gating to this endpoint in 2025/2026; mobile clients now receive HTTP 403. Source stays wired and surfaces the failure in the drill-down sheet so it's never silently empty. |
-| **CITIZEN** | Real-time public-safety incidents (police-relevant only — fire/medical-only events filtered out) within configurable proximity, < 30 min old | `citizen.com/api/incident/trending` (bbox) polled every 60 s, then per-incident detail via `/api/incident/{id}` with an in-memory cache so each incident is fetched once per session. Pulled in to replace Waze's coverage gap. |
+| **CITIZEN** | Real-time public-safety incidents (police-relevant only — fire/medical-only events filtered out) within configurable proximity, < 30 min old | `citizen.com/api/incident/trending` (bbox) polled every 60 s, then per-incident detail via `/api/incident/{id}` with an in-memory cache so each incident is fetched once per session. |
+
+> **Why no Waze?** Waze added reCAPTCHA gating to its `live-map/api/georss` endpoint in 2025/2026. Mobile clients receive HTTP 403, and the only known workarounds (Selenium proxy on a home server, Waze for Cities partner program) aren't viable for a phone-deployed app. Citizen replaces it.
 
 Every observation is scored 0-100 by `ConfidenceEngine`. The on-screen tier is
 the maximum live score across all sources:

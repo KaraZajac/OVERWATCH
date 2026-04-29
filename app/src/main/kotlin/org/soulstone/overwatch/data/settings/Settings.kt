@@ -29,9 +29,6 @@ class Settings private constructor(private val prefs: SharedPreferences) {
     private val _deflockEnabled = MutableStateFlow(prefs.getBoolean(KEY_DEFLOCK, true))
     val deflockEnabled: StateFlow<Boolean> = _deflockEnabled.asStateFlow()
 
-    private val _wazeEnabled = MutableStateFlow(prefs.getBoolean(KEY_WAZE, true))
-    val wazeEnabled: StateFlow<Boolean> = _wazeEnabled.asStateFlow()
-
     private val _citizenEnabled = MutableStateFlow(prefs.getBoolean(KEY_CITIZEN, true))
     val citizenEnabled: StateFlow<Boolean> = _citizenEnabled.asStateFlow()
 
@@ -40,10 +37,10 @@ class Settings private constructor(private val prefs: SharedPreferences) {
     )
     val deflockProximityM: StateFlow<Int> = _deflockProximityM.asStateFlow()
 
-    private val _wazeProximityM = MutableStateFlow(
-        prefs.getInt(KEY_WAZE_PROX, DEFAULT_WAZE_PROX)
+    private val _citizenProximityM = MutableStateFlow(
+        prefs.getInt(KEY_CITIZEN_PROX, DEFAULT_CITIZEN_PROX)
     )
-    val wazeProximityM: StateFlow<Int> = _wazeProximityM.asStateFlow()
+    val citizenProximityM: StateFlow<Int> = _citizenProximityM.asStateFlow()
 
     private val _themeMode = MutableStateFlow(
         ThemeMode.valueOf(prefs.getString(KEY_THEME, ThemeMode.DARK.name) ?: ThemeMode.DARK.name)
@@ -53,7 +50,6 @@ class Settings private constructor(private val prefs: SharedPreferences) {
     fun setBleEnabled(v: Boolean) { prefs.edit { putBoolean(KEY_BLE, v) }; _bleEnabled.value = v }
     fun setWifiEnabled(v: Boolean) { prefs.edit { putBoolean(KEY_WIFI, v) }; _wifiEnabled.value = v }
     fun setDeflockEnabled(v: Boolean) { prefs.edit { putBoolean(KEY_DEFLOCK, v) }; _deflockEnabled.value = v }
-    fun setWazeEnabled(v: Boolean) { prefs.edit { putBoolean(KEY_WAZE, v) }; _wazeEnabled.value = v }
     fun setCitizenEnabled(v: Boolean) { prefs.edit { putBoolean(KEY_CITIZEN, v) }; _citizenEnabled.value = v }
 
     fun setDeflockProximityM(v: Int) {
@@ -62,10 +58,10 @@ class Settings private constructor(private val prefs: SharedPreferences) {
         _deflockProximityM.value = clamped
     }
 
-    fun setWazeProximityM(v: Int) {
+    fun setCitizenProximityM(v: Int) {
         val clamped = v.coerceIn(100, 5000)
-        prefs.edit { putInt(KEY_WAZE_PROX, clamped) }
-        _wazeProximityM.value = clamped
+        prefs.edit { putInt(KEY_CITIZEN_PROX, clamped) }
+        _citizenProximityM.value = clamped
     }
 
     fun setThemeMode(mode: ThemeMode) {
@@ -78,14 +74,13 @@ class Settings private constructor(private val prefs: SharedPreferences) {
         private const val KEY_BLE = "src_ble"
         private const val KEY_WIFI = "src_wifi"
         private const val KEY_DEFLOCK = "src_deflock"
-        private const val KEY_WAZE = "src_waze"
         private const val KEY_CITIZEN = "src_citizen"
         private const val KEY_DEFLOCK_PROX = "deflock_proximity_m"
-        private const val KEY_WAZE_PROX = "waze_proximity_m"
+        private const val KEY_CITIZEN_PROX = "citizen_proximity_m"
         private const val KEY_THEME = "theme_mode"
 
         const val DEFAULT_DEFLOCK_PROX = 200
-        const val DEFAULT_WAZE_PROX = 500
+        const val DEFAULT_CITIZEN_PROX = 500
 
         @Volatile private var INSTANCE: Settings? = null
 

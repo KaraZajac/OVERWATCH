@@ -24,12 +24,11 @@ object ConfidenceEngine {
     const val W_WIFI_SSID_GENERIC = 50
     const val W_WIFI_SSID_FLOCK_FMT = 65
 
-    // Map / Waze (Phase 3 + 4)
+    // Map (Phase 3)
     const val W_DEFLOCK_NEAR = 60   // <= 200m
     const val W_DEFLOCK_VERY_NEAR = 85 // <= 50m
-    const val W_WAZE_POLICE = 55
 
-    // Citizen (added when Waze went dark)
+    // Citizen (replaces Waze; Waze's reCAPTCHA gating made it unreachable)
     const val W_CITIZEN_INCIDENT = 55
     const val B_CITIZEN_LEVEL_BUMP = 5     // level >= 2
     const val B_CITIZEN_POLICE_TITLE = 5   // title contains a police-action keyword
@@ -64,16 +63,6 @@ object ConfidenceEngine {
         val distanceMeters: Float,
         val operator: String?,
         val manufacturer: String?
-    )
-
-    /** A Waze POLICE alert observed within proximity + freshness thresholds. */
-    data class WazeObservation(
-        val uuid: String,
-        val distanceMeters: Float,
-        val ageMs: Long,
-        val confidence: Int,   // raw 0-5
-        val reliability: Int,  // raw 0-10
-        val subtype: String?
     )
 
     /** A Citizen incident observed within proximity + freshness, after the
@@ -184,22 +173,6 @@ object ConfidenceEngine {
         }
 
         return Scored(score, methods.toString().trim(), label, isAxon)
-    }
-
-    fun scoreWaze(obs: WazeObservation): Scored {
-        // Plan baseline: 55 for any POLICE alert ≤500m & <10min old.
-        // Caller is responsible for applying the proximity + age gate before scoring.
-        var score = W_WAZE_POLICE
-        // Lightweight crowd-trust nudge: high reliability & high confidence each add a few points,
-        // capped well under the multi-method bonus so a corroborating BLE/WiFi hit still dominates.
-        if (obs.reliability >= 7) score += 5
-        if (obs.confidence >= 4) score += 5
-        score = score.coerceAtMost(100)
-        val methods = "waze_police rel=${obs.reliability} conf=${obs.confidence}"
-        val ageMin = (obs.ageMs / 60_000L).toInt()
-        val sub = obs.subtype?.let { " ($it)" } ?: ""
-        val label = "Police report$sub @ ${obs.distanceMeters.toInt()}m, ${ageMin}min ago"
-        return Scored(score, methods, label, isAxon = false)
     }
 
     fun scoreCitizen(obs: CitizenObservation): Scored {
