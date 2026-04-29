@@ -45,10 +45,9 @@ fun SettingsScreen(
     val ble by settings.bleEnabled.collectAsState()
     val wifi by settings.wifiEnabled.collectAsState()
     val deflock by settings.deflockEnabled.collectAsState()
-    val waze by settings.wazeEnabled.collectAsState()
     val citizen by settings.citizenEnabled.collectAsState()
     val deflockProx by settings.deflockProximityM.collectAsState()
-    val wazeProx by settings.wazeProximityM.collectAsState()
+    val citizenProx by settings.citizenProximityM.collectAsState()
     val theme by settings.themeMode.collectAsState()
 
     Column(
@@ -78,7 +77,6 @@ fun SettingsScreen(
         SourceToggle("BLE  •  Bluetooth Low Energy", ble) { settings.setBleEnabled(it) }
         SourceToggle("WIFI  •  WiFi BSSID + SSID", wifi) { settings.setWifiEnabled(it) }
         SourceToggle("DEFLOCK  •  ALPR map (Overpass)", deflock) { settings.setDeflockEnabled(it) }
-        SourceToggle("WAZE  •  Live police reports (gated)", waze) { settings.setWazeEnabled(it) }
         SourceToggle("CITIZEN  •  Real-time incident feed", citizen) { settings.setCitizenEnabled(it) }
         Spacer(Modifier.height(8.dp))
         if (isRunning) {
@@ -116,12 +114,12 @@ fun SettingsScreen(
             onChange = { settings.setDeflockProximityM(it.toInt()) }
         )
         SliderRow(
-            label = "Waze alert distance",
-            valueLabel = "${wazeProx} m",
-            value = wazeProx.toFloat(),
+            label = "Citizen alert distance",
+            valueLabel = "${citizenProx} m",
+            value = citizenProx.toFloat(),
             range = 100f..5000f,
             steps = 48,
-            onChange = { settings.setWazeProximityM(it.toInt()) }
+            onChange = { settings.setCitizenProximityM(it.toInt()) }
         )
 
         Spacer(Modifier.height(16.dp))
