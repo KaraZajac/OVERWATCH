@@ -49,12 +49,13 @@ class LocationProvider(private val context: Context) {
 
     private val callback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
+            if (!running) return
             val fix = result.lastLocation ?: return
             _location.value = fix
         }
     }
 
-    private var running = false
+    @Volatile private var running = false
 
     fun hasPermission(): Boolean =
         ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
@@ -68,12 +69,22 @@ class LocationProvider(private val context: Context) {
             return false
         }
         try {
-            client.requestLocationUpdates(request, callback, Looper.getMainLooper())
-            client.lastLocation.addOnSuccessListener { last -> if (last != null) _location.value = last }
             running = true
+            client.requestLocationUpdates(request, callback, Looper.getMainLooper())
+            // Seed with the cached lastLocation only if (a) we haven't already
+            // received a fresh fix from requestLocationUpdates and (b) we're
+            // still running by the time the listener fires. Otherwise the
+            // listener can race and either overwrite a fresh fix with a stale
+            // one or fire after stop().
+            client.lastLocation.addOnSuccessListener { last ->
+                if (running && last != null && _location.value == null) {
+                    _location.value = last
+                }
+            }
             Log.i(TAG, "Location updates started")
             return true
         } catch (e: SecurityException) {
+            running = false
             Log.e(TAG, "SecurityException starting location updates", e)
             return false
         }

@@ -24,6 +24,7 @@ import org.soulstone.overwatch.fusion.DetectionEvent
 import org.soulstone.overwatch.fusion.DetectionSource
 import org.soulstone.overwatch.fusion.DetectionStore
 import org.soulstone.overwatch.fusion.RssiTracker
+import org.soulstone.overwatch.fusion.SourceHealth
 
 /**
  * WiFi scanner — BSSID OUI + SSID-pattern matching via [WifiManager.getScanResults].
@@ -86,15 +87,23 @@ class WifiScanner(
         if (running) return true
         if (!hasScanPermission()) {
             Log.w(TAG, "WiFi scan permission missing")
+            SourceHealth.record(DetectionSource.WIFI, ok = false, message = "Permission missing")
             return false
         }
         val mgr = wifiManager ?: run {
             Log.w(TAG, "WifiManager unavailable")
+            SourceHealth.record(DetectionSource.WIFI, ok = false, message = "WifiManager unavailable")
             return false
         }
         if (!mgr.isWifiEnabled) {
             Log.w(TAG, "WiFi disabled — scanner won't return results")
+            SourceHealth.record(
+                DetectionSource.WIFI, ok = false,
+                message = "WiFi disabled — enable in system settings"
+            )
             // We still register the receiver so results arrive when the user enables WiFi.
+        } else {
+            SourceHealth.record(DetectionSource.WIFI, ok = true)
         }
         registerReceiver()
         running = true

@@ -128,7 +128,15 @@ class DeflockClient(context: Context) {
             val code = conn.responseCode
             if (code in 200..299) {
                 val body = conn.inputStream.bufferedReader().use { it.readText() }
-                body to null
+                // Overpass returns HTTP 200 with `{"remark": "runtime error: Query timed out..."}`
+                // when the query exceeded server-side limits. Body has elements:[]; treat as
+                // failure so we don't poison the 24h cache with empty results.
+                if (looksLikeOverpassTimeout(body)) {
+                    Log.w(TAG, "$endpoint returned 200 with timeout/runtime-limit remark")
+                    null to "Overpass timeout"
+                } else {
+                    body to null
+                }
             } else {
                 Log.w(TAG, "$endpoint returned $code")
                 null to "HTTP $code"
@@ -139,6 +147,16 @@ class DeflockClient(context: Context) {
         } finally {
             conn.disconnect()
         }
+    }
+
+    private fun looksLikeOverpassTimeout(body: String): Boolean {
+        if (!body.contains("remark", ignoreCase = true)) return false
+        val lower = body.lowercase()
+        return lower.contains("timed out") ||
+            lower.contains("timeout") ||
+            lower.contains("runtime error") ||
+            lower.contains("runtime limit exceeded") ||
+            lower.contains("rate_limited")
     }
 
     private fun parseSafely(json: String): List<AlprPoint> {

@@ -47,6 +47,9 @@ class Settings private constructor(private val prefs: SharedPreferences) {
     )
     val themeMode: StateFlow<ThemeMode> = _themeMode.asStateFlow()
 
+    private val _vibrateOnAlert = MutableStateFlow(prefs.getBoolean(KEY_VIBRATE, true))
+    val vibrateOnAlert: StateFlow<Boolean> = _vibrateOnAlert.asStateFlow()
+
     fun setBleEnabled(v: Boolean) { prefs.edit { putBoolean(KEY_BLE, v) }; _bleEnabled.value = v }
     fun setWifiEnabled(v: Boolean) { prefs.edit { putBoolean(KEY_WIFI, v) }; _wifiEnabled.value = v }
     fun setDeflockEnabled(v: Boolean) { prefs.edit { putBoolean(KEY_DEFLOCK, v) }; _deflockEnabled.value = v }
@@ -69,6 +72,11 @@ class Settings private constructor(private val prefs: SharedPreferences) {
         _themeMode.value = mode
     }
 
+    fun setVibrateOnAlert(v: Boolean) {
+        prefs.edit { putBoolean(KEY_VIBRATE, v) }
+        _vibrateOnAlert.value = v
+    }
+
     companion object {
         private const val PREFS = "overwatch_settings"
         private const val KEY_BLE = "src_ble"
@@ -78,6 +86,7 @@ class Settings private constructor(private val prefs: SharedPreferences) {
         private const val KEY_DEFLOCK_PROX = "deflock_proximity_m"
         private const val KEY_CITIZEN_PROX = "citizen_proximity_m"
         private const val KEY_THEME = "theme_mode"
+        private const val KEY_VIBRATE = "vibrate_on_alert"
 
         const val DEFAULT_DEFLOCK_PROX = 200
         const val DEFAULT_CITIZEN_PROX = 500
