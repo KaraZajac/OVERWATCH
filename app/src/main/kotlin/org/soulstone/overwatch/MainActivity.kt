@@ -70,8 +70,8 @@ class MainActivity : ComponentActivity() {
                             threat = threat,
                             score = maxScore,
                             events = events,
-                            canStart = granted || running,
-                            permissionMessage = if (!granted) "Bluetooth, WiFi + location permissions required" else null,
+                            canStart = true,
+                            permissionMessage = if (!granted) "Tap START to grant Bluetooth, WiFi + location permissions" else null,
                             onStartStop = {
                                 if (running) {
                                     DetectionService.stop(this)
