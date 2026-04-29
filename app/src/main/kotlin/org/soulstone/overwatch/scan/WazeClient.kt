@@ -48,7 +48,13 @@ class WazeClient {
         val reportedBy: String?
     )
 
-    suspend fun fetchPoliceNear(lat: Double, lon: Double): List<Alert> = withContext(Dispatchers.IO) {
+    /** Outcome — distinguishes "no police alerts in area" from "couldn't reach Waze." */
+    sealed class FetchResult {
+        data class Success(val alerts: List<Alert>) : FetchResult()
+        data class Failed(val reason: String) : FetchResult()
+    }
+
+    suspend fun fetchPoliceNear(lat: Double, lon: Double): FetchResult = withContext(Dispatchers.IO) {
         val top = lat + BBOX_HALF_DEG
         val bottom = lat - BBOX_HALF_DEG
         val left = lon - BBOX_HALF_DEG
@@ -67,15 +73,22 @@ class WazeClient {
         }
         try {
             val code = conn.responseCode
+            if (code == 403) {
+                // Waze added reCAPTCHA gating to live-map in 2025/2026; mobile
+                // clients can no longer hit this endpoint without browser-level
+                // automation. Surface this distinctly so the UI can say so.
+                Log.w(TAG, "Waze returned 403 (upstream reCAPTCHA gating)")
+                return@withContext FetchResult.Failed("Upstream blocked (HTTP 403)")
+            }
             if (code !in 200..299) {
                 Log.w(TAG, "Waze returned $code")
-                return@withContext emptyList()
+                return@withContext FetchResult.Failed("HTTP $code")
             }
             val body = conn.inputStream.bufferedReader().use { it.readText() }
-            parsePolice(body)
+            FetchResult.Success(parsePolice(body))
         } catch (e: Exception) {
             Log.w(TAG, "Waze fetch failed: ${e.message}")
-            emptyList()
+            FetchResult.Failed(e.message ?: e.javaClass.simpleName)
         } finally {
             conn.disconnect()
         }
