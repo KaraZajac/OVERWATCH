@@ -29,6 +29,11 @@ object ConfidenceEngine {
     const val W_DEFLOCK_VERY_NEAR = 85 // <= 50m
     const val W_WAZE_POLICE = 55
 
+    // Citizen (added when Waze went dark)
+    const val W_CITIZEN_INCIDENT = 55
+    const val B_CITIZEN_LEVEL_BUMP = 5     // level >= 2
+    const val B_CITIZEN_POLICE_TITLE = 5   // title contains a police-action keyword
+
     // Bonuses
     const val B_MULTI_METHOD = 20
     const val B_STRONG_RSSI = 10   // > -50 dBm
@@ -69,6 +74,18 @@ object ConfidenceEngine {
         val confidence: Int,   // raw 0-5
         val reliability: Int,  // raw 0-10
         val subtype: String?
+    )
+
+    /** A Citizen incident observed within proximity + freshness, after the
+     *  fire/medical filter is applied. */
+    data class CitizenObservation(
+        val incidentId: String,
+        val distanceMeters: Float,
+        val ageMs: Long,
+        val level: Int,             // 0-5 severity (Citizen's own scale)
+        val title: String,
+        val isPoliceTitled: Boolean,
+        val precinct: String?
     )
 
     data class Scored(
@@ -183,6 +200,24 @@ object ConfidenceEngine {
         val sub = obs.subtype?.let { " ($it)" } ?: ""
         val label = "Police report$sub @ ${obs.distanceMeters.toInt()}m, ${ageMin}min ago"
         return Scored(score, methods, label, isAxon = false)
+    }
+
+    fun scoreCitizen(obs: CitizenObservation): Scored {
+        var score = W_CITIZEN_INCIDENT
+        val tags = StringBuilder("citizen ")
+        if (obs.level >= 2) {
+            score += B_CITIZEN_LEVEL_BUMP
+            tags.append("L${obs.level} ")
+        }
+        if (obs.isPoliceTitled) {
+            score += B_CITIZEN_POLICE_TITLE
+            tags.append("police_title ")
+        }
+        if (!obs.precinct.isNullOrBlank()) tags.append("precinct=${obs.precinct} ")
+        score = score.coerceAtMost(100)
+        val ageMin = (obs.ageMs / 60_000L).toInt()
+        val label = "${obs.title} @ ${obs.distanceMeters.toInt()}m, ${ageMin}min ago"
+        return Scored(score, tags.toString().trim(), label, isAxon = false)
     }
 
     fun scoreDeflock(obs: DeflockObservation): Scored {
