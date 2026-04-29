@@ -42,7 +42,13 @@ class MainActivity : ComponentActivity() {
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { result ->
-        permissionsGranted.value = result.all { it.value }
+        val allGranted = result.all { it.value }
+        permissionsGranted.value = allGranted
+        if (allGranted) {
+            // First-run path: user just granted everything, kick off scanning
+            // immediately so they don't have to tap START a second time.
+            DetectionService.start(this)
+        }
     }
 
     private val permissionsGranted = androidx.compose.runtime.mutableStateOf(false)
@@ -87,8 +93,14 @@ class MainActivity : ComponentActivity() {
                         )
                     }
                     Screen.SETTINGS -> {
+                        val running by DetectionService.running.collectAsState()
                         SettingsScreen(
                             settings = settings,
+                            isRunning = running,
+                            onRestart = {
+                                DetectionService.stop(this)
+                                DetectionService.start(this)
+                            },
                             onBack = { screen = Screen.MAIN }
                         )
                     }
