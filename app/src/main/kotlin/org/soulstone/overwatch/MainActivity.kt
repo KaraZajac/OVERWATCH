@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings as AndroidSettings
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.collectAsState
@@ -115,6 +116,10 @@ class MainActivity : ComponentActivity() {
                         )
                     }
                     Screen.SETTINGS -> {
+                        // Route system back into MAIN instead of letting the
+                        // activity finish — the screen enum is internal to
+                        // Compose and the OS doesn't know about it.
+                        BackHandler { screen = Screen.MAIN }
                         val running by DetectionService.running.collectAsState()
                         SettingsScreen(
                             settings = settings,
