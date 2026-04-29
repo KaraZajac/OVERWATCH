@@ -46,6 +46,7 @@ fun SettingsScreen(
     val wifi by settings.wifiEnabled.collectAsState()
     val deflock by settings.deflockEnabled.collectAsState()
     val waze by settings.wazeEnabled.collectAsState()
+    val citizen by settings.citizenEnabled.collectAsState()
     val deflockProx by settings.deflockProximityM.collectAsState()
     val wazeProx by settings.wazeProximityM.collectAsState()
     val theme by settings.themeMode.collectAsState()
@@ -76,8 +77,9 @@ fun SettingsScreen(
         SectionLabel("Detection sources")
         SourceToggle("BLE  •  Bluetooth Low Energy", ble) { settings.setBleEnabled(it) }
         SourceToggle("WIFI  •  WiFi BSSID + SSID", wifi) { settings.setWifiEnabled(it) }
-        SourceToggle("DEFLOCK  •  ALPR map (cdn.deflock.me)", deflock) { settings.setDeflockEnabled(it) }
-        SourceToggle("WAZE  •  Live police reports", waze) { settings.setWazeEnabled(it) }
+        SourceToggle("DEFLOCK  •  ALPR map (Overpass)", deflock) { settings.setDeflockEnabled(it) }
+        SourceToggle("WAZE  •  Live police reports (gated)", waze) { settings.setWazeEnabled(it) }
+        SourceToggle("CITIZEN  •  Real-time incident feed", citizen) { settings.setCitizenEnabled(it) }
         Spacer(Modifier.height(8.dp))
         if (isRunning) {
             Button(

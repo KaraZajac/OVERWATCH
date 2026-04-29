@@ -26,6 +26,7 @@ import org.soulstone.overwatch.data.settings.Settings
 import org.soulstone.overwatch.fusion.DetectionStore
 import org.soulstone.overwatch.fusion.SourceHealth
 import org.soulstone.overwatch.scan.BleScanner
+import org.soulstone.overwatch.scan.CitizenScanner
 import org.soulstone.overwatch.scan.DeflockClient
 import org.soulstone.overwatch.scan.DeflockScanner
 import org.soulstone.overwatch.scan.WazeScanner
@@ -80,11 +81,13 @@ class DetectionService : LifecycleService() {
     private lateinit var locationProvider: LocationProvider
     private lateinit var deflockScanner: DeflockScanner
     private lateinit var wazeScanner: WazeScanner
+    private lateinit var citizenScanner: CitizenScanner
     private var pruneJob: Job? = null
     private var bleStarted = false
     private var wifiStarted = false
     private var deflockStarted = false
     private var wazeStarted = false
+    private var citizenStarted = false
 
     override fun onCreate() {
         super.onCreate()
@@ -97,6 +100,10 @@ class DetectionService : LifecycleService() {
             proximityMeters = { settings.deflockProximityM.value.toFloat() }
         )
         wazeScanner = WazeScanner(
+            store, locationProvider,
+            proximityMeters = { settings.wazeProximityM.value.toFloat() }
+        )
+        citizenScanner = CitizenScanner(
             store, locationProvider,
             proximityMeters = { settings.wazeProximityM.value.toFloat() }
         )
@@ -127,7 +134,9 @@ class DetectionService : LifecycleService() {
             wifiStarted = wifiScanner.start(lifecycleScope)
             if (!wifiStarted) Log.w(TAG, "WifiScanner.start() returned false (permission/adapter)")
         }
-        val needsLocation = settings.deflockEnabled.value || settings.wazeEnabled.value
+        val needsLocation = settings.deflockEnabled.value ||
+            settings.wazeEnabled.value ||
+            settings.citizenEnabled.value
         if (needsLocation) {
             val locOk = locationProvider.start()
             if (!locOk) {
@@ -138,6 +147,9 @@ class DetectionService : LifecycleService() {
                 }
                 if (settings.wazeEnabled.value) {
                     wazeScanner.start(lifecycleScope); wazeStarted = true
+                }
+                if (settings.citizenEnabled.value) {
+                    citizenScanner.start(lifecycleScope); citizenStarted = true
                 }
             }
         }
@@ -157,6 +169,7 @@ class DetectionService : LifecycleService() {
         if (wifiStarted) { wifiScanner.stop(); wifiStarted = false }
         if (deflockStarted) { deflockScanner.stop(); deflockStarted = false }
         if (wazeStarted) { wazeScanner.stop(); wazeStarted = false }
+        if (citizenStarted) { citizenScanner.stop(); citizenStarted = false }
         locationProvider.stop()
         store.clear()
         SourceHealth.reset()
