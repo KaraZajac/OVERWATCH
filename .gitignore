@@ -15,3 +15,15 @@ __pycache__/
 *.pyc
 .idea/
 .vscode/
+
+# Android / Gradle
+.gradle/
+.kotlin/
+local.properties
+*.iml
+.cxx/
+captures/
+app/build/
+app/release/
+**/build/
+**/release/
