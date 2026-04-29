@@ -27,6 +27,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
@@ -49,6 +52,7 @@ fun SettingsScreen(
     val deflockProx by settings.deflockProximityM.collectAsState()
     val citizenProx by settings.citizenProximityM.collectAsState()
     val theme by settings.themeMode.collectAsState()
+    val vibrate by settings.vibrateOnAlert.collectAsState()
 
     Column(
         modifier = Modifier
@@ -107,20 +111,22 @@ fun SettingsScreen(
         SectionLabel("Proximity thresholds")
         SliderRow(
             label = "DeFlock alert distance",
-            valueLabel = "${deflockProx} m",
-            value = deflockProx.toFloat(),
+            persistedValue = deflockProx,
             range = 50f..1600f,
             steps = 30,
-            onChange = { settings.setDeflockProximityM(it.toInt()) }
+            onCommit = { settings.setDeflockProximityM(it) }
         )
         SliderRow(
             label = "Citizen alert distance",
-            valueLabel = "${citizenProx} m",
-            value = citizenProx.toFloat(),
+            persistedValue = citizenProx,
             range = 100f..5000f,
             steps = 48,
-            onChange = { settings.setCitizenProximityM(it.toInt()) }
+            onCommit = { settings.setCitizenProximityM(it) }
         )
+
+        Spacer(Modifier.height(16.dp))
+        SectionLabel("Alerts")
+        SourceToggle("Vibrate on threat escalation", vibrate) { settings.setVibrateOnAlert(it) }
 
         Spacer(Modifier.height(16.dp))
         SectionLabel("Appearance")
@@ -169,15 +175,20 @@ private fun SourceToggle(label: String, value: Boolean, onChange: (Boolean) -> U
     }
 }
 
+/**
+ * Slider that commits the value to Settings only on drag-release. The label
+ * tracks the live drag position locally to avoid spamming SharedPreferences
+ * writes (and downstream StateFlow re-emissions) on every pixel of movement.
+ */
 @Composable
 private fun SliderRow(
     label: String,
-    valueLabel: String,
-    value: Float,
+    persistedValue: Int,
     range: ClosedFloatingPointRange<Float>,
     steps: Int,
-    onChange: (Float) -> Unit
+    onCommit: (Int) -> Unit
 ) {
+    var live by remember(persistedValue) { mutableFloatStateOf(persistedValue.toFloat()) }
     Column(modifier = Modifier.padding(vertical = 4.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -190,15 +201,16 @@ private fun SliderRow(
                 fontFamily = FontFamily.Monospace
             )
             Text(
-                text = valueLabel,
+                text = "${live.toInt()} m",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 13.sp,
                 fontFamily = FontFamily.Monospace
             )
         }
         Slider(
-            value = value,
-            onValueChange = onChange,
+            value = live,
+            onValueChange = { live = it },
+            onValueChangeFinished = { onCommit(live.toInt()) },
             valueRange = range,
             steps = steps
         )

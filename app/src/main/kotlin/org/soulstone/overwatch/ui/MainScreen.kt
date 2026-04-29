@@ -19,8 +19,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -36,8 +40,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -65,11 +68,12 @@ fun MainScreen(
     onStartStop: () -> Unit,
     onOpenSettings: () -> Unit,
     canStart: Boolean,
-    permissionMessage: String?
+    permissionMessage: String?,
+    showOpenAppSettings: Boolean = false,
+    onOpenAppSettings: () -> Unit = {}
 ) {
-    var showSheet by remember { mutableStateOf(false) }
+    var showSheet by rememberSaveable { mutableStateOf(false) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val sheetScope = rememberCoroutineScope()
 
     Column(
         modifier = Modifier
@@ -159,6 +163,24 @@ fun MainScreen(
                     fontSize = 13.sp
                 )
             }
+            if (showOpenAppSettings) {
+                Spacer(Modifier.height(8.dp))
+                Button(
+                    onClick = onOpenAppSettings,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        contentColor = MaterialTheme.colorScheme.onSurface
+                    ),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "Open app settings",
+                        fontSize = 14.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+            }
         }
     }
 
@@ -186,12 +208,20 @@ fun MainScreen(
 
 @Composable
 private fun ThreatCircle(level: ThreatLevel, animating: Boolean, onTap: () -> Unit) {
-    val color = when (level) {
+    // When the scanner isn't running, deliberately use a muted color and IDLE
+    // text so the user can tell at a glance whether they're scanning. Without
+    // this, idle and "scanning, all clear" both render as solid green.
+    val idleColor = MaterialTheme.colorScheme.surfaceVariant
+    val activeColor = when (level) {
         ThreatLevel.GREEN -> ThreatColors.Green
         ThreatLevel.YELLOW -> ThreatColors.Yellow
         ThreatLevel.ORANGE -> ThreatColors.Orange
         ThreatLevel.RED -> ThreatColors.Red
     }
+    val color = if (animating) activeColor else idleColor
+    val labelText = if (animating) level.name else "IDLE"
+    val labelColor = if (animating) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+
     val transition = rememberInfiniteTransition(label = "pulse")
     val pulse by transition.animateFloat(
         initialValue = if (animating) 0.6f else 1.0f,
@@ -220,8 +250,8 @@ private fun ThreatCircle(level: ThreatLevel, animating: Boolean, onTap: () -> Un
         contentAlignment = Alignment.Center
     ) {
         Text(
-            text = level.name,
-            color = Color.White,
+            text = labelText,
+            color = labelColor,
             fontSize = 28.sp,
             fontWeight = FontWeight.Black,
             fontFamily = FontFamily.Monospace
@@ -329,14 +359,7 @@ private fun SourceRow(source: DetectionSource, events: List<DetectionEvent>) {
                 )
             } else {
                 Spacer(Modifier.height(4.dp))
-                events.take(3).forEach { e ->
-                    Text(
-                        text = "${e.score}  •  ${e.label}  •  ${e.matchedMethods}",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 11.sp,
-                        fontFamily = FontFamily.Monospace
-                    )
-                }
+                events.take(3).forEach { e -> EventRow(e) }
                 if (events.size > 3) {
                     Text(
                         text = "+${events.size - 3} more",
@@ -344,6 +367,43 @@ private fun SourceRow(source: DetectionSource, events: List<DetectionEvent>) {
                         fontSize = 11.sp
                     )
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EventRow(e: DetectionEvent) {
+    val ctx = LocalContext.current
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(
+            text = "${e.score}  •  ${e.label}  •  ${e.matchedMethods}",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontSize = 11.sp,
+            fontFamily = FontFamily.Monospace,
+            modifier = Modifier.weight(1f, fill = true)
+        )
+        if (e.hasGeo) {
+            IconButton(
+                onClick = {
+                    val uri = Uri.parse("geo:${e.lat},${e.lon}?q=${e.lat},${e.lon}(${Uri.encode(e.label)})")
+                    val intent = Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    if (intent.resolveActivity(ctx.packageManager) != null) {
+                        ctx.startActivity(intent)
+                    }
+                },
+                modifier = Modifier.size(28.dp)
+            ) {
+                Icon(
+                    Icons.Filled.Place,
+                    contentDescription = "Open in Maps",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(18.dp)
+                )
             }
         }
     }

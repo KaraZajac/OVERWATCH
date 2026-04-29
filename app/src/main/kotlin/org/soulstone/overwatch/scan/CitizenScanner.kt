@@ -5,6 +5,7 @@ import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.soulstone.overwatch.data.location.LocationProvider
@@ -57,6 +58,9 @@ class CitizenScanner(
     fun start(scope: CoroutineScope): Boolean {
         if (job != null) return true
         job = scope.launch {
+            // Wait for the first non-null location fix so the first poll fires
+            // immediately when location arrives, instead of after a 60 s delay.
+            locationProvider.location.first { it != null }
             while (isActive) {
                 val fix = locationProvider.location.value
                 if (fix != null) pollOnce(fix)
@@ -137,7 +141,9 @@ class CitizenScanner(
                     label = scored.label,
                     score = scored.score,
                     matchedMethods = scored.methods,
-                    rssi = null
+                    rssi = null,
+                    lat = incident.lat,
+                    lon = incident.lon
                 )
             )
         }

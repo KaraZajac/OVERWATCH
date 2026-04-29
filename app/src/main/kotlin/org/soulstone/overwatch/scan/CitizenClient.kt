@@ -64,7 +64,10 @@ class CitizenClient {
                     val arr = JSONObject(raw.body).optJSONArray("results")
                         ?: return@withContext TrendingResult.Success(emptyList())
                     val out = ArrayList<String>(arr.length())
-                    for (i in 0 until arr.length()) arr.optString(i)?.takeIf { it.isNotBlank() }?.let(out::add)
+                    for (i in 0 until arr.length()) {
+                        val id = arr.optString(i)
+                        if (id.isNotBlank()) out.add(id)
+                    }
                     TrendingResult.Success(out)
                 } catch (e: Exception) {
                     TrendingResult.Failed("parse: ${e.message}")

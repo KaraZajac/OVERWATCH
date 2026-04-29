@@ -21,6 +21,7 @@ import org.soulstone.overwatch.fusion.DetectionEvent
 import org.soulstone.overwatch.fusion.DetectionSource
 import org.soulstone.overwatch.fusion.DetectionStore
 import org.soulstone.overwatch.fusion.RssiTracker
+import org.soulstone.overwatch.fusion.SourceHealth
 
 /**
  * BLE scanner — ported from AxonCadabra (scan side only; no advertise/fuzz).
@@ -79,18 +80,30 @@ class BleScanner(
         if (running) return true
         if (!hasScanPermission()) {
             Log.w(TAG, "BLE scan permission missing")
+            SourceHealth.record(DetectionSource.BLE, ok = false, message = "Permission missing")
             return false
         }
-        val adapter = bluetoothAdapter ?: return false
-        if (!adapter.isEnabled) return false
-        leScanner = adapter.bluetoothLeScanner ?: return false
+        val adapter = bluetoothAdapter ?: run {
+            SourceHealth.record(DetectionSource.BLE, ok = false, message = "BLE not supported")
+            return false
+        }
+        if (!adapter.isEnabled) {
+            SourceHealth.record(DetectionSource.BLE, ok = false, message = "Bluetooth disabled")
+            return false
+        }
+        leScanner = adapter.bluetoothLeScanner ?: run {
+            SourceHealth.record(DetectionSource.BLE, ok = false, message = "BLE scanner unavailable")
+            return false
+        }
         try {
             leScanner?.startScan(null, scanSettings, scanCallback)
             running = true
+            SourceHealth.record(DetectionSource.BLE, ok = true)
             Log.i(TAG, "BLE scan started")
             return true
         } catch (e: SecurityException) {
             Log.e(TAG, "SecurityException starting scan", e)
+            SourceHealth.record(DetectionSource.BLE, ok = false, message = "Permission revoked")
             return false
         }
     }
@@ -120,6 +133,11 @@ class BleScanner(
         override fun onScanFailed(errorCode: Int) {
             Log.e(TAG, "BLE scan failed: $errorCode")
             running = false
+            SourceHealth.record(
+                DetectionSource.BLE,
+                ok = false,
+                message = "BLE scan failed (code $errorCode)"
+            )
         }
     }
 
@@ -132,11 +150,23 @@ class BleScanner(
 
         val advertisedUuids = record?.serviceUuids?.map { it.uuid }
         val mfgSpecific = record?.manufacturerSpecificData
+        // Iterate ALL manufacturer-data entries; some devices advertise multiple
+        // and XUNTONG might not be the first one. Prefer the XUNTONG match if
+        // present, otherwise fall back to the first entry so we still surface
+        // *some* mfg signal in the observation.
         var companyId: Int? = null
         var payload: ByteArray? = null
         if (mfgSpecific != null && mfgSpecific.size() > 0) {
-            companyId = mfgSpecific.keyAt(0)
-            payload = mfgSpecific.valueAt(0)
+            for (i in 0 until mfgSpecific.size()) {
+                val cid = mfgSpecific.keyAt(i)
+                val data = mfgSpecific.valueAt(i)
+                if (cid == org.soulstone.overwatch.data.targets.Manufacturers.XUNTONG_COMPANY_ID) {
+                    companyId = cid
+                    payload = data
+                    break
+                }
+                if (companyId == null) { companyId = cid; payload = data }
+            }
         }
 
         // Cheap pre-filter — drop devices that have zero target signals.

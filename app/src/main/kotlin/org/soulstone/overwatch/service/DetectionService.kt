@@ -9,6 +9,9 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.LifecycleService
@@ -18,13 +21,16 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import org.soulstone.overwatch.MainActivity
 import org.soulstone.overwatch.R
 import org.soulstone.overwatch.data.location.LocationProvider
 import org.soulstone.overwatch.data.settings.Settings
+import org.soulstone.overwatch.fusion.DetectionEvent
 import org.soulstone.overwatch.fusion.DetectionStore
 import org.soulstone.overwatch.fusion.SourceHealth
+import org.soulstone.overwatch.fusion.ThreatLevel
 import org.soulstone.overwatch.scan.BleScanner
 import org.soulstone.overwatch.scan.CitizenScanner
 import org.soulstone.overwatch.scan.DeflockClient
@@ -32,12 +38,18 @@ import org.soulstone.overwatch.scan.DeflockScanner
 import org.soulstone.overwatch.scan.WifiScanner
 
 /**
- * Foreground service that owns all scanners and the [DetectionStore].
+ * Foreground service that owns all four scanners (BLE, WiFi, DeFlock, Citizen)
+ * and the [DetectionStore]. UI observes companion-object state flows directly.
  *
- * Phase 1 wires only [BleScanner]; phases 2-4 will register WiFi, DeFlock, Waze.
+ * Responsibilities beyond scanner orchestration:
+ *  - Updates the foreground notification on every threat-tier change so a
+ *    locked-screen user sees escalations.
+ *  - Vibrates on upward tier transitions (gated by Settings.vibrateOnAlert).
+ *  - Resets [SourceHealth] on start/stop.
  *
- * The service is a singleton at runtime — UI binds to it (or observes the
- * companion-object state flows directly, which is what we do here for simplicity).
+ * Returns START_NOT_STICKY so a system-killed service does not auto-restart
+ * into a zombie state where the notification disappears but `_running` stays
+ * stale. The user explicitly starts and stops; auto-restart isn't needed.
  */
 class DetectionService : LifecycleService() {
 
@@ -81,10 +93,13 @@ class DetectionService : LifecycleService() {
     private lateinit var deflockScanner: DeflockScanner
     private lateinit var citizenScanner: CitizenScanner
     private var pruneJob: Job? = null
+    private var observerJob: Job? = null
     private var bleStarted = false
     private var wifiStarted = false
     private var deflockStarted = false
     private var citizenStarted = false
+    /** Last threat tier the notification displayed; tracks upward transitions for vibration. */
+    private var lastNotifiedTier: ThreatLevel = ThreatLevel.GREEN
 
     override fun onCreate() {
         super.onCreate()
@@ -112,13 +127,17 @@ class DetectionService : LifecycleService() {
                 stopSelf()
             }
         }
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     private fun beginScanning() {
         if (_running.value) return
         SourceHealth.reset()
-        startInForeground()
+        lastNotifiedTier = ThreatLevel.GREEN
+        // Bring up the foreground notification BEFORE any scanner so we don't
+        // accidentally call startForeground after work has already begun.
+        startInForeground(ThreatLevel.GREEN, topEvent = null)
+
         if (settings.bleEnabled.value) {
             bleStarted = bleScanner.start()
             if (!bleStarted) Log.w(TAG, "BleScanner.start() returned false (permission/adapter)")
@@ -127,8 +146,7 @@ class DetectionService : LifecycleService() {
             wifiStarted = wifiScanner.start(lifecycleScope)
             if (!wifiStarted) Log.w(TAG, "WifiScanner.start() returned false (permission/adapter)")
         }
-        val needsLocation = settings.deflockEnabled.value ||
-            settings.citizenEnabled.value
+        val needsLocation = settings.deflockEnabled.value || settings.citizenEnabled.value
         if (needsLocation) {
             val locOk = locationProvider.start()
             if (!locOk) {
@@ -142,6 +160,15 @@ class DetectionService : LifecycleService() {
                 }
             }
         }
+
+        val anyStarted = bleStarted || wifiStarted || deflockStarted || citizenStarted
+        if (!anyStarted) {
+            Log.w(TAG, "No scanner started — endScanning + stopSelf")
+            endScanning()
+            stopSelf()
+            return
+        }
+
         _running.value = true
         pruneJob?.cancel()
         pruneJob = lifecycleScope.launch {
@@ -150,10 +177,23 @@ class DetectionService : LifecycleService() {
                 store.pruneExpired()
             }
         }
+        observerJob?.cancel()
+        observerJob = lifecycleScope.launch {
+            // Watch threat tier + the top event together; rebuild the notification
+            // on either change. Vibrate only when the tier ratchets upward.
+            store.threatLevel.combine(store.events) { tier, events ->
+                tier to events.firstOrNull()
+            }.collect { (tier, top) ->
+                onTierChanged(tier, top)
+            }
+        }
     }
 
     private fun endScanning() {
-        if (!_running.value) return
+        if (!_running.value && !bleStarted && !wifiStarted && !deflockStarted && !citizenStarted) {
+            return
+        }
+        _running.value = false
         if (bleStarted) { bleScanner.stop(); bleStarted = false }
         if (wifiStarted) { wifiScanner.stop(); wifiStarted = false }
         if (deflockStarted) { deflockScanner.stop(); deflockStarted = false }
@@ -161,9 +201,9 @@ class DetectionService : LifecycleService() {
         locationProvider.stop()
         store.clear()
         SourceHealth.reset()
-        pruneJob?.cancel()
-        pruneJob = null
-        _running.value = false
+        pruneJob?.cancel(); pruneJob = null
+        observerJob?.cancel(); observerJob = null
+        lastNotifiedTier = ThreatLevel.GREEN
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             stopForeground(STOP_FOREGROUND_REMOVE)
         } else {
@@ -182,12 +222,46 @@ class DetectionService : LifecycleService() {
         return null
     }
 
-    private fun startInForeground() {
-        val notification = buildNotification()
+    private fun onTierChanged(tier: ThreatLevel, top: DetectionEvent?) {
+        // Re-issue the foreground notification with the current tier + top event
+        // so a locked-screen user sees the escalation even without opening the app.
+        val notification = buildNotification(tier, top)
+        val mgr = getSystemService(NotificationManager::class.java) ?: return
+        mgr.notify(NOTIFICATION_ID, notification)
+
+        if (tier.ordinal > lastNotifiedTier.ordinal && settings.vibrateOnAlert.value) {
+            vibrateForTier(tier)
+        }
+        lastNotifiedTier = tier
+    }
+
+    private fun vibrateForTier(tier: ThreatLevel) {
+        val v = currentVibrator() ?: return
+        val effect = when (tier) {
+            ThreatLevel.YELLOW -> VibrationEffect.createOneShot(120, VibrationEffect.DEFAULT_AMPLITUDE)
+            ThreatLevel.ORANGE -> VibrationEffect.createWaveform(longArrayOf(0, 180, 100, 180), -1)
+            ThreatLevel.RED -> VibrationEffect.createWaveform(
+                longArrayOf(0, 250, 120, 250, 120, 400), -1
+            )
+            ThreatLevel.GREEN -> return
+        }
+        try { v.vibrate(effect) } catch (e: Exception) { Log.w(TAG, "vibrate failed: ${e.message}") }
+    }
+
+    private fun currentVibrator(): Vibrator? =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            (getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager)?.defaultVibrator
+        } else {
+            @Suppress("DEPRECATION")
+            getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+        }
+
+    private fun startInForeground(tier: ThreatLevel, topEvent: DetectionEvent?) {
+        val notification = buildNotification(tier, topEvent)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            // Android 14+ requires the runtime type to cover every capability
-            // the service uses. We declare both in the manifest; pass both here
-            // so location-using sources (DeFlock, Waze) keep working with the
+            // Android 14+ requires the runtime type to cover every capability the
+            // service uses. We declare both in the manifest; pass both here so
+            // location-using sources (DeFlock, Citizen) keep working with the
             // screen off.
             val type = ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
@@ -197,7 +271,7 @@ class DetectionService : LifecycleService() {
         }
     }
 
-    private fun buildNotification(): Notification {
+    private fun buildNotification(tier: ThreatLevel, topEvent: DetectionEvent?): Notification {
         val openIntent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
@@ -205,14 +279,26 @@ class DetectionService : LifecycleService() {
             this, 0, openIntent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
+        val title = "OVERWATCH  •  ${tier.name}"
+        val text = topEvent?.let { "${it.score}  •  ${it.label}" }
+            ?: getString(R.string.notification_text)
+        // Higher importance for ORANGE/RED so the system surfaces it more
+        // aggressively (heads-up notification, etc.). The channel was created
+        // with LOW; on supported versions this priority is best-effort.
+        val priority = when (tier) {
+            ThreatLevel.RED -> NotificationCompat.PRIORITY_HIGH
+            ThreatLevel.ORANGE -> NotificationCompat.PRIORITY_DEFAULT
+            else -> NotificationCompat.PRIORITY_LOW
+        }
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle(getString(R.string.notification_title))
-            .setContentText(getString(R.string.notification_text))
+            .setContentTitle(title)
+            .setContentText(text)
             .setSmallIcon(android.R.drawable.ic_menu_view)
             .setOngoing(true)
             .setContentIntent(pi)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setPriority(priority)
+            .setOnlyAlertOnce(false)
             .build()
     }
 
