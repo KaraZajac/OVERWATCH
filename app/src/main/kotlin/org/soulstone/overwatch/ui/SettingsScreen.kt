@@ -1,5 +1,8 @@
 package org.soulstone.overwatch.ui
 
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings as AndroidSettings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -11,6 +14,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -54,6 +58,8 @@ fun SettingsScreen(
     val citizenProx by settings.citizenProximityM.collectAsState()
     val theme by settings.themeMode.collectAsState()
     val vibrate by settings.vibrateOnAlert.collectAsState()
+    val overlay by settings.overlayEnabled.collectAsState()
+    val context = LocalContext.current
 
     Column(
         modifier = Modifier
@@ -129,6 +135,32 @@ fun SettingsScreen(
         Spacer(Modifier.height(16.dp))
         SectionLabel("Alerts")
         SourceToggle("Vibrate on threat escalation", vibrate) { settings.setVibrateOnAlert(it) }
+
+        Spacer(Modifier.height(16.dp))
+        SectionLabel("Display over other apps")
+        SourceToggle("Floating threat circle", overlay) { enabled ->
+            settings.setOverlayEnabled(enabled)
+            // Special-access perm: can't be granted via runtime prompt. Bounce
+            // the user to the system settings page for this app so they can
+            // approve. The DetectionService re-checks canDrawOverlays at show()
+            // time so a denied/revoked perm just means the bubble silently
+            // doesn't appear — no crash.
+            if (enabled && !AndroidSettings.canDrawOverlays(context)) {
+                val intent = Intent(
+                    AndroidSettings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:${context.packageName}")
+                ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                try { context.startActivity(intent) } catch (_: Exception) {}
+            }
+        }
+        if (overlay && !AndroidSettings.canDrawOverlays(context)) {
+            Text(
+                "Permission needed — system page should have opened. If not, grant manually under Apps → OVERWATCH → Display over other apps.",
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(vertical = 4.dp)
+            )
+        }
 
         Spacer(Modifier.height(16.dp))
         SectionLabel("Appearance")

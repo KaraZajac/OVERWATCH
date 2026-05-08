@@ -105,12 +105,14 @@ class DetectionService : LifecycleService() {
     private lateinit var locationProvider: LocationProvider
     private lateinit var deflockScanner: DeflockScanner
     private lateinit var citizenScanner: CitizenScanner
+    private lateinit var overlayManager: OverlayManager
     private var pruneJob: Job? = null
     private var observerJob: Job? = null
     private var mapPointsJob: Job? = null
     private var locationJob: Job? = null
     private var deflockProxJob: Job? = null
     private var citizenProxJob: Job? = null
+    private var overlayJob: Job? = null
     private var bleStarted = false
     private var wifiStarted = false
     private var deflockStarted = false
@@ -132,6 +134,7 @@ class DetectionService : LifecycleService() {
             store, locationProvider,
             proximityMeters = { settings.citizenProximityM.value.toFloat() }
         )
+        overlayManager = OverlayManager(this)
         createNotificationChannel()
     }
 
@@ -248,6 +251,16 @@ class DetectionService : LifecycleService() {
                 settings.citizenProximityM.drop(1).collect { citizenScanner.refresh() }
             }
         }
+
+        // Floating threat-circle overlay — observe the toggle and show/hide
+        // accordingly. The OverlayManager re-checks SYSTEM_ALERT_WINDOW each
+        // show() so a denied/revoked permission silently no-ops.
+        overlayJob?.cancel()
+        overlayJob = lifecycleScope.launch {
+            settings.overlayEnabled.collect { enabled ->
+                if (enabled) overlayManager.show() else overlayManager.hide()
+            }
+        }
     }
 
     private fun endScanning() {
@@ -268,6 +281,8 @@ class DetectionService : LifecycleService() {
         locationJob?.cancel(); locationJob = null
         deflockProxJob?.cancel(); deflockProxJob = null
         citizenProxJob?.cancel(); citizenProxJob = null
+        overlayJob?.cancel(); overlayJob = null
+        overlayManager.hide()
         _mapPoints.value = emptyList()
         _location.value = null
         lastNotifiedTier = ThreatLevel.GREEN

@@ -38,6 +38,12 @@
     <!-- Vibration on threat-tier escalation -->
     <uses-permission android:name="android.permission.VIBRATE" />
 
+    <!-- Floating threat-circle overlay (chat-bubble style). Special-access
+         permission — user grants via system Settings page, not the runtime
+         prompt. Only consumed when the user opts in to the bubble in app
+         Settings; otherwise dormant. -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
 
     <!-- Allow Intent.setPackage("com.google.android.apps.maps") on Android 11+
