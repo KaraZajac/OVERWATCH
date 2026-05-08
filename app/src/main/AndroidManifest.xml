@@ -40,6 +40,13 @@
 
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
 
+    <!-- Allow Intent.setPackage("com.google.android.apps.maps") on Android 11+
+         (package visibility) so we can force "Open in Maps" pins to land in
+         Google Maps regardless of the user's default geo: handler. -->
+    <queries>
+        <package android:name="com.google.android.apps.maps" />
+    </queries>
+
     <application
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"

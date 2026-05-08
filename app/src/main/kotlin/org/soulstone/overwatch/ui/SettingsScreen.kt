@@ -83,7 +83,7 @@ fun SettingsScreen(
         SourceToggle("WIFI  •  WiFi BSSID + SSID", wifi) { settings.setWifiEnabled(it) }
         SourceToggle("DEFLOCK  •  ALPR map (Overpass)", deflock) { settings.setDeflockEnabled(it) }
         SourceToggle("CITIZEN  •  Real-time incident feed", citizen) { settings.setCitizenEnabled(it) }
-        SourceToggle("MIC  •  Smart speakers / cams (Echo, Ring, Nest)", mic) { settings.setMicEnabled(it) }
+        SourceToggle("COMMERCIAL  •  Nest, Ring, Echo devices", mic) { settings.setMicEnabled(it) }
         Spacer(Modifier.height(8.dp))
         if (isRunning) {
             Button(

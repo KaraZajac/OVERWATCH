@@ -92,6 +92,14 @@ class MainActivity : ComponentActivity() {
                         val maxScore by DetectionService.store.maxScore.collectAsState()
                         val mapPoints by DetectionService.mapPoints.collectAsState()
                         val userLocation by DetectionService.location.collectAsState()
+                        // Visible map radius = max of the two proximity sliders
+                        // so the user sees the full area where a detection
+                        // can fire. Using the raw setting values regardless of
+                        // enabled-state keeps the visualization stable when a
+                        // source is briefly toggled.
+                        val deflockProx by settings.deflockProximityM.collectAsState()
+                        val citizenProx by settings.citizenProximityM.collectAsState()
+                        val mapRadiusM = maxOf(deflockProx, citizenProx).toFloat()
                         val granted by permissionsGranted
                         val denied by permanentlyDenied
 
@@ -108,6 +116,7 @@ class MainActivity : ComponentActivity() {
                             events = events,
                             mapPoints = mapPoints,
                             userLocation = userLocation,
+                            mapRadiusMeters = mapRadiusM,
                             canStart = true,
                             permissionMessage = message,
                             showOpenAppSettings = denied && !granted,
