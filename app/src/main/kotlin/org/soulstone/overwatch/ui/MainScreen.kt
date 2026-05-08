@@ -41,6 +41,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -53,8 +54,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import kotlinx.coroutines.launch
+import kotlin.math.cos
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
+import org.osmdroid.util.BoundingBox
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
@@ -74,6 +76,10 @@ fun MainScreen(
     events: List<DetectionEvent>,
     mapPoints: List<DeflockClient.AlprPoint>,
     userLocation: Location?,
+    /** Visible radius of the map circle, in meters. Driven by the larger of
+     *  the DeFlock and Citizen proximity sliders so the user sees the full
+     *  area where a detection could fire. */
+    mapRadiusMeters: Float,
     onStartStop: () -> Unit,
     onOpenSettings: () -> Unit,
     canStart: Boolean,
@@ -90,12 +96,12 @@ fun MainScreen(
             .background(MaterialTheme.colorScheme.background)
             .padding(horizontal = 24.dp)
     ) {
-        Row(
+        // Box (rather than Row + SpaceBetween) so the title is truly centered
+        // regardless of the gear icon's width.
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 8.dp),
-            verticalAlignment = Alignment.Top,
-            horizontalArrangement = Arrangement.SpaceBetween
+                .padding(top = 8.dp)
         ) {
             Text(
                 text = "OVERWATCH",
@@ -103,9 +109,13 @@ fun MainScreen(
                 fontSize = 26.sp,
                 fontWeight = FontWeight.Bold,
                 fontFamily = FontFamily.Monospace,
-                letterSpacing = 4.sp
+                letterSpacing = 4.sp,
+                modifier = Modifier.align(Alignment.Center)
             )
-            IconButton(onClick = onOpenSettings) {
+            IconButton(
+                onClick = onOpenSettings,
+                modifier = Modifier.align(Alignment.CenterEnd)
+            ) {
                 Icon(
                     Icons.Filled.Settings,
                     contentDescription = "Settings",
@@ -125,6 +135,7 @@ fun MainScreen(
                 animating = running,
                 userLocation = userLocation,
                 mapPoints = mapPoints,
+                mapRadiusMeters = mapRadiusMeters,
                 onTap = { showSheet = true }
             )
 
@@ -213,12 +224,33 @@ fun MainScreen(
     }
 }
 
+/** Builds a small white-bordered blue dot used as the user-position Marker. */
+private fun userDotDrawable(
+    resources: android.content.res.Resources
+): android.graphics.drawable.BitmapDrawable {
+    val sizePx = 36
+    val bitmap = android.graphics.Bitmap.createBitmap(
+        sizePx, sizePx, android.graphics.Bitmap.Config.ARGB_8888
+    )
+    val canvas = android.graphics.Canvas(bitmap)
+    val outline = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0xFFFFFFFF.toInt()
+    }
+    canvas.drawCircle(sizePx / 2f, sizePx / 2f, sizePx / 2f - 2f, outline)
+    val core = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0xFF2196F3.toInt()
+    }
+    canvas.drawCircle(sizePx / 2f, sizePx / 2f, sizePx / 2f - 6f, core)
+    return android.graphics.drawable.BitmapDrawable(resources, bitmap)
+}
+
 @Composable
 private fun ThreatMapCircle(
     level: ThreatLevel,
     animating: Boolean,
     userLocation: Location?,
     mapPoints: List<DeflockClient.AlprPoint>,
+    mapRadiusMeters: Float,
     onTap: () -> Unit
 ) {
     val idleColor = MaterialTheme.colorScheme.surfaceVariant
@@ -278,69 +310,81 @@ private fun ThreatMapCircle(
                 )
             }
         } else {
-            // OSM map snapshot, centered on the user, with red ALPR pins.
-            // Non-interactive — touches are captured by the click overlay above
-            // so a tap opens the source-details bottom sheet (matching the old
-            // circle's UX). Pan/zoom controls stay off.
+            // OSM map snapshot, centered on the user, with red ALPR pins and
+            // a blue user-position dot. Non-interactive — touches are captured
+            // by the click overlay above, so a tap opens the source-details
+            // bottom sheet. Pan/zoom controls stay off.
             // Capture into a local non-null val so the AndroidView update
             // lambda doesn't run afoul of smart-cast-into-closure rules.
             val fix: Location = userLocation
+            val ctx = LocalContext.current
+            // Build the user-dot drawable once per Composition rather than
+            // every recomposition — bitmap allocation isn't free.
+            val userDot = remember(ctx) { userDotDrawable(ctx.resources) }
             AndroidView(
                 modifier = Modifier.fillMaxSize(),
-                factory = { ctx ->
-                    MapView(ctx).apply {
+                factory = { c ->
+                    MapView(c).apply {
                         setTileSource(TileSourceFactory.MAPNIK)
                         setMultiTouchControls(false)
                         setBuiltInZoomControls(false)
                         isClickable = false
                         isFocusable = false
-                        controller.setZoom(17.0)
                     }
                 },
                 update = { map ->
                     map.controller.setCenter(GeoPoint(fix.latitude, fix.longitude))
                     map.overlays.clear()
+
+                    // ALPR pins first, user dot last so the dot draws on top.
                     for (p in mapPoints) {
-                        val m = Marker(map).apply {
-                            position = GeoPoint(p.lat, p.lon)
-                            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
-                            title = p.operator ?: p.manufacturer ?: "ALPR"
-                            // Disable osmdroid's per-marker info popup since
-                            // the map isn't interactive — the bottom sheet is
-                            // the canonical "details" surface.
+                        map.overlays.add(
+                            Marker(map).apply {
+                                position = GeoPoint(p.lat, p.lon)
+                                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                                title = p.operator ?: p.manufacturer ?: "ALPR"
+                                setInfoWindow(null)
+                            }
+                        )
+                    }
+                    map.overlays.add(
+                        Marker(map).apply {
+                            position = GeoPoint(fix.latitude, fix.longitude)
+                            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                            icon = userDot
                             setInfoWindow(null)
                         }
-                        map.overlays.add(m)
-                    }
+                    )
+
+                    // Fit the visible radius to the larger of the two proximity
+                    // settings. Defer to map.post so the call lands after layout
+                    // — zoomToBoundingBox needs measured dimensions to compute
+                    // the right zoom level. Latitude-aware longitude scaling so
+                    // the bbox stays roughly square in real meters at any lat.
+                    val r = mapRadiusMeters.toDouble().coerceAtLeast(50.0)
+                    val latDegPerMeter = 1.0 / 111_000.0
+                    val lonDegPerMeter = 1.0 /
+                        (111_000.0 * cos(Math.toRadians(fix.latitude)).coerceAtLeast(0.01))
+                    val bbox = BoundingBox(
+                        fix.latitude + r * latDegPerMeter,
+                        fix.longitude + r * lonDegPerMeter,
+                        fix.latitude - r * latDegPerMeter,
+                        fix.longitude - r * lonDegPerMeter
+                    )
+                    map.post { map.zoomToBoundingBox(bbox, false, 0) }
                     map.invalidate()
                 },
                 onRelease = { map -> map.onDetach() }
             )
-            // Threat-tier scrim — pulses while scanning, dims tiles to keep
-            // the dark theme aesthetic and signals tier without text.
-            val scrimAlpha = (0.35f * pulse).coerceIn(0.18f, 0.5f)
+            // Threat-tier scrim — pulses while scanning. Heavier alpha than
+            // the first cut so the tier color reads at a glance over OSM
+            // tiles, which are themselves cream/light by default.
+            val scrimAlpha = (0.55f * pulse).coerceIn(0.40f, 0.65f)
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(activeColor.copy(alpha = scrimAlpha))
             )
-            // Tier label, top-center. Smaller than the old text so the map
-            // remains readable underneath.
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(top = 14.dp),
-                contentAlignment = Alignment.TopCenter
-            ) {
-                Text(
-                    text = level.name,
-                    color = Color.White,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Black,
-                    fontFamily = FontFamily.Monospace,
-                    letterSpacing = 2.sp
-                )
-            }
         }
         // Click capture sits on top so taps reach onTap regardless of which
         // visual layer was painted underneath.
@@ -395,6 +439,14 @@ private fun SourcesPanel(events: List<DetectionEvent>) {
     }
 }
 
+/** User-facing label for a detection source. The internal enum stays MIC
+ *  (mic-bearing devices is the technical concept) while the UI shows the
+ *  friendlier "COMMERCIAL" — Nest/Ring/Echo are commercial smart-home gear. */
+private fun DetectionSource.displayLabel(): String = when (this) {
+    DetectionSource.MIC -> "COMMERCIAL"
+    else -> name
+}
+
 @Composable
 private fun SourceRow(source: DetectionSource, events: List<DetectionEvent>) {
     val health by SourceHealth.flowFor(source).collectAsState()
@@ -414,7 +466,7 @@ private fun SourceRow(source: DetectionSource, events: List<DetectionEvent>) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = source.name,
+                    text = source.displayLabel(),
                     color = MaterialTheme.colorScheme.onSurface,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Bold,
@@ -483,23 +535,22 @@ private fun EventRow(e: DetectionEvent) {
         if (e.hasGeo) {
             IconButton(
                 onClick = {
-                    // resolveActivity returns null on Android 11+ without a matching
-                    // <queries> entry even when Google Maps is installed. Skip the
-                    // pre-check and let startActivity handle it; catch the rare
-                    // "no app at all" case instead of silently no-op'ing.
-                    val uri = Uri.parse("geo:${e.lat},${e.lon}?q=${e.lat},${e.lon}(${Uri.encode(e.label)})")
-                    val intent = Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    // Force the pin to open in Google Maps rather than whichever
+                    // app holds the user's default geo: handler — Waze, etc. can
+                    // intercept geo: intents and we don't want that here. Falls
+                    // back to a generic browser intent if Maps isn't installed.
+                    val mapsUri = Uri.parse(
+                        "https://www.google.com/maps/search/?api=1&query=${e.lat},${e.lon}"
+                    )
+                    val mapsIntent = Intent(Intent.ACTION_VIEW, mapsUri)
+                        .setPackage("com.google.android.apps.maps")
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     try {
-                        ctx.startActivity(intent)
+                        ctx.startActivity(mapsIntent)
                     } catch (_: android.content.ActivityNotFoundException) {
-                        // Fall back to a Google Maps URL — works even on devices
-                        // without a registered geo: handler.
-                        val webUri = Uri.parse(
-                            "https://www.google.com/maps/search/?api=1&query=${e.lat},${e.lon}"
-                        )
-                        val webIntent = Intent(Intent.ACTION_VIEW, webUri)
+                        val fallback = Intent(Intent.ACTION_VIEW, mapsUri)
                             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        try { ctx.startActivity(webIntent) } catch (_: android.content.ActivityNotFoundException) {}
+                        try { ctx.startActivity(fallback) } catch (_: android.content.ActivityNotFoundException) {}
                     }
                 },
                 modifier = Modifier.size(28.dp)
