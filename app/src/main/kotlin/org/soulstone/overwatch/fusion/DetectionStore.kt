@@ -44,6 +44,17 @@ class DetectionStore(
         _maxScore.value = 0
     }
 
+    /** Drop every event from a single source — used when a proximity threshold
+     *  changes and the owning scanner needs to re-emit a fresh slate (events
+     *  outside the new radius would otherwise linger until their 5-min TTL). */
+    @Synchronized
+    fun clearSource(source: DetectionSource) {
+        val remaining = _events.value.filter { it.source != source }
+        if (remaining.size == _events.value.size) return
+        _events.value = remaining
+        recompute(remaining)
+    }
+
     @Synchronized
     fun pruneExpired() {
         val cutoff = nowMs() - retentionMs

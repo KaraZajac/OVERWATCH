@@ -83,7 +83,7 @@ fun SettingsScreen(
         SourceToggle("WIFI  •  WiFi BSSID + SSID", wifi) { settings.setWifiEnabled(it) }
         SourceToggle("DEFLOCK  •  ALPR map (Overpass)", deflock) { settings.setDeflockEnabled(it) }
         SourceToggle("CITIZEN  •  Real-time incident feed", citizen) { settings.setCitizenEnabled(it) }
-        SourceToggle("COMMERCIAL  •  Nest, Ring, Echo devices", mic) { settings.setMicEnabled(it) }
+        SourceToggle("COMMERCIAL  •  Nest, Ring, Echo", mic) { settings.setMicEnabled(it) }
         Spacer(Modifier.height(8.dp))
         if (isRunning) {
             Button(
@@ -167,11 +167,16 @@ private fun SourceToggle(label: String, value: Boolean, onChange: (Boolean) -> U
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
+        // weight(1f) reserves the remaining row width for the label so it
+        // wraps on narrow screens instead of clipping under the Switch.
         Text(
             text = label,
             color = MaterialTheme.colorScheme.onBackground,
             fontSize = 14.sp,
-            fontFamily = FontFamily.Monospace
+            fontFamily = FontFamily.Monospace,
+            modifier = Modifier
+                .weight(1f, fill = true)
+                .padding(end = 12.dp)
         )
         Switch(checked = value, onCheckedChange = onChange)
     }

@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 import org.soulstone.overwatch.MainActivity
 import org.soulstone.overwatch.R
@@ -108,6 +109,8 @@ class DetectionService : LifecycleService() {
     private var observerJob: Job? = null
     private var mapPointsJob: Job? = null
     private var locationJob: Job? = null
+    private var deflockProxJob: Job? = null
+    private var citizenProxJob: Job? = null
     private var bleStarted = false
     private var wifiStarted = false
     private var deflockStarted = false
@@ -229,6 +232,22 @@ class DetectionService : LifecycleService() {
         locationJob = lifecycleScope.launch {
             locationProvider.location.collect { _location.value = it }
         }
+
+        // Live re-eval when the user moves a proximity slider. drop(1) skips
+        // the StateFlow's initial replay so we don't redundantly clear+re-emit
+        // the events the scanner just produced from its first handleFix call.
+        deflockProxJob?.cancel()
+        if (deflockStarted) {
+            deflockProxJob = lifecycleScope.launch {
+                settings.deflockProximityM.drop(1).collect { deflockScanner.refresh() }
+            }
+        }
+        citizenProxJob?.cancel()
+        if (citizenStarted) {
+            citizenProxJob = lifecycleScope.launch {
+                settings.citizenProximityM.drop(1).collect { citizenScanner.refresh() }
+            }
+        }
     }
 
     private fun endScanning() {
@@ -247,6 +266,8 @@ class DetectionService : LifecycleService() {
         observerJob?.cancel(); observerJob = null
         mapPointsJob?.cancel(); mapPointsJob = null
         locationJob?.cancel(); locationJob = null
+        deflockProxJob?.cancel(); deflockProxJob = null
+        citizenProxJob?.cancel(); citizenProxJob = null
         _mapPoints.value = emptyList()
         _location.value = null
         lastNotifiedTier = ThreatLevel.GREEN

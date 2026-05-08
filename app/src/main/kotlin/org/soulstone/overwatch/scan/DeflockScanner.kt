@@ -101,6 +101,27 @@ class DeflockScanner(
                 }
             }
         }
+        emitProximityEvents(fix)
+    }
+
+    /**
+     * Re-evaluate the cached ALPRs against the current proximity threshold and
+     * the latest fix, *without* a network refetch. Used when the user moves the
+     * proximity slider — the slider changes [proximityMeters], but the scanner
+     * is otherwise idle (no new location ticks while stationary), so events
+     * outside the new radius would otherwise linger and detections inside the
+     * widened radius wouldn't appear until the next handleFix cycle.
+     *
+     * Clears the DEFLOCK source from the store first so events that fall
+     * outside a tightened radius disappear immediately.
+     */
+    fun refresh() {
+        val fix = locationProvider.location.value ?: return
+        store.clearSource(DetectionSource.DEFLOCK)
+        emitProximityEvents(fix)
+    }
+
+    private fun emitProximityEvents(fix: Location) {
         val points = _cachedPoints.value
         if (points.isEmpty()) return
 

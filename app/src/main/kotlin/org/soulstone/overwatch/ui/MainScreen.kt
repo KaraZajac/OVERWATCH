@@ -224,11 +224,15 @@ fun MainScreen(
     }
 }
 
-/** Builds a small white-bordered blue dot used as the user-position Marker. */
-private fun userDotDrawable(
-    resources: android.content.res.Resources
+/** Builds a small filled-circle Marker icon. Used for both the user-position
+ *  dot (blue) and the ALPR pins (red) — osmdroid's default teardrop marker
+ *  reads as a "click me" affordance which is wrong for a non-interactive
+ *  visualization, so we use simple dots instead. */
+private fun dotDrawable(
+    resources: android.content.res.Resources,
+    sizePx: Int,
+    coreColor: Int
 ): android.graphics.drawable.BitmapDrawable {
-    val sizePx = 36
     val bitmap = android.graphics.Bitmap.createBitmap(
         sizePx, sizePx, android.graphics.Bitmap.Config.ARGB_8888
     )
@@ -236,11 +240,11 @@ private fun userDotDrawable(
     val outline = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
         color = 0xFFFFFFFF.toInt()
     }
-    canvas.drawCircle(sizePx / 2f, sizePx / 2f, sizePx / 2f - 2f, outline)
+    canvas.drawCircle(sizePx / 2f, sizePx / 2f, sizePx / 2f - 1f, outline)
     val core = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0xFF2196F3.toInt()
+        color = coreColor
     }
-    canvas.drawCircle(sizePx / 2f, sizePx / 2f, sizePx / 2f - 6f, core)
+    canvas.drawCircle(sizePx / 2f, sizePx / 2f, sizePx / 2f - 4f, core)
     return android.graphics.drawable.BitmapDrawable(resources, bitmap)
 }
 
@@ -318,9 +322,10 @@ private fun ThreatMapCircle(
             // lambda doesn't run afoul of smart-cast-into-closure rules.
             val fix: Location = userLocation
             val ctx = LocalContext.current
-            // Build the user-dot drawable once per Composition rather than
+            // Build the marker drawables once per Composition rather than
             // every recomposition — bitmap allocation isn't free.
-            val userDot = remember(ctx) { userDotDrawable(ctx.resources) }
+            val userDot = remember(ctx) { dotDrawable(ctx.resources, 36, 0xFF2196F3.toInt()) }
+            val flockDot = remember(ctx) { dotDrawable(ctx.resources, 26, 0xFFD7263D.toInt()) }
             AndroidView(
                 modifier = Modifier.fillMaxSize(),
                 factory = { c ->
@@ -336,12 +341,13 @@ private fun ThreatMapCircle(
                     map.controller.setCenter(GeoPoint(fix.latitude, fix.longitude))
                     map.overlays.clear()
 
-                    // ALPR pins first, user dot last so the dot draws on top.
+                    // ALPR dots first, user dot last so the user draws on top.
                     for (p in mapPoints) {
                         map.overlays.add(
                             Marker(map).apply {
                                 position = GeoPoint(p.lat, p.lon)
-                                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                                icon = flockDot
                                 title = p.operator ?: p.manufacturer ?: "ALPR"
                                 setInfoWindow(null)
                             }
