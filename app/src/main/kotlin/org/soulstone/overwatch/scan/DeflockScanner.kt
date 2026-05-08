@@ -4,6 +4,9 @@ import android.location.Location
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import org.soulstone.overwatch.data.location.LocationProvider
@@ -41,7 +44,10 @@ class DeflockScanner(
     private var lastFetchLon: Double? = null
     private var lastAttemptMs: Long = 0L
     private var lastAttemptOk: Boolean = false
-    private var cachedPoints: List<DeflockClient.AlprPoint> = emptyList()
+    private val _cachedPoints = MutableStateFlow<List<DeflockClient.AlprPoint>>(emptyList())
+    /** All ALPR points in the current cell — exposed so the UI map can render them.
+     *  Distinct from the proximity-filtered DetectionEvents on [DetectionStore]. */
+    val cachedPoints: StateFlow<List<DeflockClient.AlprPoint>> = _cachedPoints.asStateFlow()
 
     fun start(scope: CoroutineScope): Boolean {
         if (job != null) return true
@@ -61,7 +67,7 @@ class DeflockScanner(
         lastFetchLon = null
         lastAttemptMs = 0L
         lastAttemptOk = false
-        cachedPoints = emptyList()
+        _cachedPoints.value = emptyList()
         Log.i(TAG, "DeflockScanner stopped")
     }
 
@@ -74,12 +80,12 @@ class DeflockScanner(
             lastAttemptMs = System.currentTimeMillis()
             when (val result = client.fetchAround(fix.latitude, fix.longitude)) {
                 is DeflockClient.FetchResult.Success -> {
-                    cachedPoints = result.points
+                    _cachedPoints.value = result.points
                     lastAttemptOk = true
                     SourceHealth.record(DetectionSource.DEFLOCK, ok = true)
                     Log.i(
                         TAG,
-                        "Loaded ${cachedPoints.size} ALPRs around " +
+                        "Loaded ${result.points.size} ALPRs around " +
                             "(${fix.latitude}, ${fix.longitude})"
                     )
                 }
@@ -95,11 +101,12 @@ class DeflockScanner(
                 }
             }
         }
-        if (cachedPoints.isEmpty()) return
+        val points = _cachedPoints.value
+        if (points.isEmpty()) return
 
         val limit = proximityMeters()
         val out = FloatArray(1)
-        for (p in cachedPoints) {
+        for (p in points) {
             Location.distanceBetween(fix.latitude, fix.longitude, p.lat, p.lon, out)
             val dist = out[0]
             if (dist > limit) continue

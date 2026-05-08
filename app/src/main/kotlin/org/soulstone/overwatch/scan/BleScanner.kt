@@ -14,6 +14,7 @@ import android.os.Build
 import android.util.Log
 import androidx.core.content.ContextCompat
 import org.soulstone.overwatch.data.targets.BleOuis
+import org.soulstone.overwatch.data.targets.MicTargets
 import org.soulstone.overwatch.data.targets.Patterns
 import org.soulstone.overwatch.data.targets.RavenUuids
 import org.soulstone.overwatch.fusion.ConfidenceEngine
@@ -38,7 +39,9 @@ import org.soulstone.overwatch.fusion.SourceHealth
 class BleScanner(
     private val context: Context,
     private val store: DetectionStore,
-    private val rssi: RssiTracker = RssiTracker()
+    private val rssi: RssiTracker = RssiTracker(),
+    /** When true, also evaluate each scan against MicTargets and submit MIC events. */
+    private val micEnabled: () -> Boolean = { false }
 ) {
 
     companion object {
@@ -170,35 +173,66 @@ class BleScanner(
         }
 
         // Cheap pre-filter — drop devices that have zero target signals.
-        val candidate = BleOuis.matches(mac) ||
+        val isSurveillance = BleOuis.matches(mac) ||
             Patterns.bleNameMatch(name) ||
             Patterns.isPenguinNumeric(name) ||
             RavenUuids.countMatches(advertisedUuids) > 0 ||
             companyId == org.soulstone.overwatch.data.targets.Manufacturers.XUNTONG_COMPANY_ID
-        if (!candidate) return
+        val isMic = micEnabled() &&
+            MicTargets.couldBeMicBle(mac, name, advertisedUuids, companyId)
+        if (!isSurveillance && !isMic) return
 
         rssi.update(mac, result.rssi)
-        val obs = ConfidenceEngine.BleObservation(
-            mac = mac,
-            rssi = result.rssi,
-            deviceName = name,
-            advertisedUuids = advertisedUuids,
-            manufacturerCompanyId = companyId,
-            manufacturerPayload = payload,
-            isStationary = rssi.isStationary(mac)
-        )
-        val scored = ConfidenceEngine.scoreBle(obs)
-        if (scored.score < ALARM_THRESHOLD) return
+        val stationary = rssi.isStationary(mac)
 
-        store.submit(
-            DetectionEvent(
-                source = DetectionSource.BLE,
-                key = mac,
-                label = scored.label,
-                score = scored.score,
-                matchedMethods = scored.methods,
-                rssi = result.rssi
+        if (isSurveillance) {
+            val obs = ConfidenceEngine.BleObservation(
+                mac = mac,
+                rssi = result.rssi,
+                deviceName = name,
+                advertisedUuids = advertisedUuids,
+                manufacturerCompanyId = companyId,
+                manufacturerPayload = payload,
+                isStationary = stationary
             )
-        )
+            val scored = ConfidenceEngine.scoreBle(obs)
+            if (scored.score >= ALARM_THRESHOLD) {
+                store.submit(
+                    DetectionEvent(
+                        source = DetectionSource.BLE,
+                        key = mac,
+                        label = scored.label,
+                        score = scored.score,
+                        matchedMethods = scored.methods,
+                        rssi = result.rssi
+                    )
+                )
+            }
+        }
+        if (isMic) {
+            val obs = ConfidenceEngine.MicBleObservation(
+                mac = mac,
+                rssi = result.rssi,
+                deviceName = name,
+                advertisedUuids = advertisedUuids,
+                manufacturerCompanyId = companyId,
+                isStationary = stationary
+            )
+            val scored = ConfidenceEngine.scoreMicBle(obs)
+            if (scored.score >= ALARM_THRESHOLD) {
+                store.submit(
+                    DetectionEvent(
+                        source = DetectionSource.MIC,
+                        // Disambiguate from any BLE event on the same MAC so the
+                        // store's (source, key) dedup doesn't collide.
+                        key = "mic:$mac",
+                        label = scored.label,
+                        score = scored.score,
+                        matchedMethods = scored.methods,
+                        rssi = result.rssi
+                    )
+                )
+            }
+        }
     }
 }

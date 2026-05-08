@@ -1,14 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">[DЯΣΛMMΛKΣЯ] OVERWATCH</string>
-    <string name="title_line1">[DЯΣΛMMΛKΣЯ]</string>
-    <string name="title_line2">   . //0VΣЯW4TCH</string>
+    <string name="app_name">OVERWATCH</string>
     <string name="status_idle">Idle — press START to begin scanning</string>
     <string name="status_scanning_clear">All clear</string>
     <string name="status_scanning">Scanning…</string>
     <string name="action_start">START</string>
     <string name="action_stop">STOP</string>
-    <string name="notification_channel_name">DREAMMAKER / OVERWATCH detection</string>
+    <string name="notification_channel_name">OVERWATCH detection</string>
     <string name="notification_channel_desc">Foreground notification while scanning</string>
     <string name="notification_title">OVERWATCH active</string>
     <string name="notification_text">Scanning for nearby surveillance</string>
