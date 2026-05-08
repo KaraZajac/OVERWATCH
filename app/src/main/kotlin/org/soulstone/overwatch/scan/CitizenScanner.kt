@@ -99,15 +99,36 @@ class CitizenScanner(
         // Drop cache entries that no longer appear in the trending list (resolved).
         incidentCache.keys.retainAll(ids.toSet())
 
+        // Fetch any ids we haven't seen yet — Citizen incidents don't mutate,
+        // so a single fetch per id per session is enough.
+        for (id in ids) {
+            if (incidentCache[id] == null) {
+                client.fetchIncident(id)?.also { incidentCache[id] = it }
+            }
+        }
+
+        emitProximityEvents(fix, ids.mapNotNull { incidentCache[it] })
+    }
+
+    /**
+     * Re-evaluate the cached incident set against the current proximity + age
+     * thresholds and the latest fix, *without* a network refetch. Used when
+     * the user moves the proximity slider — events outside a tightened radius
+     * would otherwise linger and detections inside a widened radius wouldn't
+     * appear until the next poll cycle.
+     */
+    fun refresh() {
+        val fix = locationProvider.location.value ?: return
+        store.clearSource(DetectionSource.CITIZEN)
+        emitProximityEvents(fix, incidentCache.values.toList())
+    }
+
+    private fun emitProximityEvents(fix: Location, incidents: Collection<CitizenClient.Incident>) {
         val now = System.currentTimeMillis()
         val limit = proximityMeters()
         val out = FloatArray(1)
 
-        for (id in ids) {
-            val incident = incidentCache[id] ?: client.fetchIncident(id)?.also {
-                incidentCache[id] = it
-            } ?: continue
-
+        for (incident in incidents) {
             // Title-based pre-filter: drop pure fire/medical events.
             if (FIRE_MEDICAL_RX.containsMatchIn(incident.title) &&
                 !POLICE_TITLE_RX.containsMatchIn(incident.title)) {
