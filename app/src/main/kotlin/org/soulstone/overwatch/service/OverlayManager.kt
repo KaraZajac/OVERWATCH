@@ -92,12 +92,17 @@ class OverlayManager(
 
         val newOwner = OverlayOwner()
         val composeView = ComposeView(context).apply {
-            setViewTreeLifecycleOwner(newOwner)
-            setViewTreeSavedStateRegistryOwner(newOwner)
             setContent { OverlayBubble() }
         }
         // Wrap so we can intercept *before* MapView's own touch handling.
+        // Compose's WindowRecomposer reads findViewTreeLifecycleOwner from
+        // the *window-root* view (= the wrapper here, since it's what's
+        // attached to WindowManager). Setting the owner only on the inner
+        // ComposeView throws IllegalStateException at composition startup —
+        // that was the v0.3.1 crash.
         val wrapper = TouchInterceptor(context).apply {
+            setViewTreeLifecycleOwner(newOwner)
+            setViewTreeSavedStateRegistryOwner(newOwner)
             addView(
                 composeView,
                 FrameLayout.LayoutParams(
