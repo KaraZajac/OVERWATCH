@@ -224,30 +224,6 @@ fun MainScreen(
     }
 }
 
-/** Builds a small filled-circle Marker icon. Used for both the user-position
- *  dot (blue) and the ALPR pins (red) — osmdroid's default teardrop marker
- *  reads as a "click me" affordance which is wrong for a non-interactive
- *  visualization, so we use simple dots instead. */
-private fun dotDrawable(
-    resources: android.content.res.Resources,
-    sizePx: Int,
-    coreColor: Int
-): android.graphics.drawable.BitmapDrawable {
-    val bitmap = android.graphics.Bitmap.createBitmap(
-        sizePx, sizePx, android.graphics.Bitmap.Config.ARGB_8888
-    )
-    val canvas = android.graphics.Canvas(bitmap)
-    val outline = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0xFFFFFFFF.toInt()
-    }
-    canvas.drawCircle(sizePx / 2f, sizePx / 2f, sizePx / 2f - 1f, outline)
-    val core = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-        color = coreColor
-    }
-    canvas.drawCircle(sizePx / 2f, sizePx / 2f, sizePx / 2f - 4f, core)
-    return android.graphics.drawable.BitmapDrawable(resources, bitmap)
-}
-
 @Composable
 private fun ThreatMapCircle(
     level: ThreatLevel,
@@ -324,8 +300,8 @@ private fun ThreatMapCircle(
             val ctx = LocalContext.current
             // Build the marker drawables once per Composition rather than
             // every recomposition — bitmap allocation isn't free.
-            val userDot = remember(ctx) { dotDrawable(ctx.resources, 36, 0xFF2196F3.toInt()) }
-            val flockDot = remember(ctx) { dotDrawable(ctx.resources, 26, 0xFFD7263D.toInt()) }
+            val userDot = remember(ctx) { dotDrawable(ctx.resources, 36, DOT_USER_BLUE) }
+            val flockDot = remember(ctx) { dotDrawable(ctx.resources, 26, DOT_FLOCK_RED) }
             AndroidView(
                 modifier = Modifier.fillMaxSize(),
                 factory = { c ->
