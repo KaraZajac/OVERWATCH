@@ -19,6 +19,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import org.osmdroid.config.Configuration
 import org.soulstone.overwatch.data.settings.Settings
 import org.soulstone.overwatch.service.DetectionService
 import org.soulstone.overwatch.ui.MainScreen
@@ -66,6 +67,14 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // osmdroid requires a User-Agent and a writable cache before any
+        // MapView is constructed, otherwise OSM may rate-limit/IP-ban us.
+        // Set it here once per process — Configuration is a singleton.
+        Configuration.getInstance().apply {
+            userAgentValue = packageName
+            osmdroidBasePath = cacheDir
+            osmdroidTileCache = java.io.File(cacheDir, "osmdroid-tiles").apply { mkdirs() }
+        }
         permissionsGranted.value = checkAllPermissions()
         permanentlyDenied.value = false  // reset on activity create
         val settings = Settings.get(this)
@@ -81,6 +90,8 @@ class MainActivity : ComponentActivity() {
                         val events by DetectionService.store.events.collectAsState()
                         val threat by DetectionService.store.threatLevel.collectAsState()
                         val maxScore by DetectionService.store.maxScore.collectAsState()
+                        val mapPoints by DetectionService.mapPoints.collectAsState()
+                        val userLocation by DetectionService.location.collectAsState()
                         val granted by permissionsGranted
                         val denied by permanentlyDenied
 
@@ -95,6 +106,8 @@ class MainActivity : ComponentActivity() {
                             threat = threat,
                             score = maxScore,
                             events = events,
+                            mapPoints = mapPoints,
+                            userLocation = userLocation,
                             canStart = true,
                             permissionMessage = message,
                             showOpenAppSettings = denied && !granted,

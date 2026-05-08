@@ -32,6 +32,9 @@ class Settings private constructor(private val prefs: SharedPreferences) {
     private val _citizenEnabled = MutableStateFlow(prefs.getBoolean(KEY_CITIZEN, true))
     val citizenEnabled: StateFlow<Boolean> = _citizenEnabled.asStateFlow()
 
+    private val _micEnabled = MutableStateFlow(prefs.getBoolean(KEY_MIC, true))
+    val micEnabled: StateFlow<Boolean> = _micEnabled.asStateFlow()
+
     private val _deflockProximityM = MutableStateFlow(
         prefs.getInt(KEY_DEFLOCK_PROX, DEFAULT_DEFLOCK_PROX)
     )
@@ -54,6 +57,7 @@ class Settings private constructor(private val prefs: SharedPreferences) {
     fun setWifiEnabled(v: Boolean) { prefs.edit { putBoolean(KEY_WIFI, v) }; _wifiEnabled.value = v }
     fun setDeflockEnabled(v: Boolean) { prefs.edit { putBoolean(KEY_DEFLOCK, v) }; _deflockEnabled.value = v }
     fun setCitizenEnabled(v: Boolean) { prefs.edit { putBoolean(KEY_CITIZEN, v) }; _citizenEnabled.value = v }
+    fun setMicEnabled(v: Boolean) { prefs.edit { putBoolean(KEY_MIC, v) }; _micEnabled.value = v }
 
     fun setDeflockProximityM(v: Int) {
         val clamped = v.coerceIn(50, 1600)
@@ -83,6 +87,7 @@ class Settings private constructor(private val prefs: SharedPreferences) {
         private const val KEY_WIFI = "src_wifi"
         private const val KEY_DEFLOCK = "src_deflock"
         private const val KEY_CITIZEN = "src_citizen"
+        private const val KEY_MIC = "src_mic"
         private const val KEY_DEFLOCK_PROX = "deflock_proximity_m"
         private const val KEY_CITIZEN_PROX = "citizen_proximity_m"
         private const val KEY_THEME = "theme_mode"

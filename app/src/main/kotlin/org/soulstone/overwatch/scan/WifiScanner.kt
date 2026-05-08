@@ -17,6 +17,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import org.soulstone.overwatch.data.targets.MicTargets
 import org.soulstone.overwatch.data.targets.Patterns
 import org.soulstone.overwatch.data.targets.WifiOuis
 import org.soulstone.overwatch.fusion.ConfidenceEngine
@@ -40,7 +41,9 @@ import org.soulstone.overwatch.fusion.SourceHealth
 class WifiScanner(
     private val context: Context,
     private val store: DetectionStore,
-    private val rssi: RssiTracker = RssiTracker()
+    private val rssi: RssiTracker = RssiTracker(),
+    /** When true, also evaluate each scan against MicTargets and submit MIC events. */
+    private val micEnabled: () -> Boolean = { false }
 ) {
 
     companion object {
@@ -167,31 +170,51 @@ class WifiScanner(
             val bssid = r.BSSID ?: continue
             val ssid = readSsid(r)
 
-            val candidate = WifiOuis.matches(bssid) ||
+            val isSurveillance = WifiOuis.matches(bssid) ||
                 Patterns.ssidGenericMatch(ssid) ||
                 Patterns.ssidFlockFormat(ssid)
-            if (!candidate) continue
+            val isMic = micEnabled() && MicTargets.couldBeMicWifi(bssid, ssid)
+            if (!isSurveillance && !isMic) continue
 
             rssi.update(bssid, r.level)
-            val obs = ConfidenceEngine.WifiObservation(
-                bssid = bssid,
-                ssid = ssid,
-                rssi = r.level,
-                isStationary = rssi.isStationary(bssid)
-            )
-            val scored = ConfidenceEngine.scoreWifi(obs)
-            if (scored.score < ALARM_THRESHOLD) continue
+            val stationary = rssi.isStationary(bssid)
 
-            store.submit(
-                DetectionEvent(
-                    source = DetectionSource.WIFI,
-                    key = bssid,
-                    label = scored.label,
-                    score = scored.score,
-                    matchedMethods = scored.methods,
-                    rssi = r.level
+            if (isSurveillance) {
+                val obs = ConfidenceEngine.WifiObservation(
+                    bssid = bssid, ssid = ssid, rssi = r.level, isStationary = stationary
                 )
-            )
+                val scored = ConfidenceEngine.scoreWifi(obs)
+                if (scored.score >= ALARM_THRESHOLD) {
+                    store.submit(
+                        DetectionEvent(
+                            source = DetectionSource.WIFI,
+                            key = bssid,
+                            label = scored.label,
+                            score = scored.score,
+                            matchedMethods = scored.methods,
+                            rssi = r.level
+                        )
+                    )
+                }
+            }
+            if (isMic) {
+                val obs = ConfidenceEngine.MicWifiObservation(
+                    bssid = bssid, ssid = ssid, rssi = r.level, isStationary = stationary
+                )
+                val scored = ConfidenceEngine.scoreMicWifi(obs)
+                if (scored.score >= ALARM_THRESHOLD) {
+                    store.submit(
+                        DetectionEvent(
+                            source = DetectionSource.MIC,
+                            key = "mic:$bssid",
+                            label = scored.label,
+                            score = scored.score,
+                            matchedMethods = scored.methods,
+                            rssi = r.level
+                        )
+                    )
+                }
+            }
         }
     }
 

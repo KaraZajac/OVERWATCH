@@ -38,6 +38,19 @@ object ConfidenceEngine {
     const val B_STRONG_RSSI = 10   // > -50 dBm
     const val B_STATIONARY = 15    // RSSI rise-peak-fall
 
+    // MIC channel — smart-home/voice-assistant detection. Capped so a Ring or
+    // Echo cluster can't push the global tier above ORANGE; RED stays reserved
+    // for ALPR/Axon-grade evidence.
+    const val MIC_SCORE_CAP = 84
+    const val W_MIC_OUI = 30
+    const val W_MIC_NAME = 45
+    const val W_MIC_MFG = 30
+    const val W_MIC_AVS_UUID = 50
+    const val W_MIC_SSID = 45
+    const val B_MIC_MULTI = 10
+    const val B_MIC_STATIONARY = 8
+    const val B_MIC_STRONG_RSSI = 5
+
     /** What we observed about one BLE device on a single scan callback. */
     data class BleObservation(
         val mac: String,
@@ -200,6 +213,107 @@ object ConfidenceEngine {
             .joinToString(" / ").ifBlank { "ALPR" }
         val label = "%s @ %dm (osm:%d)".format(descriptor, obs.distanceMeters.toInt(), obs.osmId)
         return Scored(score, rangeTag, label, isAxon = false)
+    }
+
+    /** A BLE mic-bearing-device observation, score-capped at ORANGE. */
+    data class MicBleObservation(
+        val mac: String,
+        val rssi: Int,
+        val deviceName: String?,
+        val advertisedUuids: List<java.util.UUID>?,
+        val manufacturerCompanyId: Int?,
+        val isStationary: Boolean
+    )
+
+    /** A WiFi mic-bearing-device observation, score-capped at ORANGE. */
+    data class MicWifiObservation(
+        val bssid: String,
+        val ssid: String?,
+        val rssi: Int,
+        val isStationary: Boolean
+    )
+
+    fun scoreMicBle(obs: MicBleObservation): Scored {
+        var score = 0
+        var methodCount = 0
+        val methods = StringBuilder()
+        val ouiFamily = org.soulstone.overwatch.data.targets.MicTargets.matchOui(obs.mac)
+        if (ouiFamily != null) {
+            score += W_MIC_OUI
+            methods.append("mic_oui ")
+            methodCount++
+        }
+        val nameMatch = org.soulstone.overwatch.data.targets.MicTargets.matchBleName(obs.deviceName)
+        if (nameMatch != null) {
+            score += W_MIC_NAME
+            methods.append("mic_name ")
+            methodCount++
+        }
+        val mfgFamily = org.soulstone.overwatch.data.targets.MicTargets.matchManufacturer(obs.manufacturerCompanyId)
+        if (mfgFamily != null) {
+            score += W_MIC_MFG
+            methods.append("mic_mfg ")
+            methodCount++
+        }
+        if (org.soulstone.overwatch.data.targets.MicTargets.matchAvsService(obs.advertisedUuids)) {
+            score += W_MIC_AVS_UUID
+            methods.append("mic_avs ")
+            methodCount++
+        }
+        if (methodCount >= 2) {
+            score += B_MIC_MULTI
+            methods.append("multi ")
+        }
+        if (obs.rssi > -50) {
+            score += B_MIC_STRONG_RSSI
+            methods.append("strong_rssi ")
+        }
+        if (obs.isStationary) {
+            score += B_MIC_STATIONARY
+            methods.append("stationary ")
+        }
+        score = score.coerceAtMost(MIC_SCORE_CAP)
+        val family = nameMatch?.family ?: ouiFamily ?: mfgFamily
+            ?: org.soulstone.overwatch.data.targets.MicTargets.Family.HIDDEN_CAM
+        val familyLabel = org.soulstone.overwatch.data.targets.MicTargets.familyLabel(family)
+        val nameSuffix = if (!obs.deviceName.isNullOrBlank()) " — ${obs.deviceName}" else ""
+        return Scored(score, methods.toString().trim(), "$familyLabel$nameSuffix (${obs.mac})", isAxon = false)
+    }
+
+    fun scoreMicWifi(obs: MicWifiObservation): Scored {
+        var score = 0
+        var methodCount = 0
+        val methods = StringBuilder()
+        val ouiFamily = org.soulstone.overwatch.data.targets.MicTargets.matchOui(obs.bssid)
+        if (ouiFamily != null) {
+            score += W_MIC_OUI
+            methods.append("mic_oui ")
+            methodCount++
+        }
+        val ssidMatch = org.soulstone.overwatch.data.targets.MicTargets.matchSsid(obs.ssid)
+        if (ssidMatch != null) {
+            score += W_MIC_SSID
+            methods.append("mic_ssid ")
+            methodCount++
+        }
+        if (methodCount >= 2) {
+            score += B_MIC_MULTI
+            methods.append("multi ")
+        }
+        if (obs.rssi > -50) {
+            score += B_MIC_STRONG_RSSI
+            methods.append("strong_rssi ")
+        }
+        if (obs.isStationary) {
+            score += B_MIC_STATIONARY
+            methods.append("stationary ")
+        }
+        score = score.coerceAtMost(MIC_SCORE_CAP)
+        val family = ssidMatch?.family ?: ouiFamily
+            ?: org.soulstone.overwatch.data.targets.MicTargets.Family.HIDDEN_CAM
+        val familyLabel = org.soulstone.overwatch.data.targets.MicTargets.familyLabel(family)
+        val ssidSuffix = if (!obs.ssid.isNullOrBlank()) " — ${obs.ssid}" else ""
+        return Scored(score, methods.toString().trim(), "$familyLabel$ssidSuffix (${obs.bssid})", isAxon = false)
     }
 
     fun scoreWifi(obs: WifiObservation): Scored {

@@ -12,8 +12,8 @@ android {
         applicationId = "org.soulstone.overwatch"
         minSdk = 26
         targetSdk = 35
-        versionCode = 8
-        versionName = "0.1.7"
+        versionCode = 9
+        versionName = "0.2.0"
     }
 
     buildTypes {
@@ -61,6 +61,7 @@ dependencies {
     implementation(libs.androidx.compose.material.icons.extended)
 
     implementation(libs.play.services.location)
+    implementation(libs.osmdroid.android)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
 }

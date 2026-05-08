@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.location.Location
 import android.os.Build
 import android.os.IBinder
 import android.os.VibrationEffect
@@ -28,6 +29,7 @@ import org.soulstone.overwatch.R
 import org.soulstone.overwatch.data.location.LocationProvider
 import org.soulstone.overwatch.data.settings.Settings
 import org.soulstone.overwatch.fusion.DetectionEvent
+import org.soulstone.overwatch.fusion.DetectionSource
 import org.soulstone.overwatch.fusion.DetectionStore
 import org.soulstone.overwatch.fusion.SourceHealth
 import org.soulstone.overwatch.fusion.ThreatLevel
@@ -35,6 +37,7 @@ import org.soulstone.overwatch.scan.BleScanner
 import org.soulstone.overwatch.scan.CitizenScanner
 import org.soulstone.overwatch.scan.DeflockClient
 import org.soulstone.overwatch.scan.DeflockScanner
+import org.soulstone.overwatch.scan.DeflockClient.AlprPoint
 import org.soulstone.overwatch.scan.WifiScanner
 
 /**
@@ -67,6 +70,15 @@ class DetectionService : LifecycleService() {
         private val _running = MutableStateFlow(false)
         val running: StateFlow<Boolean> = _running.asStateFlow()
 
+        /** Latest ALPR cell cache — UI map renders these as pins. Mirrored from
+         *  the active DeflockScanner while the service is running; cleared on stop. */
+        private val _mapPoints = MutableStateFlow<List<AlprPoint>>(emptyList())
+        val mapPoints: StateFlow<List<AlprPoint>> = _mapPoints.asStateFlow()
+
+        /** Latest fused location fix — UI map centers on this. */
+        private val _location = MutableStateFlow<Location?>(null)
+        val location: StateFlow<Location?> = _location.asStateFlow()
+
         fun start(context: Context) {
             val intent = Intent(context, DetectionService::class.java).apply {
                 action = ACTION_START
@@ -94,6 +106,8 @@ class DetectionService : LifecycleService() {
     private lateinit var citizenScanner: CitizenScanner
     private var pruneJob: Job? = null
     private var observerJob: Job? = null
+    private var mapPointsJob: Job? = null
+    private var locationJob: Job? = null
     private var bleStarted = false
     private var wifiStarted = false
     private var deflockStarted = false
@@ -104,8 +118,8 @@ class DetectionService : LifecycleService() {
     override fun onCreate() {
         super.onCreate()
         settings = Settings.get(this)
-        bleScanner = BleScanner(this, store)
-        wifiScanner = WifiScanner(this, store)
+        bleScanner = BleScanner(this, store, micEnabled = { settings.micEnabled.value })
+        wifiScanner = WifiScanner(this, store, micEnabled = { settings.micEnabled.value })
         locationProvider = LocationProvider(this)
         deflockScanner = DeflockScanner(
             store, locationProvider, DeflockClient(this),
@@ -169,6 +183,20 @@ class DetectionService : LifecycleService() {
             return
         }
 
+        // MIC piggybacks on the BLE/WiFi scanners. Surface its health so the
+        // user sees an explicit status row rather than a silent UNKNOWN.
+        if (settings.micEnabled.value) {
+            if (bleStarted || wifiStarted) {
+                SourceHealth.record(DetectionSource.MIC, ok = true)
+            } else {
+                SourceHealth.record(
+                    DetectionSource.MIC,
+                    ok = false,
+                    message = "Needs BLE or WiFi scanner enabled"
+                )
+            }
+        }
+
         _running.value = true
         pruneJob?.cancel()
         pruneJob = lifecycleScope.launch {
@@ -187,6 +215,20 @@ class DetectionService : LifecycleService() {
                 onTierChanged(tier, top)
             }
         }
+
+        // Mirror scanner state to the companion StateFlows the UI observes.
+        // These exist so the map widget doesn't need a direct handle on the
+        // scanner instances (which are private to this service).
+        mapPointsJob?.cancel()
+        if (deflockStarted) {
+            mapPointsJob = lifecycleScope.launch {
+                deflockScanner.cachedPoints.collect { _mapPoints.value = it }
+            }
+        }
+        locationJob?.cancel()
+        locationJob = lifecycleScope.launch {
+            locationProvider.location.collect { _location.value = it }
+        }
     }
 
     private fun endScanning() {
@@ -203,6 +245,10 @@ class DetectionService : LifecycleService() {
         SourceHealth.reset()
         pruneJob?.cancel(); pruneJob = null
         observerJob?.cancel(); observerJob = null
+        mapPointsJob?.cancel(); mapPointsJob = null
+        locationJob?.cancel(); locationJob = null
+        _mapPoints.value = emptyList()
+        _location.value = null
         lastNotifiedTier = ThreatLevel.GREEN
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             stopForeground(STOP_FOREGROUND_REMOVE)

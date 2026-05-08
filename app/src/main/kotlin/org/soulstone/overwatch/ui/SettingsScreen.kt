@@ -49,6 +49,7 @@ fun SettingsScreen(
     val wifi by settings.wifiEnabled.collectAsState()
     val deflock by settings.deflockEnabled.collectAsState()
     val citizen by settings.citizenEnabled.collectAsState()
+    val mic by settings.micEnabled.collectAsState()
     val deflockProx by settings.deflockProximityM.collectAsState()
     val citizenProx by settings.citizenProximityM.collectAsState()
     val theme by settings.themeMode.collectAsState()
@@ -82,6 +83,7 @@ fun SettingsScreen(
         SourceToggle("WIFI  •  WiFi BSSID + SSID", wifi) { settings.setWifiEnabled(it) }
         SourceToggle("DEFLOCK  •  ALPR map (Overpass)", deflock) { settings.setDeflockEnabled(it) }
         SourceToggle("CITIZEN  •  Real-time incident feed", citizen) { settings.setCitizenEnabled(it) }
+        SourceToggle("MIC  •  Smart speakers / cams (Echo, Ring, Nest)", mic) { settings.setMicEnabled(it) }
         Spacer(Modifier.height(8.dp))
         if (isRunning) {
             Button(

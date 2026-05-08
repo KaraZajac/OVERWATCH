@@ -1,5 +1,8 @@
 package org.soulstone.overwatch.ui
 
+import android.content.Intent
+import android.location.Location
+import android.net.Uri
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -19,8 +22,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import android.content.Intent
-import android.net.Uri
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Settings
@@ -51,11 +52,17 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import kotlinx.coroutines.launch
+import org.osmdroid.tileprovider.tilesource.TileSourceFactory
+import org.osmdroid.util.GeoPoint
+import org.osmdroid.views.MapView
+import org.osmdroid.views.overlay.Marker
 import org.soulstone.overwatch.fusion.DetectionEvent
 import org.soulstone.overwatch.fusion.DetectionSource
 import org.soulstone.overwatch.fusion.SourceHealth
 import org.soulstone.overwatch.fusion.ThreatLevel
+import org.soulstone.overwatch.scan.DeflockClient
 import org.soulstone.overwatch.ui.theme.ThreatColors
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -65,6 +72,8 @@ fun MainScreen(
     threat: ThreatLevel,
     score: Int,
     events: List<DetectionEvent>,
+    mapPoints: List<DeflockClient.AlprPoint>,
+    userLocation: Location?,
     onStartStop: () -> Unit,
     onOpenSettings: () -> Unit,
     canStart: Boolean,
@@ -88,22 +97,14 @@ fun MainScreen(
             verticalAlignment = Alignment.Top,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Column {
-                Text(
-                    text = "[DЯΣΛMMΛKΣЯ]",
-                    color = MaterialTheme.colorScheme.onBackground,
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Monospace
-                )
-                Text(
-                    text = "   . //0VΣЯW4TCH",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Medium,
-                    fontFamily = FontFamily.Monospace
-                )
-            }
+            Text(
+                text = "OVERWATCH",
+                color = MaterialTheme.colorScheme.onBackground,
+                fontSize = 26.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace,
+                letterSpacing = 4.sp
+            )
             IconButton(onClick = onOpenSettings) {
                 Icon(
                     Icons.Filled.Settings,
@@ -119,7 +120,13 @@ fun MainScreen(
             modifier = Modifier.fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            ThreatCircle(level = threat, animating = running, onTap = { showSheet = true })
+            ThreatMapCircle(
+                level = threat,
+                animating = running,
+                userLocation = userLocation,
+                mapPoints = mapPoints,
+                onTap = { showSheet = true }
+            )
 
             Spacer(Modifier.height(12.dp))
             Text(
@@ -207,10 +214,13 @@ fun MainScreen(
 }
 
 @Composable
-private fun ThreatCircle(level: ThreatLevel, animating: Boolean, onTap: () -> Unit) {
-    // When the scanner isn't running, deliberately use a muted color and IDLE
-    // text so the user can tell at a glance whether they're scanning. Without
-    // this, idle and "scanning, all clear" both render as solid green.
+private fun ThreatMapCircle(
+    level: ThreatLevel,
+    animating: Boolean,
+    userLocation: Location?,
+    mapPoints: List<DeflockClient.AlprPoint>,
+    onTap: () -> Unit
+) {
     val idleColor = MaterialTheme.colorScheme.surfaceVariant
     val activeColor = when (level) {
         ThreatLevel.GREEN -> ThreatColors.Green
@@ -218,13 +228,10 @@ private fun ThreatCircle(level: ThreatLevel, animating: Boolean, onTap: () -> Un
         ThreatLevel.ORANGE -> ThreatColors.Orange
         ThreatLevel.RED -> ThreatColors.Red
     }
-    val color = if (animating) activeColor else idleColor
-    val labelText = if (animating) level.name else "IDLE"
-    val labelColor = if (animating) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
 
     val transition = rememberInfiniteTransition(label = "pulse")
     val pulse by transition.animateFloat(
-        initialValue = if (animating) 0.6f else 1.0f,
+        initialValue = if (animating) 0.5f else 1.0f,
         targetValue = 1.0f,
         animationSpec = infiniteRepeatable(
             animation = tween(durationMillis = 1200),
@@ -232,29 +239,115 @@ private fun ThreatCircle(level: ThreatLevel, animating: Boolean, onTap: () -> Un
         ),
         label = "pulse"
     )
-    val alpha = if (animating) pulse else 1.0f
 
     Box(
         modifier = Modifier
             .size(220.dp)
-            .clip(CircleShape)
-            .background(
-                Brush.radialGradient(
-                    colors = listOf(
-                        color.copy(alpha = alpha),
-                        color.copy(alpha = alpha * 0.6f)
-                    )
-                )
-            )
-            .clickable(onClick = onTap),
+            .clip(CircleShape),
         contentAlignment = Alignment.Center
     ) {
-        Text(
-            text = labelText,
-            color = labelColor,
-            fontSize = 28.sp,
-            fontWeight = FontWeight.Black,
-            fontFamily = FontFamily.Monospace
+        // While idle OR before the first location fix arrives, fall back to the
+        // solid pulsing circle — a blank/loading map mid-tile-fetch reads as
+        // broken. The map only renders once we actually have something to show.
+        if (!animating || userLocation == null) {
+            val color = if (animating) activeColor else idleColor
+            val alpha = if (animating) pulse else 1.0f
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.radialGradient(
+                            colors = listOf(
+                                color.copy(alpha = alpha),
+                                color.copy(alpha = alpha * 0.6f)
+                            )
+                        )
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                val labelText = when {
+                    !animating -> "IDLE"
+                    else -> "WAITING FIX"
+                }
+                Text(
+                    text = labelText,
+                    color = if (animating) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Black,
+                    fontFamily = FontFamily.Monospace
+                )
+            }
+        } else {
+            // OSM map snapshot, centered on the user, with red ALPR pins.
+            // Non-interactive — touches are captured by the click overlay above
+            // so a tap opens the source-details bottom sheet (matching the old
+            // circle's UX). Pan/zoom controls stay off.
+            // Capture into a local non-null val so the AndroidView update
+            // lambda doesn't run afoul of smart-cast-into-closure rules.
+            val fix: Location = userLocation
+            AndroidView(
+                modifier = Modifier.fillMaxSize(),
+                factory = { ctx ->
+                    MapView(ctx).apply {
+                        setTileSource(TileSourceFactory.MAPNIK)
+                        setMultiTouchControls(false)
+                        setBuiltInZoomControls(false)
+                        isClickable = false
+                        isFocusable = false
+                        controller.setZoom(17.0)
+                    }
+                },
+                update = { map ->
+                    map.controller.setCenter(GeoPoint(fix.latitude, fix.longitude))
+                    map.overlays.clear()
+                    for (p in mapPoints) {
+                        val m = Marker(map).apply {
+                            position = GeoPoint(p.lat, p.lon)
+                            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                            title = p.operator ?: p.manufacturer ?: "ALPR"
+                            // Disable osmdroid's per-marker info popup since
+                            // the map isn't interactive — the bottom sheet is
+                            // the canonical "details" surface.
+                            setInfoWindow(null)
+                        }
+                        map.overlays.add(m)
+                    }
+                    map.invalidate()
+                },
+                onRelease = { map -> map.onDetach() }
+            )
+            // Threat-tier scrim — pulses while scanning, dims tiles to keep
+            // the dark theme aesthetic and signals tier without text.
+            val scrimAlpha = (0.35f * pulse).coerceIn(0.18f, 0.5f)
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(activeColor.copy(alpha = scrimAlpha))
+            )
+            // Tier label, top-center. Smaller than the old text so the map
+            // remains readable underneath.
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(top = 14.dp),
+                contentAlignment = Alignment.TopCenter
+            ) {
+                Text(
+                    text = level.name,
+                    color = Color.White,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Black,
+                    fontFamily = FontFamily.Monospace,
+                    letterSpacing = 2.sp
+                )
+            }
+        }
+        // Click capture sits on top so taps reach onTap regardless of which
+        // visual layer was painted underneath.
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clickable(onClick = onTap)
         )
     }
 }
@@ -390,10 +483,23 @@ private fun EventRow(e: DetectionEvent) {
         if (e.hasGeo) {
             IconButton(
                 onClick = {
+                    // resolveActivity returns null on Android 11+ without a matching
+                    // <queries> entry even when Google Maps is installed. Skip the
+                    // pre-check and let startActivity handle it; catch the rare
+                    // "no app at all" case instead of silently no-op'ing.
                     val uri = Uri.parse("geo:${e.lat},${e.lon}?q=${e.lat},${e.lon}(${Uri.encode(e.label)})")
                     val intent = Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    if (intent.resolveActivity(ctx.packageManager) != null) {
+                    try {
                         ctx.startActivity(intent)
+                    } catch (_: android.content.ActivityNotFoundException) {
+                        // Fall back to a Google Maps URL — works even on devices
+                        // without a registered geo: handler.
+                        val webUri = Uri.parse(
+                            "https://www.google.com/maps/search/?api=1&query=${e.lat},${e.lon}"
+                        )
+                        val webIntent = Intent(Intent.ACTION_VIEW, webUri)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        try { ctx.startActivity(webIntent) } catch (_: android.content.ActivityNotFoundException) {}
                     }
                 },
                 modifier = Modifier.size(28.dp)
