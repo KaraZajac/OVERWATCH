@@ -134,7 +134,13 @@ class DetectionService : LifecycleService() {
             store, locationProvider,
             proximityMeters = { settings.citizenProximityM.value.toFloat() }
         )
-        overlayManager = OverlayManager(this)
+        overlayManager = OverlayManager(
+            context = this,
+            // User dragged the bubble onto the X — flip the persisted toggle
+            // so the setting and the bubble state stay aligned. The settings
+            // collector below will call hide() again, but hide() is idempotent.
+            onDismissed = { settings.setOverlayEnabled(false) }
+        )
         createNotificationChannel()
     }
 
