@@ -13,7 +13,7 @@ on upward escalations — you don't have to be looking at the screen.
 > advertise/fuzz code from one of the reference projects is intentionally
 > excluded.
 
-Latest release: [v0.5.1](https://github.com/KaraZajac/OVERWATCH/releases) (debug-signed APK, sideload).
+Latest release: [v0.5.2](https://github.com/KaraZajac/OVERWATCH/releases) (debug-signed APK, sideload).
 
 ---
 
@@ -132,7 +132,10 @@ Or download the latest debug-signed APK from
 
 Releases are cut by CI: pushing a `v*` tag runs `.github/workflows/release.yml`,
 which builds `:app:assembleDebug` and attaches the APK to a GitHub Release. No
-build-time secrets — the app ships with no key or token.
+build-time secrets — the app ships with no key or token. A fixed `debug.keystore`
+is committed (a debug key is non-secret; password is the well-known `android`) so
+every build — CI or local — signs identically and updates install in place
+without an uninstall.
 
 ---
 
@@ -208,6 +211,7 @@ field-tested. Current release **v0.5.1**. Notable changes:
 - v0.3.0–v0.3.2 — Floating threat-circle overlay (chat-bubble style) + drag/crash fixes.
 - v0.5.0 — Waze re-added via a key-protected Caddy proxy (`api.blackflagintel.com`): the OpenWeb Ninja key stays server-side, the app uses an encrypted per-device token. GitHub Actions release pipeline added.
 - v0.5.1 — UI: larger map circle with a threat-color ring, ⌖ user crosshair, source-color dots (Flock red / Waze blue / Citizen purple), START moved to the bottom.
+- v0.5.2 — Committed a fixed debug keystore so CI + local builds sign identically; updates now install in place (no functional changes).
 
 ## License
 

@@ -12,8 +12,21 @@ android {
         applicationId = "org.soulstone.overwatch"
         minSdk = 26
         targetSdk = 35
-        versionCode = 17
-        versionName = "0.5.1"
+        versionCode = 18
+        versionName = "0.5.2"
+    }
+
+    // Fixed debug keystore committed to the repo (a debug key is non-secret — its
+    // password is the well-known "android") so CI and local builds sign
+    // identically. Without it each CI build minted a fresh debug key and updates
+    // wouldn't install over the previous one.
+    signingConfigs {
+        getByName("debug") {
+            storeFile = rootProject.file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
     }
 
     buildTypes {
