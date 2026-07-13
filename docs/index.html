@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OVERWATCH — passive surveillance detection for Android</title>
+<meta name="description" content="A native Android app that passively flags nearby Flock Safety ALPRs, Axon body cameras, and police presence. Fuses BLE/WiFi radio scans, the DeFlock ALPR map, and Citizen/Waze feeds into a green→red threat tier. Listens only — never transmits.">
+<meta property="og:title" content="OVERWATCH — passive surveillance detection">
+<meta property="og:description" content="Android app that flags nearby Flock ALPRs, Axon body cams, and police by fusing BLE/WiFi + the DeFlock map + Citizen/Waze. Passive only — it never transmits.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://overwatch.netslum.io/">
+<meta property="og:image" content="https://overwatch.netslum.io/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://overwatch.netslum.io/og.png">
+<meta name="theme-color" content="#07070d">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="bg-mesh" aria-hidden="true">
+  <div class="mesh-blob mesh-blob-1"></div>
+  <div class="mesh-blob mesh-blob-2"></div>
+  <div class="mesh-blob mesh-blob-3"></div>
+</div>
+
+<nav class="nav">
+  <div class="container nav-inner">
+    <a class="nav-brand" href="#">
+      <span class="nav-mark" aria-hidden="true">◉</span>
+      OVERWATCH
+    </a>
+    <div class="nav-links">
+      <a href="#detect">How it works</a>
+      <a href="#sources">Sources</a>
+      <a href="#tiers">Tiers</a>
+      <a href="#download">Download</a>
+      <a class="nav-github" href="https://github.com/KaraZajac/OVERWATCH" aria-label="GitHub">
+        <svg height="18" viewBox="0 0 16 16" width="18" fill="currentColor" aria-hidden="true">
+          <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/>
+        </svg>
+      </a>
+    </div>
+  </div>
+</nav>
+
+<!-- ──────────────── HERO ──────────────── -->
+<header class="hero">
+  <div class="container hero-inner">
+    <div class="hero-eyebrow">
+      <span class="dot dot-pulse"></span>
+      v0.5.2 · Android · passive
+    </div>
+    <h1 class="hero-title">
+      <span class="display-wordmark">OVERWATCH</span>
+    </h1>
+    <p class="hero-tag">
+      A native Android app that <strong>passively detects surveillance around you</strong>.
+      Open it, hit <strong>START</strong>, and a ring turns green → yellow →
+      orange → red as the engine gets more sure there's a Flock Safety ALPR,
+      an Axon body camera, or active police nearby.
+      <span class="hero-tag-pop">It only listens. It never transmits, probes, or jams.</span>
+    </p>
+
+    <div class="phone-hero">
+      <img class="phone" src="img/overwatch-main.png" width="1096" height="2560"
+        alt="OVERWATCH main screen: a live map inside a green &quot;all clear&quot; threat ring, centered on the user with a crosshair, and a STOP button." loading="eager">
+    </div>
+
+    <div class="stats-row" id="stats-row">
+      <div class="stat-chip"><span class="num" data-target="6">0</span><span>fused sources</span></div>
+      <div class="stat-chip stat-vfy"><span class="num" data-target="4">0</span><span>threat tiers</span></div>
+      <div class="stat-chip"><span class="num" data-target="0">0</span><span>packets sent</span></div>
+      <div class="stat-chip"><span class="num" data-target="17">0</span><span>releases</span></div>
+    </div>
+
+    <div class="cta-row">
+      <a class="btn btn-primary" href="https://github.com/KaraZajac/OVERWATCH/releases/latest">
+        ↓ Download APK
+      </a>
+      <a class="btn" href="#detect">How it works</a>
+      <a class="btn btn-ghost" href="https://github.com/KaraZajac/OVERWATCH">
+        <svg height="16" viewBox="0 0 16 16" width="16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+        Source on GitHub
+      </a>
+    </div>
+
+    <p class="hero-warn">Passive defense only. Debug-signed APK — sideload; no Play Store. <a href="https://github.com/KaraZajac/OVERWATCH">Read the README.</a></p>
+  </div>
+</header>
+
+<!-- ──────────────── TRUST STRIP ──────────────── -->
+<section class="trust-strip">
+  <div class="container">
+    <div class="trust-row">
+      <span class="trust-label">Fuses signal from</span>
+      <ul class="trust-items">
+        <li>Bluetooth-LE + WiFi radio</li>
+        <li>DeFlock ALPR map</li>
+        <li>Citizen incidents</li>
+        <li>Waze police alerts</li>
+        <li>OpenStreetMap · Overpass</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ──────────────── HOW IT WORKS ──────────────── -->
+<section id="detect" class="section section-feature reveal">
+  <div class="container">
+    <div class="section-head">
+      <span class="section-tag">how it works</span>
+      <h2>One tap. A live threat map.</h2>
+      <p class="lead">
+        While scanning, the circle becomes an <strong>OpenStreetMap centered on
+        you</strong>, wrapped in a threat-color ring for the current tier and
+        marked with a ⌖ crosshair. Every detection is a dot, color-coded by
+        source — so each mark is self-explanatory. Lock the screen and the
+        foreground notification keeps the tier live; the phone vibrates only
+        when the threat <em>escalates</em>.
+      </p>
+    </div>
+
+    <div class="feature-split">
+      <div class="phone-frame">
+        <img class="phone" src="img/overwatch-sources.png" width="856" height="2000"
+          alt="Detection-sources drill-down: BLE, WiFi, DeFlock, Citizen, Waze and Commercial rows, each with a color tier dot and the observations that fired it." loading="lazy">
+      </div>
+      <div class="explain-annotations">
+        <div class="annotation">
+          <span class="anno-num">1</span>
+          <div>
+            <strong>Threat-color ring</strong>
+            <p>The map is wrapped in the current tier's color — green, yellow,
+            orange, or red — so you read your situation at a glance without
+            opening anything.</p>
+          </div>
+        </div>
+        <div class="annotation">
+          <span class="anno-num">2</span>
+          <div>
+            <strong>Source-color dots</strong>
+            <p><span class="legend-dot red"></span> Flock / DeFlock cameras red ·
+            <span class="legend-dot blue"></span> Waze police blue ·
+            <span class="legend-dot purple"></span> Citizen incidents purple.
+            Tap any row for coordinates + a Maps deep-link.</p>
+          </div>
+        </div>
+        <div class="annotation">
+          <span class="anno-num">3</span>
+          <div>
+            <strong>Foreground notification</strong>
+            <p>Rebuilt on every tier change — <code>OVERWATCH • RED</code> with
+            the top detection's score. Priority bumps to HIGH on RED so the
+            system surfaces it as a heads-up, screen locked or not.</p>
+          </div>
+        </div>
+        <div class="annotation">
+          <span class="anno-num">4</span>
+          <div>
+            <strong>Escalation-only haptics</strong>
+            <p>A short pulse for YELLOW, double for ORANGE, escalating triple
+            for RED — but only on <em>upward</em> transitions, so it never
+            nags you while a threat lingers.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ──────────────── DETECTION SOURCES ──────────────── -->
+<section id="sources" class="section section-bento reveal">
+  <div class="container">
+    <div class="section-head">
+      <span class="section-tag">detection sources</span>
+      <h2>Six sensors, one score.</h2>
+      <p class="lead">Every observation is scored 0–100 by the confidence
+      engine; the on-screen tier is the <strong>max live score across all
+      sources</strong>. Cross-source corroboration — a BLE hit <em>and</em> a
+      DeFlock map match in the same spot — naturally pushes the tier higher
+      than either alone.</p>
+    </div>
+
+    <div class="bento">
+      <article class="bento-card bento-lg">
+        <div class="bento-icon">📶</div>
+        <h3>BLE — Bluetooth-LE</h3>
+        <p>
+          Vendor MAC OUIs (Axon, Flock Penguin / Raven, XUNTONG mfg id
+          <code>0x09C8</code>, "TN" serial pattern), Raven service UUIDs, and
+          device-name patterns. Iterates <em>every</em> manufacturer-data entry
+          per advert — not just the first — so it doesn't miss a buried match.
+        </p>
+      </article>
+
+      <article class="bento-card">
+        <div class="bento-icon">📡</div>
+        <h3>WiFi</h3>
+        <p>
+          BSSID OUI prefixes for Flock infrastructure (31-prefix superset) and
+          <code>Flock-XXXX</code> SSID patterns, polled every 35 s — just under
+          the Android 11+ scan throttle.
+        </p>
+      </article>
+
+      <article class="bento-card bento-cam">
+        <div class="bento-icon">🎥</div>
+        <h3>DeFlock — ALPR map</h3>
+        <p>
+          Crowdsourced ALPR camera locations within range (200 m default) via
+          the Overpass API (<code>overpass.deflock.org</code> → fallback
+          <code>overpass-api.de</code>), with a 24 h on-disk cache and failure
+          backoff. Refetches when you move &gt; 1.5 km.
+        </p>
+      </article>
+
+      <article class="bento-card">
+        <div class="bento-icon">🚨</div>
+        <h3>Citizen</h3>
+        <p>
+          Real-time public-safety incidents — police-relevant only,
+          fire/medical filtered out — within range and under 30 min old,
+          polled every 60 s from the Citizen trending feed.
+        </p>
+      </article>
+
+      <article class="bento-card bento-lg">
+        <div class="bento-icon">🚓</div>
+        <h3>Waze — police alerts</h3>
+        <p>
+          Live user-reported <code>POLICE</code> alerts (default 500 m,
+          ~45 min freshness). Waze reCAPTCHA-gated its map endpoint, so
+          OVERWATCH reads a key-protected feed through a Caddy proxy at
+          <code>api.blackflagintel.com</code> that injects the key
+          server-side — the paid key <strong>never ships in the APK</strong>.
+          The app authenticates with a scoped, revocable <code>X-App-Token</code>
+          stored encrypted in the Android Keystore.
+        </p>
+      </article>
+
+      <article class="bento-card">
+        <div class="bento-icon">🏠</div>
+        <h3>Commercial</h3>
+        <p>
+          Nearby consumer smart-home gear (Nest, Ring, Echo, hidden cams) as a
+          secondary situational signal, riding the BLE + WiFi scans.
+          Score-capped at ORANGE so a cluster of doorbells never reads as
+          ALPR-grade certainty.
+        </p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ──────────────── THREAT TIERS ──────────────── -->
+<section id="tiers" class="section reveal">
+  <div class="container">
+    <div class="section-head">
+      <span class="section-tag">confidence</span>
+      <h2>Four tiers. Highest live score wins.</h2>
+    </div>
+
+    <div class="tiers">
+      <div class="tier tier-green">
+        <div class="tier-range">&lt; 40</div>
+        <div class="tier-name">GREEN</div>
+        <p>Nothing credible. Idle shows a muted gray ring so "all clear" reads differently from "not scanning."</p>
+      </div>
+      <div class="tier tier-yellow">
+        <div class="tier-range">40 – 69</div>
+        <div class="tier-name">YELLOW</div>
+        <p>A single weak indicator. Short vibration pulse on the way up.</p>
+      </div>
+      <div class="tier tier-orange">
+        <div class="tier-range">70 – 84</div>
+        <div class="tier-name">ORANGE</div>
+        <p>High confidence — usually a hard radio hit or a close map match. Double pulse.</p>
+      </div>
+      <div class="tier tier-red">
+        <div class="tier-range">85 +</div>
+        <div class="tier-name">RED</div>
+        <p>Certain. Notification jumps to HIGH priority; escalating triple pulse.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ──────────────── CAPABILITIES ──────────────── -->
+<section class="section section-bento reveal">
+  <div class="container">
+    <div class="section-head">
+      <span class="section-tag">built for the street</span>
+      <h2>Runs in your pocket, not the cloud.</h2>
+    </div>
+
+    <div class="bento">
+      <article class="bento-card bento-lg">
+        <div class="bento-icon">🔇</div>
+        <h3>Passive by design</h3>
+        <p>
+          OVERWATCH only listens — it never transmits, probes, jams, or
+          interferes with any device or network. The Axon advertise/fuzz code
+          from one of the reference projects is <strong>intentionally
+          excluded</strong>. It reads the airwaves and public feeds; that's it.
+        </p>
+      </article>
+
+      <article class="bento-card">
+        <div class="bento-icon">🫧</div>
+        <h3>Floating overlay</h3>
+        <p>
+          The same threat-ring map renders in a small draggable bubble over
+          other apps (Settings → Display over other apps), so it stays with
+          you while you use your phone.
+        </p>
+      </article>
+
+      <article class="bento-card">
+        <div class="bento-icon">🔐</div>
+        <h3>Keys stay off-device</h3>
+        <p>
+          The paid Waze feed key lives server-side behind the proxy; the app
+          holds only a scoped, revocable token, encrypted via the Android
+          Keystore. No secrets in the APK.
+        </p>
+      </article>
+
+      <article class="bento-card">
+        <div class="bento-icon">🩺</div>
+        <h3>Honest per-source health</h3>
+        <p>
+          The drill-down marks a source <code>Source unreachable</code> when
+          its scanner couldn't reach its feed — a silent empty result and a
+          real failure look different.
+        </p>
+      </article>
+
+      <article class="bento-card">
+        <div class="bento-icon">🗺</div>
+        <h3>Your position, not your data</h3>
+        <p>
+          Location drives the proximity checks and the map on-device. No
+          account, no telemetry, no analytics — the scans and feeds run and
+          the results stay on your phone.
+        </p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ──────────────── CALLOUT ──────────────── -->
+<section class="section section-callout reveal">
+  <div class="container">
+    <div class="callout">
+      <div class="callout-mark">🛡</div>
+      <div>
+        <h3>Situational awareness, not interference</h3>
+        <p>
+          OVERWATCH is a defensive, receive-only tool for knowing what's
+          watching <em>you</em> — Flock ALPRs, Axon body cameras, and police
+          presence — in the space you're already in. It does not touch, spoof,
+          or disrupt anything. Know your local laws; use it responsibly.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ──────────────── DOWNLOAD ──────────────── -->
+<section id="download" class="section section-timeline reveal">
+  <div class="container">
+    <div class="section-head">
+      <span class="section-tag">get it</span>
+      <h2>Sideload in three steps.</h2>
+    </div>
+
+    <div class="feature-split">
+      <div class="phone-frame">
+        <img class="phone" src="img/overwatch-settings.png" width="856" height="2000"
+          alt="Settings screen: per-source toggles (BLE, WiFi, DeFlock, Citizen, Waze, Commercial), proximity distance sliders, and the encrypted Waze proxy token field." loading="lazy">
+      </div>
+      <div class="timeline dl-steps">
+        <div class="tl-col tl-shipped">
+          <div class="tl-tag">1 · download</div>
+          <ul>
+            <li>Grab the latest debug-signed APK from
+              <a href="https://github.com/KaraZajac/OVERWATCH/releases/latest">Releases</a>
+              (currently <strong>v0.5.2</strong>).</li>
+          </ul>
+        </div>
+        <div class="tl-col tl-active">
+          <div class="tl-tag">2 · install</div>
+          <ul>
+            <li>Sideload it — allow "install unknown apps" for your browser or files app, then open the APK.</li>
+          </ul>
+        </div>
+        <div class="tl-col tl-next">
+          <div class="tl-tag">3 · grant + start</div>
+          <ul>
+            <li>Grant location + nearby-devices + notifications, toggle the sources you want, hit <strong>START</strong>.</li>
+            <li>Optional: paste a Waze proxy token in Settings for police-report coverage.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <p class="tl-foot">
+      Build from source, file issues, or read the internals:
+      <a href="https://github.com/KaraZajac/OVERWATCH">github.com/KaraZajac/OVERWATCH</a>
+    </p>
+  </div>
+</section>
+
+<!-- ──────────────── FOOTER ──────────────── -->
+<footer class="footer">
+  <div class="container footer-inner">
+    <div class="footer-col">
+      <div class="footer-brand">
+        <span class="nav-mark" aria-hidden="true">◉</span>
+        OVERWATCH
+      </div>
+      <p class="footer-tag">
+        Passive Android surveillance-detection. Listens only — never
+        transmits. A DREAMMAKER project.
+      </p>
+    </div>
+    <div class="footer-col">
+      <h4>Project</h4>
+      <ul>
+        <li><a href="https://github.com/KaraZajac/OVERWATCH">Source</a></li>
+        <li><a href="https://github.com/KaraZajac/OVERWATCH/releases">Releases</a></li>
+        <li><a href="https://github.com/KaraZajac/OVERWATCH/releases/latest">Latest APK</a></li>
+      </ul>
+    </div>
+    <div class="footer-col">
+      <h4>Signal from</h4>
+      <ul>
+        <li><a href="https://deflock.me">DeFlock ALPR map</a></li>
+        <li><a href="https://citizen.com">Citizen</a></li>
+        <li><a href="https://www.waze.com">Waze</a></li>
+        <li><a href="https://www.openstreetmap.org">OpenStreetMap</a></li>
+      </ul>
+    </div>
+    <div class="footer-col">
+      <h4>More</h4>
+      <ul>
+        <li><a href="https://netslum.io/notes/overwatch-passive-counter-surveillance/">The writeup</a></li>
+        <li><a href="https://netslum.io">netslum.io</a></li>
+      </ul>
+    </div>
+  </div>
+  <div class="container footer-bottom">
+    <p>
+      OVERWATCH is a receive-only situational-awareness tool. It does not
+      transmit, probe, jam, or interfere with any device or network.
+    </p>
+    <p class="footer-meta">
+      v0.5.2 · <a href="https://github.com/KaraZajac/OVERWATCH">github.com/KaraZajac/OVERWATCH</a>
+    </p>
+  </div>
+</footer>
+
+<script src="app.js" defer></script>
+
+</body>
+</html>
