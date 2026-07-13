@@ -16,7 +16,10 @@ import kotlinx.coroutines.flow.asStateFlow
  * Per-source toggles only take effect at the next Start cycle — flipping a
  * source while scanning will NOT live-restart that scanner.
  */
-class Settings private constructor(private val prefs: SharedPreferences) {
+class Settings private constructor(
+    private val prefs: SharedPreferences,
+    private val appContext: Context
+) {
 
     enum class ThemeMode { SYSTEM, DARK, LIGHT }
 
@@ -32,6 +35,9 @@ class Settings private constructor(private val prefs: SharedPreferences) {
     private val _citizenEnabled = MutableStateFlow(prefs.getBoolean(KEY_CITIZEN, true))
     val citizenEnabled: StateFlow<Boolean> = _citizenEnabled.asStateFlow()
 
+    private val _wazeEnabled = MutableStateFlow(prefs.getBoolean(KEY_WAZE, true))
+    val wazeEnabled: StateFlow<Boolean> = _wazeEnabled.asStateFlow()
+
     private val _micEnabled = MutableStateFlow(prefs.getBoolean(KEY_MIC, true))
     val micEnabled: StateFlow<Boolean> = _micEnabled.asStateFlow()
 
@@ -44,6 +50,17 @@ class Settings private constructor(private val prefs: SharedPreferences) {
         prefs.getInt(KEY_CITIZEN_PROX, DEFAULT_CITIZEN_PROX)
     )
     val citizenProximityM: StateFlow<Int> = _citizenProximityM.asStateFlow()
+
+    private val _wazeProximityM = MutableStateFlow(
+        prefs.getInt(KEY_WAZE_PROX, DEFAULT_WAZE_PROX)
+    )
+    val wazeProximityM: StateFlow<Int> = _wazeProximityM.asStateFlow()
+
+    // Shared secret the app presents to the api.blackflagintel.com proxy, which
+    // holds the real OpenWeb Ninja key server-side. Stored encrypted (Keystore),
+    // never baked into the APK, so a published build carries no usable credential.
+    private val _wazeProxyToken = MutableStateFlow(SecureStore.get(appContext, KEY_WAZE_TOKEN) ?: "")
+    val wazeProxyToken: StateFlow<String> = _wazeProxyToken.asStateFlow()
 
     private val _themeMode = MutableStateFlow(
         ThemeMode.valueOf(prefs.getString(KEY_THEME, ThemeMode.DARK.name) ?: ThemeMode.DARK.name)
@@ -60,6 +77,7 @@ class Settings private constructor(private val prefs: SharedPreferences) {
     fun setWifiEnabled(v: Boolean) { prefs.edit { putBoolean(KEY_WIFI, v) }; _wifiEnabled.value = v }
     fun setDeflockEnabled(v: Boolean) { prefs.edit { putBoolean(KEY_DEFLOCK, v) }; _deflockEnabled.value = v }
     fun setCitizenEnabled(v: Boolean) { prefs.edit { putBoolean(KEY_CITIZEN, v) }; _citizenEnabled.value = v }
+    fun setWazeEnabled(v: Boolean) { prefs.edit { putBoolean(KEY_WAZE, v) }; _wazeEnabled.value = v }
     fun setMicEnabled(v: Boolean) { prefs.edit { putBoolean(KEY_MIC, v) }; _micEnabled.value = v }
 
     fun setDeflockProximityM(v: Int) {
@@ -72,6 +90,18 @@ class Settings private constructor(private val prefs: SharedPreferences) {
         val clamped = v.coerceIn(100, 5000)
         prefs.edit { putInt(KEY_CITIZEN_PROX, clamped) }
         _citizenProximityM.value = clamped
+    }
+
+    fun setWazeProximityM(v: Int) {
+        val clamped = v.coerceIn(100, 5000)
+        prefs.edit { putInt(KEY_WAZE_PROX, clamped) }
+        _wazeProximityM.value = clamped
+    }
+
+    fun setWazeProxyToken(v: String) {
+        val t = v.trim()
+        SecureStore.put(appContext, KEY_WAZE_TOKEN, t)
+        _wazeProxyToken.value = t
     }
 
     fun setThemeMode(mode: ThemeMode) {
@@ -95,21 +125,26 @@ class Settings private constructor(private val prefs: SharedPreferences) {
         private const val KEY_WIFI = "src_wifi"
         private const val KEY_DEFLOCK = "src_deflock"
         private const val KEY_CITIZEN = "src_citizen"
+        private const val KEY_WAZE = "src_waze"
         private const val KEY_MIC = "src_mic"
         private const val KEY_DEFLOCK_PROX = "deflock_proximity_m"
         private const val KEY_CITIZEN_PROX = "citizen_proximity_m"
+        private const val KEY_WAZE_PROX = "waze_proximity_m"
+        private const val KEY_WAZE_TOKEN = "waze_proxy_token"
         private const val KEY_THEME = "theme_mode"
         private const val KEY_VIBRATE = "vibrate_on_alert"
         private const val KEY_OVERLAY = "overlay_enabled"
 
         const val DEFAULT_DEFLOCK_PROX = 200
         const val DEFAULT_CITIZEN_PROX = 500
+        const val DEFAULT_WAZE_PROX = 500
 
         @Volatile private var INSTANCE: Settings? = null
 
         fun get(context: Context): Settings = INSTANCE ?: synchronized(this) {
             INSTANCE ?: Settings(
-                context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE),
+                context.applicationContext
             ).also { INSTANCE = it }
         }
     }

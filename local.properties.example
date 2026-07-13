@@ -14,3 +14,8 @@ sdk.dir=/Users/YOUR_USERNAME/Library/Android/sdk
 #       in your shell profile
 #   (b) put the line below into ~/.gradle/gradle.properties (NOT project gradle.properties):
 #       org.gradle.java.home=/usr/local/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home
+
+# The Waze police source no longer uses an app-side key. The OpenWeb Ninja key
+# lives only on the api.blackflagintel.com proxy (server-side); the app calls
+# that proxy with a token pasted into Settings (stored encrypted on-device).
+# Nothing to configure here for Waze.

@@ -21,4 +21,4 @@ enum class ThreatLevel(val minScore: Int) {
 }
 
 /** Logical signal channel — used in the drill-down UI. */
-enum class DetectionSource { BLE, WIFI, DEFLOCK, CITIZEN, MIC }
+enum class DetectionSource { BLE, WIFI, DEFLOCK, CITIZEN, WAZE, MIC }

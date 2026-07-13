@@ -27,12 +27,14 @@ object SourceHealth {
     private val _wifi = MutableStateFlow(Health())
     private val _deflock = MutableStateFlow(Health())
     private val _citizen = MutableStateFlow(Health())
+    private val _waze = MutableStateFlow(Health())
     private val _mic = MutableStateFlow(Health())
 
     val ble: StateFlow<Health> = _ble.asStateFlow()
     val wifi: StateFlow<Health> = _wifi.asStateFlow()
     val deflock: StateFlow<Health> = _deflock.asStateFlow()
     val citizen: StateFlow<Health> = _citizen.asStateFlow()
+    val waze: StateFlow<Health> = _waze.asStateFlow()
     val mic: StateFlow<Health> = _mic.asStateFlow()
 
     fun flowFor(source: DetectionSource): StateFlow<Health> = when (source) {
@@ -40,6 +42,7 @@ object SourceHealth {
         DetectionSource.WIFI -> wifi
         DetectionSource.DEFLOCK -> deflock
         DetectionSource.CITIZEN -> citizen
+        DetectionSource.WAZE -> waze
         DetectionSource.MIC -> mic
     }
 
@@ -49,6 +52,7 @@ object SourceHealth {
             DetectionSource.WIFI -> _wifi
             DetectionSource.DEFLOCK -> _deflock
             DetectionSource.CITIZEN -> _citizen
+            DetectionSource.WAZE -> _waze
             DetectionSource.MIC -> _mic
         }
         target.value = Health(
@@ -63,6 +67,7 @@ object SourceHealth {
         _wifi.value = Health()
         _deflock.value = Health()
         _citizen.value = Health()
+        _waze.value = Health()
         _mic.value = Health()
     }
 }

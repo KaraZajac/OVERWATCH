@@ -13,7 +13,7 @@ on upward escalations — you don't have to be looking at the screen.
 > advertise/fuzz code from one of the reference projects is intentionally
 > excluded.
 
-Latest release: [v0.1.7](https://github.com/KaraZajac/OVERWATCH/releases) (debug-signed APK, sideload).
+Latest release: [v0.5.0](https://github.com/KaraZajac/OVERWATCH/releases) (debug-signed APK, sideload).
 
 ---
 
@@ -25,8 +25,9 @@ Latest release: [v0.1.7](https://github.com/KaraZajac/OVERWATCH/releases) (debug
 | **WiFi** | BSSID OUI prefixes for Flock infrastructure (31-prefix superset), `Flock-XXXX` and other generic SSID patterns | `WifiManager.getScanResults()` polled every 35 s (just under the Android 11+ 4-scans/2-min throttle) |
 | **DEFLOCK** | Crowdsourced ALPR locations within configurable proximity (default 200 m) | POST to Overpass API (`overpass.deflock.org` → fallback `overpass-api.de`) for `man_made=surveillance + surveillance:type=ALPR` in a 5 km bbox; 24 h on-disk cache by 0.05° grid cell. Refetches when the user moves > 1.5 km from the last fetch center. Backoffs after Overpass failures; treats `{"remark": "...timed out..."}` 200-responses as failure so timeouts don't poison the cache. |
 | **CITIZEN** | Real-time public-safety incidents (police-relevant only — fire/medical-only events filtered out) within configurable proximity, < 30 min old | `citizen.com/api/incident/trending` (bbox) polled every 60 s, then per-incident detail via `/api/incident/{id}` with an in-memory cache so each incident is fetched once per session. First poll fires immediately on the first location fix. |
+| **WAZE** | User-reported `POLICE` alerts still active in the feed within configurable proximity (default 500 m), up to ~45 min old | `api.blackflagintel.com/waze/alerts-and-jams` — the OVERWATCH proxy (Caddy) that injects the OpenWeb Ninja key server-side and forwards to their hosted Waze scrape, sidestepping the reCAPTCHA gating that 403s direct `live-map/api/georss` calls. The app authenticates with an `X-App-Token` entered in Settings (encrypted on-device); the paid key never ships in the APK. Polled every ~4 min. Upstream ignores type filtering and caps at 200 alerts, so the client pulls the full page and filters to `POLICE` itself. Alerts carry confidence (0–5) + reliability (0–10); high values nudge the score up. No token → source shows "not configured" in the drill-down. |
 
-> **Why no Waze?** Waze added reCAPTCHA gating to its `live-map/api/georss` endpoint in 2025/2026. Mobile clients receive HTTP 403, and the only known workarounds (Selenium proxy on a home server, Waze for Cities partner program) aren't viable for a phone-deployed app. Citizen replaces it as the police-presence source.
+> **Waze is back (v0.4.0+), via a key-protected proxy.** Waze reCAPTCHA-gated its `live-map/api/georss` endpoint in 2025/2026 — automated calls get HTTP 403 regardless of IP or headless-vs-headful browser (it scores browser *reputation*, verified by direct testing), which is why v0.1.5 removed the original integration and why no free scraper survives. OVERWATCH reads Waze POLICE alerts through [OpenWeb Ninja](https://www.openwebninja.com)'s hosted feed (pay-as-you-go ~$0.005/req, ≈ $1–3/mo at the 4-min poll). To keep the paid key off every device, the app doesn't hold it: a Caddy reverse proxy at `api.blackflagintel.com` injects the key server-side, and the app authenticates with a scoped, revocable `X-App-Token` entered in Settings (stored encrypted via the Android Keystore). The Waze for Cities partner feed was ruled out — it excludes POLICE and is agency-only. Waze complements Citizen: denser for roadway stops / speed traps.
 
 Every observation is scored 0–100 by `ConfidenceEngine`. The on-screen tier is
 the maximum live score across all sources:
@@ -102,6 +103,7 @@ Requires:
 # 1) Copy the example local.properties and point sdk.dir at your install
 cp local.properties.example local.properties
 # edit local.properties → sdk.dir=/Users/<you>/Library/Android/sdk
+# (Waze needs no build config — paste the proxy token into Settings in-app)
 
 # 2) Make sure JAVA_HOME is JDK 21
 export JAVA_HOME=/usr/local/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home
@@ -140,12 +142,16 @@ so you can grant manually.
 
 Tap the gear icon in the top-right.
 
-- **Detection sources**: toggle BLE / WiFi / DeFlock / Citizen independently.
+- **Detection sources**: toggle BLE / WiFi / DeFlock / Citizen / Waze independently.
   Changes take effect on the next Start. While scanning, a **Restart scan to
   apply** button appears that does `stop()` + `start()` in one tap.
 - **Proximity thresholds** (sliders commit on release, not per-pixel):
   - DeFlock: 50 m – 1600 m (default 200 m)
   - Citizen: 100 m – 5000 m (default 500 m)
+  - Waze: 100 m – 5000 m (default 500 m)
+- **Waze police feed**: paste the `api.blackflagintel.com` proxy token. It's
+  stored encrypted on-device (Android Keystore), never baked into the APK; the
+  paid OpenWeb Ninja key stays server-side on the proxy. Empty = Waze source off.
 - **Alerts**:
   - Vibrate on threat escalation (default on)
 - **Appearance**: System / Dark / Light (default Dark)

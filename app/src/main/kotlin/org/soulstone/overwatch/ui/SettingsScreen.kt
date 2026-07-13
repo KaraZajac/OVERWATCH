@@ -17,6 +17,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -26,14 +28,19 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Slider
+import androidx.compose.material3.LocalTextStyle
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
@@ -53,9 +60,12 @@ fun SettingsScreen(
     val wifi by settings.wifiEnabled.collectAsState()
     val deflock by settings.deflockEnabled.collectAsState()
     val citizen by settings.citizenEnabled.collectAsState()
+    val waze by settings.wazeEnabled.collectAsState()
     val mic by settings.micEnabled.collectAsState()
     val deflockProx by settings.deflockProximityM.collectAsState()
     val citizenProx by settings.citizenProximityM.collectAsState()
+    val wazeProx by settings.wazeProximityM.collectAsState()
+    val wazeToken by settings.wazeProxyToken.collectAsState()
     val theme by settings.themeMode.collectAsState()
     val vibrate by settings.vibrateOnAlert.collectAsState()
     val overlay by settings.overlayEnabled.collectAsState()
@@ -89,6 +99,7 @@ fun SettingsScreen(
         SourceToggle("WIFI  •  WiFi BSSID + SSID", wifi) { settings.setWifiEnabled(it) }
         SourceToggle("DEFLOCK  •  ALPR map (Overpass)", deflock) { settings.setDeflockEnabled(it) }
         SourceToggle("CITIZEN  •  Real-time incident feed", citizen) { settings.setCitizenEnabled(it) }
+        SourceToggle("WAZE  •  Live police reports", waze) { settings.setWazeEnabled(it) }
         SourceToggle("COMMERCIAL  •  Nest, Ring, Echo", mic) { settings.setMicEnabled(it) }
         Spacer(Modifier.height(8.dp))
         if (isRunning) {
@@ -131,6 +142,24 @@ fun SettingsScreen(
             steps = 48,
             onCommit = { settings.setCitizenProximityM(it) }
         )
+        SliderRow(
+            label = "Waze alert distance",
+            persistedValue = wazeProx,
+            range = 100f..5000f,
+            steps = 48,
+            onCommit = { settings.setWazeProximityM(it) }
+        )
+
+        Spacer(Modifier.height(16.dp))
+        SectionLabel("Waze police feed")
+        Text(
+            "Needs a proxy token (api.blackflagintel.com). Stored encrypted on-device — never in the app package.",
+            fontSize = 11.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontFamily = FontFamily.Monospace,
+            modifier = Modifier.padding(vertical = 4.dp)
+        )
+        TokenField(currentToken = wazeToken, onSave = { settings.setWazeProxyToken(it) })
 
         Spacer(Modifier.height(16.dp))
         SectionLabel("Alerts")
@@ -253,6 +282,63 @@ private fun SliderRow(
             valueRange = range,
             steps = steps
         )
+    }
+}
+
+/**
+ * Masked entry for the Waze proxy token. Commits on Save (persisted encrypted
+ * via Settings/SecureStore), with a show/hide toggle and a set/unset status line.
+ */
+@Composable
+private fun TokenField(currentToken: String, onSave: (String) -> Unit) {
+    var text by remember(currentToken) { mutableStateOf(currentToken) }
+    var visible by remember { mutableStateOf(false) }
+    val isSet = currentToken.isNotBlank()
+    Column(modifier = Modifier.padding(vertical = 4.dp)) {
+        OutlinedTextField(
+            value = text,
+            onValueChange = { text = it },
+            singleLine = true,
+            label = { Text("Proxy token", fontFamily = FontFamily.Monospace, fontSize = 12.sp) },
+            visualTransformation =
+                if (visible) VisualTransformation.None else PasswordVisualTransformation(),
+            trailingIcon = {
+                IconButton(onClick = { visible = !visible }) {
+                    Icon(
+                        if (visible) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                        contentDescription = if (visible) "Hide token" else "Show token"
+                    )
+                }
+            },
+            textStyle = LocalTextStyle.current.copy(
+                fontFamily = FontFamily.Monospace, fontSize = 13.sp
+            ),
+            modifier = Modifier.fillMaxWidth()
+        )
+        Spacer(Modifier.height(6.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = if (isSet) "Token set — Waze feed enabled" else "No token — Waze feed off",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 11.sp,
+                fontFamily = FontFamily.Monospace,
+                modifier = Modifier.weight(1f, fill = true)
+            )
+            Button(
+                onClick = { onSave(text) },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    contentColor = MaterialTheme.colorScheme.onSurface
+                ),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text("Save", fontSize = 13.sp, fontFamily = FontFamily.Monospace)
+            }
+        }
     }
 }
 

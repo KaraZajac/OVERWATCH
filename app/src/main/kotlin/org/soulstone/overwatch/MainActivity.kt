@@ -99,7 +99,8 @@ class MainActivity : ComponentActivity() {
                         // source is briefly toggled.
                         val deflockProx by settings.deflockProximityM.collectAsState()
                         val citizenProx by settings.citizenProximityM.collectAsState()
-                        val mapRadiusM = maxOf(deflockProx, citizenProx).toFloat()
+                        val wazeProx by settings.wazeProximityM.collectAsState()
+                        val mapRadiusM = maxOf(deflockProx, citizenProx, wazeProx).toFloat()
                         val granted by permissionsGranted
                         val denied by permanentlyDenied
 

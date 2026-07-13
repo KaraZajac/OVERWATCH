@@ -39,6 +39,8 @@ import org.soulstone.overwatch.scan.CitizenScanner
 import org.soulstone.overwatch.scan.DeflockClient
 import org.soulstone.overwatch.scan.DeflockScanner
 import org.soulstone.overwatch.scan.DeflockClient.AlprPoint
+import org.soulstone.overwatch.scan.WazeClient
+import org.soulstone.overwatch.scan.WazeScanner
 import org.soulstone.overwatch.scan.WifiScanner
 
 /**
@@ -105,6 +107,7 @@ class DetectionService : LifecycleService() {
     private lateinit var locationProvider: LocationProvider
     private lateinit var deflockScanner: DeflockScanner
     private lateinit var citizenScanner: CitizenScanner
+    private lateinit var wazeScanner: WazeScanner
     private lateinit var overlayManager: OverlayManager
     private var pruneJob: Job? = null
     private var observerJob: Job? = null
@@ -112,11 +115,13 @@ class DetectionService : LifecycleService() {
     private var locationJob: Job? = null
     private var deflockProxJob: Job? = null
     private var citizenProxJob: Job? = null
+    private var wazeProxJob: Job? = null
     private var overlayJob: Job? = null
     private var bleStarted = false
     private var wifiStarted = false
     private var deflockStarted = false
     private var citizenStarted = false
+    private var wazeStarted = false
     /** Last threat tier the notification displayed; tracks upward transitions for vibration. */
     private var lastNotifiedTier: ThreatLevel = ThreatLevel.GREEN
 
@@ -133,6 +138,11 @@ class DetectionService : LifecycleService() {
         citizenScanner = CitizenScanner(
             store, locationProvider,
             proximityMeters = { settings.citizenProximityM.value.toFloat() }
+        )
+        wazeScanner = WazeScanner(
+            store, locationProvider,
+            client = WazeClient(appToken = { settings.wazeProxyToken.value }),
+            proximityMeters = { settings.wazeProximityM.value.toFloat() }
         )
         overlayManager = OverlayManager(
             context = this,
@@ -172,7 +182,8 @@ class DetectionService : LifecycleService() {
             wifiStarted = wifiScanner.start(lifecycleScope)
             if (!wifiStarted) Log.w(TAG, "WifiScanner.start() returned false (permission/adapter)")
         }
-        val needsLocation = settings.deflockEnabled.value || settings.citizenEnabled.value
+        val needsLocation = settings.deflockEnabled.value || settings.citizenEnabled.value ||
+            settings.wazeEnabled.value
         if (needsLocation) {
             val locOk = locationProvider.start()
             if (!locOk) {
@@ -184,10 +195,13 @@ class DetectionService : LifecycleService() {
                 if (settings.citizenEnabled.value) {
                     citizenScanner.start(lifecycleScope); citizenStarted = true
                 }
+                if (settings.wazeEnabled.value) {
+                    wazeScanner.start(lifecycleScope); wazeStarted = true
+                }
             }
         }
 
-        val anyStarted = bleStarted || wifiStarted || deflockStarted || citizenStarted
+        val anyStarted = bleStarted || wifiStarted || deflockStarted || citizenStarted || wazeStarted
         if (!anyStarted) {
             Log.w(TAG, "No scanner started — endScanning + stopSelf")
             endScanning()
@@ -257,6 +271,12 @@ class DetectionService : LifecycleService() {
                 settings.citizenProximityM.drop(1).collect { citizenScanner.refresh() }
             }
         }
+        wazeProxJob?.cancel()
+        if (wazeStarted) {
+            wazeProxJob = lifecycleScope.launch {
+                settings.wazeProximityM.drop(1).collect { wazeScanner.refresh() }
+            }
+        }
 
         // Floating threat-circle overlay — observe the toggle and show/hide
         // accordingly. The OverlayManager re-checks SYSTEM_ALERT_WINDOW each
@@ -278,6 +298,7 @@ class DetectionService : LifecycleService() {
         if (wifiStarted) { wifiScanner.stop(); wifiStarted = false }
         if (deflockStarted) { deflockScanner.stop(); deflockStarted = false }
         if (citizenStarted) { citizenScanner.stop(); citizenStarted = false }
+        if (wazeStarted) { wazeScanner.stop(); wazeStarted = false }
         locationProvider.stop()
         store.clear()
         SourceHealth.reset()
@@ -287,6 +308,7 @@ class DetectionService : LifecycleService() {
         locationJob?.cancel(); locationJob = null
         deflockProxJob?.cancel(); deflockProxJob = null
         citizenProxJob?.cancel(); citizenProxJob = null
+        wazeProxJob?.cancel(); wazeProxJob = null
         overlayJob?.cancel(); overlayJob = null
         overlayManager.hide()
         _mapPoints.value = emptyList()
