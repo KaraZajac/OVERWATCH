@@ -9,6 +9,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -135,6 +136,7 @@ fun MainScreen(
                 animating = running,
                 userLocation = userLocation,
                 mapPoints = mapPoints,
+                events = events,
                 mapRadiusMeters = mapRadiusMeters,
                 onTap = { showSheet = true }
             )
@@ -150,9 +152,15 @@ fun MainScreen(
             Spacer(Modifier.height(24.dp))
 
             StatusText(running = running, threat = threat, score = score, events = events)
+        }
 
-            Spacer(Modifier.height(24.dp))
+        // Push the primary action button to the bottom of the screen.
+        Spacer(Modifier.weight(1f))
 
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
             Button(
                 onClick = onStartStop,
                 enabled = canStart,
@@ -200,6 +208,8 @@ fun MainScreen(
                 }
             }
         }
+
+        Spacer(Modifier.height(24.dp))
     }
 
     if (showSheet) {
@@ -230,6 +240,7 @@ private fun ThreatMapCircle(
     animating: Boolean,
     userLocation: Location?,
     mapPoints: List<DeflockClient.AlprPoint>,
+    events: List<DetectionEvent>,
     mapRadiusMeters: Float,
     onTap: () -> Unit
 ) {
@@ -240,6 +251,9 @@ private fun ThreatMapCircle(
         ThreatLevel.ORANGE -> ThreatColors.Orange
         ThreatLevel.RED -> ThreatColors.Red
     }
+    // Steady threat-tier ring around the circle: tier color while scanning,
+    // muted gray when idle. Gives the current level at a glance even over the map.
+    val ringColor = if (animating) activeColor else idleColor
 
     val transition = rememberInfiniteTransition(label = "pulse")
     val pulse by transition.animateFloat(
@@ -254,7 +268,9 @@ private fun ThreatMapCircle(
 
     Box(
         modifier = Modifier
-            .size(220.dp)
+            .size(300.dp)
+            .border(width = 6.dp, color = ringColor, shape = CircleShape)
+            .padding(6.dp)
             .clip(CircleShape),
         contentAlignment = Alignment.Center
     ) {
@@ -300,8 +316,10 @@ private fun ThreatMapCircle(
             val ctx = LocalContext.current
             // Build the marker drawables once per Composition rather than
             // every recomposition — bitmap allocation isn't free.
-            val userDot = remember(ctx) { dotDrawable(ctx.resources, 36, DOT_USER_BLUE) }
+            val userMark = remember(ctx) { crosshairDrawable(ctx.resources, 46, MARK_USER_WHITE) }
             val flockDot = remember(ctx) { dotDrawable(ctx.resources, 26, DOT_FLOCK_RED) }
+            val wazeDot = remember(ctx) { dotDrawable(ctx.resources, 26, DOT_WAZE_BLUE) }
+            val citizenDot = remember(ctx) { dotDrawable(ctx.resources, 26, DOT_CITIZEN_PURPLE) }
             AndroidView(
                 modifier = Modifier.fillMaxSize(),
                 factory = { c ->
@@ -317,7 +335,8 @@ private fun ThreatMapCircle(
                     map.controller.setCenter(GeoPoint(fix.latitude, fix.longitude))
                     map.overlays.clear()
 
-                    // ALPR dots first, user dot last so the user draws on top.
+                    // Source dots first (Flock red, Waze blue, Citizen purple),
+                    // user position last so the crosshair always draws on top.
                     for (p in mapPoints) {
                         map.overlays.add(
                             Marker(map).apply {
@@ -329,11 +348,29 @@ private fun ThreatMapCircle(
                             }
                         )
                     }
+                    for (e in events) {
+                        val lat = e.lat ?: continue
+                        val lon = e.lon ?: continue
+                        val dot = when (e.source) {
+                            DetectionSource.WAZE -> wazeDot
+                            DetectionSource.CITIZEN -> citizenDot
+                            else -> null
+                        } ?: continue
+                        map.overlays.add(
+                            Marker(map).apply {
+                                position = GeoPoint(lat, lon)
+                                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                                icon = dot
+                                title = e.label
+                                setInfoWindow(null)
+                            }
+                        )
+                    }
                     map.overlays.add(
                         Marker(map).apply {
                             position = GeoPoint(fix.latitude, fix.longitude)
                             setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
-                            icon = userDot
+                            icon = userMark
                             setInfoWindow(null)
                         }
                     )

@@ -29,6 +29,7 @@ import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
 import org.soulstone.overwatch.data.settings.Settings
+import org.soulstone.overwatch.fusion.DetectionSource
 import org.soulstone.overwatch.fusion.ThreatLevel
 import org.soulstone.overwatch.service.DetectionService
 import org.soulstone.overwatch.ui.theme.ThreatColors
@@ -54,9 +55,11 @@ fun OverlayBubble() {
     val threat by DetectionService.store.threatLevel.collectAsState()
     val userLocation by DetectionService.location.collectAsState()
     val mapPoints by DetectionService.mapPoints.collectAsState()
+    val events by DetectionService.store.events.collectAsState()
     val deflockProx by settings.deflockProximityM.collectAsState()
     val citizenProx by settings.citizenProximityM.collectAsState()
-    val radius = max(deflockProx, citizenProx).toFloat()
+    val wazeProx by settings.wazeProximityM.collectAsState()
+    val radius = max(max(deflockProx, citizenProx), wazeProx).toFloat()
 
     val activeColor = when (threat) {
         ThreatLevel.GREEN -> ThreatColors.Green
@@ -76,8 +79,10 @@ fun OverlayBubble() {
         label = "overlay-pulse"
     )
 
-    val userDot = remember(ctx) { dotDrawable(ctx.resources, 30, DOT_USER_BLUE) }
+    val userMark = remember(ctx) { crosshairDrawable(ctx.resources, 34, MARK_USER_WHITE) }
     val flockDot = remember(ctx) { dotDrawable(ctx.resources, 22, DOT_FLOCK_RED) }
+    val wazeDot = remember(ctx) { dotDrawable(ctx.resources, 22, DOT_WAZE_BLUE) }
+    val citizenDot = remember(ctx) { dotDrawable(ctx.resources, 22, DOT_CITIZEN_PURPLE) }
 
     Box(
         modifier = Modifier
@@ -128,11 +133,28 @@ fun OverlayBubble() {
                             }
                         )
                     }
+                    for (e in events) {
+                        val lat = e.lat ?: continue
+                        val lon = e.lon ?: continue
+                        val dot = when (e.source) {
+                            DetectionSource.WAZE -> wazeDot
+                            DetectionSource.CITIZEN -> citizenDot
+                            else -> null
+                        } ?: continue
+                        map.overlays.add(
+                            Marker(map).apply {
+                                position = GeoPoint(lat, lon)
+                                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                                icon = dot
+                                setInfoWindow(null)
+                            }
+                        )
+                    }
                     map.overlays.add(
                         Marker(map).apply {
                             position = GeoPoint(fix.latitude, fix.longitude)
                             setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
-                            icon = userDot
+                            icon = userMark
                             setInfoWindow(null)
                         }
                     )
