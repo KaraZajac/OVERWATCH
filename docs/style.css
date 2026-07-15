@@ -1085,3 +1085,7 @@ pre.code .prompt { color: var(--accent-hot); user-select: none; }
 /* download steps: stack the timeline columns inside the split */
 .dl-steps { grid-template-columns: 1fr !important; gap: 1rem; }
 .dl-steps .tl-col { margin: 0; }
+
+/* radar logo mark in nav/footer (replaces the ◉ glyph) */
+.nav-logo { display: inline-block; vertical-align: middle; border-radius: 7px; }
+.nav-brand .nav-logo { margin-right: 3px; }

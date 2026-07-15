@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" width="108" height="108" role="img" aria-label="OVERWATCH">
+  <defs>
+    <radialGradient id="ow-bg" cx="50%" cy="40%" r="74%">
+      <stop offset="0" stop-color="#123a24"/>
+      <stop offset="1" stop-color="#0a0f12"/>
+    </radialGradient>
+  </defs>
+  <rect x="4" y="4" width="100" height="100" rx="26" fill="url(#ow-bg)" stroke="#1f3a2c"/>
+  <path d="M54,54 L54,20 A34,34 0 0,1 82.5,36 Z" fill="#1fbf6a" fill-opacity="0.30"/>
+  <circle cx="54" cy="54" r="33" fill="none" stroke="#10b981" stroke-width="2.4"/>
+  <circle cx="54" cy="54" r="22" fill="none" stroke="#10b981" stroke-width="2.2" stroke-opacity="0.82"/>
+  <circle cx="54" cy="54" r="11" fill="none" stroke="#10b981" stroke-width="2" stroke-opacity="0.68"/>
+  <path d="M54,21 V87 M21,54 H87" stroke="#10b981" stroke-width="1.3" stroke-opacity="0.5"/>
+  <circle cx="70" cy="40" r="4.6" fill="#ef4444"/>
+</svg>
