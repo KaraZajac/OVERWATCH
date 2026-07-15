@@ -5,23 +5,44 @@ import java.util.UUID
 /**
  * Curated targets for "device with a microphone in your space" detection.
  *
- * Scope is intentionally narrow — only well-known smart-home OEMs whose devices
- * stay in fixed locations and continuously listen. Apple manufacturer id 0x004C
- * is deliberately excluded because every iPhone, AirPod, and Apple Watch
- * advertises it; a coffee shop full of phones must not light up the alarm.
+ * Scope is intentionally narrow — well-known smart-home OEMs whose devices stay
+ * in fixed locations and continuously listen, plus body-worn smart glasses
+ * (Meta Ray-Ban, Snap Spectacles) that record the space around them. Apple
+ * manufacturer id 0x004C is deliberately excluded because every iPhone, AirPod,
+ * and Apple Watch advertises it; a coffee shop full of phones must not light up
+ * the alarm.
  *
  * Detection vectors collected from public OUI registries (Wireshark/IEEE)
  * and device-setup advertisement docs.
  */
 object MicTargets {
 
-    enum class Family { ECHO, RING, GOOGLE, HIDDEN_CAM }
+    enum class Family { ECHO, RING, GOOGLE, HIDDEN_CAM, GLASSES }
 
     /** Bluetooth SIG company identifiers for "voice/smart-home" device families. */
     private val MFG_GOOGLE = 0x00E0
     private val MFG_AMAZON = 0x0171
     /** Yingxin / cheap-spy-cam mfg id seen in field reports. */
     private val MFG_YINGXIN = 0x05A7
+
+    /**
+     * Bluetooth SIG company identifiers for camera-bearing smart glasses. The
+     * manufacturer-id field is the reliable vector — device names and service
+     * UUIDs are inconsistent across advertising frames (per the open-source
+     * Nearby Glasses project, which this mirrors). Caveat: these ids are
+     * manufacturer-wide, so Meta's also match Quest VR headsets (still a
+     * camera/mic device, so an acceptable secondary signal). Luxottica in BLE
+     * mfg data is essentially only their *smart* eyewear — plain sunglasses
+     * have no radio. Brands without a dedicated SIG company id (RayNeo — which
+     * rides under TCL's 0x0BC6, too broad to use — plus XREAL, Rokid) advertise
+     * under a chipset vendor's id, so those are caught by distinctive BLE-name
+     * hints below instead.
+     */
+    private val MFG_META = 0x01AB          // Meta Platforms, Inc. (ex-Facebook)
+    private val MFG_META_TECH = 0x058E     // Meta Platforms Technologies (Reality Labs; also Quest)
+    private val MFG_LUXOTTICA = 0x0D53     // Luxottica — Ray-Ban / Oakley Meta frames
+    private val MFG_SNAP = 0x03C2          // Snap Inc. — Spectacles
+    private val MFG_VUZIX = 0x060C         // Vuzix — enterprise / AR smart glasses
 
     /** Echo/Alexa Voice Service GATT (FE03 — assigned to Amazon Lab126). */
     private val UUID_AVS = UUID.fromString("0000fe03-0000-1000-8000-00805f9b34fb")
@@ -63,7 +84,13 @@ object MicTargets {
         "Nest" to Family.GOOGLE,
         "GoogleHome" to Family.GOOGLE,
         "Chromecast" to Family.GOOGLE,
-        "Google-Home" to Family.GOOGLE
+        "Google-Home" to Family.GOOGLE,
+        "Spectacles" to Family.GLASSES,
+        "Ray-Ban" to Family.GLASSES,
+        "RayNeo" to Family.GLASSES,
+        "Vuzix" to Family.GLASSES,
+        "XREAL" to Family.GLASSES,
+        "Rokid" to Family.GLASSES
     )
 
     private val SSID_HINTS: List<Pair<String, Family>> = listOf(
@@ -115,6 +142,7 @@ object MicTargets {
         MFG_AMAZON -> Family.ECHO
         MFG_GOOGLE -> Family.GOOGLE
         MFG_YINGXIN -> Family.HIDDEN_CAM
+        MFG_META, MFG_META_TECH, MFG_LUXOTTICA, MFG_SNAP, MFG_VUZIX -> Family.GLASSES
         else -> null
     }
 
@@ -149,5 +177,6 @@ object MicTargets {
         Family.RING -> "Ring"
         Family.GOOGLE -> "Google Nest / Home"
         Family.HIDDEN_CAM -> "Possible hidden mic / cam"
+        Family.GLASSES -> "Smart glasses"
     }
 }

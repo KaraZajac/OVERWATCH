@@ -100,7 +100,7 @@ fun SettingsScreen(
         SourceToggle("DEFLOCK  •  ALPR map (Overpass)", deflock) { settings.setDeflockEnabled(it) }
         SourceToggle("CITIZEN  •  Real-time incident feed", citizen) { settings.setCitizenEnabled(it) }
         SourceToggle("WAZE  •  Live police reports", waze) { settings.setWazeEnabled(it) }
-        SourceToggle("COMMERCIAL  •  Nest, Ring, Echo", mic) { settings.setMicEnabled(it) }
+        SourceToggle("COMMERCIAL  •  Nest, Ring, Echo, glasses", mic) { settings.setMicEnabled(it) }
         Spacer(Modifier.height(8.dp))
         if (isRunning) {
             Button(
