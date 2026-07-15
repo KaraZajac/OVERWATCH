@@ -1089,3 +1089,35 @@ pre.code .prompt { color: var(--accent-hot); user-select: none; }
 /* radar logo mark in nav/footer (replaces the ◉ glyph) */
 .nav-logo { display: inline-block; vertical-align: middle; border-radius: 7px; }
 .nav-brand .nav-logo { margin-right: 3px; }
+
+/* ============================================================
+   SCREENSHOTS GALLERY
+   ============================================================ */
+.shots {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2.6rem;
+  margin-top: 2.8rem;
+  align-items: start;
+}
+.shots .shot { margin: 0; display: flex; flex-direction: column; align-items: center; }
+.shots .phone { width: 260px; max-width: 100%; }
+.shots figcaption {
+  margin-top: 1.4rem;
+  max-width: 260px;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  line-height: 1.55;
+  text-align: center;
+}
+.shots figcaption strong {
+  display: block;
+  color: var(--text);
+  font-family: var(--display);
+  font-size: 1rem;
+  margin-bottom: 0.3rem;
+}
+@media (max-width: 820px) {
+  .shots { grid-template-columns: 1fr; gap: 3rem; }
+  .shots .phone { width: 256px; }
+}
