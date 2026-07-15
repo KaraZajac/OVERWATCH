@@ -1,13 +1,76 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Radar: range rings + crosshair + sweep beam + a red contact blip. Drawn on
+     top of the @color/bg_dark adaptive background. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+
+    <!-- lit screen glow -->
+    <path android:pathData="M54,54 m-36,0 a36,36 0 1,0 72,0 a36,36 0 1,0 -72,0">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="radial"
+                android:centerX="54" android:centerY="54" android:gradientRadius="36">
+                <item android:offset="0.0" android:color="#123A24" />
+                <item android:offset="1.0" android:color="#000B0E12" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- sweep afterglow wedge -->
     <path
+        android:pathData="M54,54 L54,19 A35,35 0 0,1 83.3,35 Z"
         android:fillColor="#1FAA59"
-        android:pathData="M54,30 m-18,0 a18,18 0 1,0 36,0 a18,18 0 1,0 -36,0" />
+        android:fillAlpha="0.32" />
+
+    <!-- range rings -->
     <path
-        android:fillColor="#F4F6FA"
-        android:pathData="M54,30 m-6,0 a6,6 0 1,0 12,0 a6,6 0 1,0 -12,0" />
+        android:pathData="M54,54 m-34,0 a34,34 0 1,0 68,0 a34,34 0 1,0 -68,0"
+        android:strokeColor="#1FAA59"
+        android:strokeWidth="2" />
+    <path
+        android:pathData="M54,54 m-23,0 a23,23 0 1,0 46,0 a23,23 0 1,0 -46,0"
+        android:strokeColor="#1FAA59"
+        android:strokeWidth="2"
+        android:strokeAlpha="0.85" />
+    <path
+        android:pathData="M54,54 m-12,0 a12,12 0 1,0 24,0 a12,12 0 1,0 -24,0"
+        android:strokeColor="#1FAA59"
+        android:strokeWidth="2"
+        android:strokeAlpha="0.85" />
+
+    <!-- crosshair -->
+    <path
+        android:pathData="M20,54 L88,54"
+        android:strokeColor="#1FAA59"
+        android:strokeWidth="1.4"
+        android:strokeAlpha="0.55" />
+    <path
+        android:pathData="M54,20 L54,88"
+        android:strokeColor="#1FAA59"
+        android:strokeWidth="1.4"
+        android:strokeAlpha="0.55" />
+
+    <!-- leading sweep beam -->
+    <path
+        android:pathData="M54,54 L83.3,35"
+        android:strokeColor="#33E38C"
+        android:strokeWidth="2.4"
+        android:strokeLineCap="round" />
+
+    <!-- contact blip -->
+    <path
+        android:pathData="M72,40 m-7,0 a7,7 0 1,0 14,0 a7,7 0 1,0 -14,0"
+        android:fillColor="#D7263D"
+        android:fillAlpha="0.22" />
+    <path
+        android:pathData="M72,40 m-3.3,0 a3.3,3.3 0 1,0 6.6,0 a3.3,3.3 0 1,0 -6.6,0"
+        android:fillColor="#D7263D" />
+
+    <!-- hub -->
+    <path
+        android:pathData="M54,54 m-2.4,0 a2.4,2.4 0 1,0 4.8,0 a2.4,2.4 0 1,0 -4.8,0"
+        android:fillColor="#33E38C" />
 </vector>

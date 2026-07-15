@@ -403,7 +403,7 @@ class DetectionService : LifecycleService() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(text)
-            .setSmallIcon(android.R.drawable.ic_menu_view)
+            .setSmallIcon(R.drawable.ic_stat_radar)
             .setOngoing(true)
             .setContentIntent(pi)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
