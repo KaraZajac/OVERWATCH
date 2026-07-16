@@ -1,5 +1,4 @@
-# [DЯΣΛMMΛKΣЯ]
-## &nbsp;&nbsp;&nbsp;. //0VΣЯW4TCH
+# OVERWATCH
 
 A native Android (Kotlin) **passive surveillance-detection** app. Open it, hit
 **START**, and a circle turns **green / yellow / orange / red** depending on
