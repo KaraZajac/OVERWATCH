@@ -160,7 +160,8 @@ object ConfidenceEngine {
         if (mfgHit) methodCount++
 
         // Raven service UUIDs
-        val ravenCount = org.soulstone.overwatch.data.targets.RavenUuids.countMatches(obs.advertisedUuids)
+        val ravenCount = org.soulstone.overwatch.data.targets.RavenUuids
+            .countRavenSpecificMatches(obs.advertisedUuids)
         if (ravenCount > 0) {
             if (ravenCount >= 3) {
                 score += W_BLE_RAVEN_UUID_MULTI

@@ -1,11 +1,85 @@
 package org.soulstone.overwatch.fusion
 
+import java.util.UUID
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ConfidenceEngineTest {
+
+    @Test
+    fun standardBluetoothServicesDoNotReceiveRavenScore() {
+        listOf("180a", "1809", "1819").forEach { shortUuid ->
+            val scored = ConfidenceEngine.scoreBle(bleObservation(uuid16(shortUuid)))
+
+            assertEquals(0, scored.score)
+            assertFalse(scored.methods.contains("raven"))
+            assertFalse(scored.label.startsWith("Raven gunshot detector"))
+        }
+    }
+
+    @Test
+    fun eachRavenSpecificUuidRetainsSingleMatchScore() {
+        listOf("3100", "3200", "3300", "3400", "3500").forEach { shortUuid ->
+            val scored = ConfidenceEngine.scoreBle(bleObservation(uuid16(shortUuid)))
+
+            assertEquals(ConfidenceEngine.W_BLE_RAVEN_UUID, scored.score)
+            assertEquals("raven_uuid", scored.methods)
+            assertTrue(scored.label.startsWith("Raven gunshot detector"))
+        }
+    }
+
+    @Test
+    fun threeRavenSpecificUuidsRetainMultiMatchScore() {
+        val scored = ConfidenceEngine.scoreBle(
+            bleObservation(uuid16("3100"), uuid16("3200"), uuid16("3300"))
+        )
+
+        assertEquals(ConfidenceEngine.W_BLE_RAVEN_UUID_MULTI, scored.score)
+        assertEquals("raven_multi", scored.methods)
+    }
+
+    @Test
+    fun twoRavenSpecificUuidsPlusStandardUuidUseSingleMatchScore() {
+        val scored = ConfidenceEngine.scoreBle(
+            bleObservation(uuid16("3100"), uuid16("3200"), uuid16("180a"))
+        )
+
+        assertEquals(ConfidenceEngine.W_BLE_RAVEN_UUID, scored.score)
+        assertEquals("raven_uuid", scored.methods)
+    }
+
+    @Test
+    fun duplicateRavenSpecificUuidDoesNotInflateScore() {
+        val ravenUuid = uuid16("3100")
+        val scored = ConfidenceEngine.scoreBle(
+            bleObservation(ravenUuid, ravenUuid, ravenUuid)
+        )
+
+        assertEquals(ConfidenceEngine.W_BLE_RAVEN_UUID, scored.score)
+        assertEquals("raven_uuid", scored.methods)
+    }
+
+    @Test
+    fun mixedAdvertisementClassifiesRavenUsingOnlySpecificUuids() {
+        val scored = ConfidenceEngine.scoreBle(
+            bleObservation(uuid16("1809"), uuid16("3100"), uuid16("1819"))
+        )
+
+        assertEquals(ConfidenceEngine.W_BLE_RAVEN_UUID, scored.score)
+        assertEquals("raven_uuid", scored.methods)
+        assertTrue(scored.label.startsWith("Raven gunshot detector"))
+    }
+
+    @Test
+    fun unrelatedUuidBehaviorRemainsUnchanged() {
+        val scored = ConfidenceEngine.scoreBle(bleObservation(uuid16("180d")))
+
+        assertEquals(0, scored.score)
+        assertEquals("", scored.methods)
+        assertFalse(scored.label.startsWith("Raven gunshot detector"))
+    }
 
     @Test
     fun bleStrongRssiBonusStartsAboveNegativeFifty() {
@@ -126,4 +200,17 @@ class ConfidenceEngineTest {
         assertEquals("known_local_prefix ssid_generic multi", scored.methods)
         assertTrue(scored.score >= ConfidenceEngine.WIFI_SUBMISSION_THRESHOLD)
     }
+
+    private fun bleObservation(vararg advertisedUuids: UUID) =
+        ConfidenceEngine.BleObservation(
+            mac = "10:20:30:40:50:60",
+            rssi = -70,
+            deviceName = null,
+            advertisedUuids = advertisedUuids.toList(),
+            manufacturerCompanyId = null,
+            manufacturerPayload = null
+        )
+
+    private fun uuid16(short: String): UUID =
+        UUID.fromString("0000$short-0000-1000-8000-00805f9b34fb")
 }

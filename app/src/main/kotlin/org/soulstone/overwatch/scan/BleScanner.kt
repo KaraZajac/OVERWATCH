@@ -176,7 +176,7 @@ class BleScanner(
         val isSurveillance = BleOuis.matches(mac) ||
             Patterns.bleNameMatch(name) ||
             Patterns.isPenguinNumeric(name) ||
-            RavenUuids.countMatches(advertisedUuids) > 0 ||
+            RavenUuids.countRavenSpecificMatches(advertisedUuids) > 0 ||
             companyId == org.soulstone.overwatch.data.targets.Manufacturers.XUNTONG_COMPANY_ID
         val isMic = micEnabled() &&
             MicTargets.couldBeMicBle(mac, name, advertisedUuids, companyId)
