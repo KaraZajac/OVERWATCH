@@ -41,12 +41,12 @@ import org.json.JSONObject
  *    shape doesn't silently zero out detections.
  */
 class WazeClient(
-    private val appToken: () -> String = { "" }
+    private val appToken: () -> String = { "" },
+    private val baseUrl: String = "https://api.blackflagintel.com/waze/alerts-and-jams"
 ) {
 
     companion object {
         private const val TAG = "WazeClient"
-        private const val BASE = "https://api.blackflagintel.com/waze/alerts-and-jams"
         private const val TIMEOUT_MS = 10_000
 
         /** Never sweep a box tighter than this, so alerts the user is driving
@@ -92,7 +92,7 @@ class WazeClient(
         // the class KDoc. The proximity-sized bbox keeps the real alert count
         // well under 200, so POLICE entries are never truncated away.
         val url = URL(
-            "$BASE?bottom_left=${enc(bottomLeft)}&top_right=${enc(topRight)}&max_alerts=200"
+            "$baseUrl?bottom_left=${enc(bottomLeft)}&top_right=${enc(topRight)}&max_alerts=200"
         )
 
         val conn = (url.openConnection() as HttpURLConnection).apply {

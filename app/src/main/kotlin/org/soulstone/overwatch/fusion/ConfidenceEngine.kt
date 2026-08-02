@@ -21,8 +21,10 @@ object ConfidenceEngine {
 
     // Single-method base weights (WiFi — wired in Phase 2)
     const val W_WIFI_OUI = 40
+    const val W_WIFI_KNOWN_LOCAL_PREFIX = 20
     const val W_WIFI_SSID_GENERIC = 50
     const val W_WIFI_SSID_FLOCK_FMT = 65
+    const val WIFI_SUBMISSION_THRESHOLD = 40
 
     // Map (Phase 3)
     const val W_DEFLOCK_NEAR = 60   // <= 200m
@@ -354,6 +356,12 @@ object ConfidenceEngine {
         if (ouiHit) {
             score += W_WIFI_OUI
             methods.append("oui ")
+            methodCount++
+        } else if (
+            org.soulstone.overwatch.data.targets.KnownLocalWifiPrefixes.matches(obs.bssid)
+        ) {
+            score += W_WIFI_KNOWN_LOCAL_PREFIX
+            methods.append("known_local_prefix ")
             methodCount++
         }
 

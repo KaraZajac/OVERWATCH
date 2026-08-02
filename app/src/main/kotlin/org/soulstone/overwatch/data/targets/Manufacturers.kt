@@ -12,16 +12,17 @@ object Manufacturers {
     const val XUNTONG_COMPANY_ID = 0x09C8
 
     fun hasTnSerial(payload: ByteArray?): Boolean {
-        if (payload == null || payload.size < 2) return false
-        // Look for "TN" anywhere in the first ~20 bytes (post-header)
-        val limit = minOf(payload.size - 1, 20)
-        for (i in 0..limit) {
-            if (payload[i] == 'T'.code.toByte() && payload[i + 1] == 'N'.code.toByte()) {
+        if (payload == null || payload.size < 3) return false
+        // A serial may start at any position from 0 through 20 (inclusive).
+        val maxStartIndex = minOf(payload.size - 3, 20)
+        for (index in 0..maxStartIndex) {
+            if (
+                payload[index] == 'T'.code.toByte() &&
+                payload[index + 1] == 'N'.code.toByte()
+            ) {
                 // Followed by digits = high-confidence Penguin/Flock serial
-                if (i + 2 < payload.size) {
-                    val c = payload[i + 2].toInt().toChar()
-                    if (c in '0'..'9') return true
-                }
+                val c = payload[index + 2].toInt().toChar()
+                if (c in '0'..'9') return true
             }
         }
         return false

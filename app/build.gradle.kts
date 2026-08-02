@@ -14,6 +14,7 @@ android {
         targetSdk = 35
         versionCode = 19
         versionName = "0.5.3"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     // Fixed debug keystore committed to the repo (a debug key is non-secret — its
@@ -53,6 +54,10 @@ android {
         buildConfig = true
     }
 
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
+
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
@@ -76,5 +81,22 @@ dependencies {
     implementation(libs.play.services.location)
     implementation(libs.osmdroid.android)
 
+    constraints {
+        implementation("androidx.fragment:fragment:1.3.0") {
+            because(
+                "AndroidX ActivityResult requires Fragment 1.3.0+; Google Play Services " +
+                    "currently brings Fragment 1.1.0 transitively."
+            )
+        }
+    }
+
     debugImplementation(libs.androidx.compose.ui.tooling)
+
+    testImplementation(libs.junit)
+    testImplementation(libs.mockwebserver)
+    testImplementation(libs.json)
+
+    androidTestImplementation(libs.androidx.test.core)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.ext.junit)
 }

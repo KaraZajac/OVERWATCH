@@ -25,7 +25,15 @@ import org.json.JSONObject
  *  - Cache the JSON response on disk by 0.05° grid cell (24h TTL). Revisits to
  *    the same cell don't re-hit the API.
  */
-class DeflockClient(context: Context) {
+class DeflockClient(
+    private val cacheDir: File,
+    private val endpoints: List<String>
+) {
+
+    constructor(context: Context) : this(
+        cacheDir = File(context.cacheDir, "deflock"),
+        endpoints = DEFAULT_ENDPOINTS
+    )
 
     companion object {
         private const val TAG = "DeflockClient"
@@ -34,7 +42,7 @@ class DeflockClient(context: Context) {
         private const val USER_AGENT = "OVERWATCH/0.1 (+github.com/KaraZajac/OVERWATCH)"
         private const val TIMEOUT_MS = 30_000
         private const val OVERPASS_QUERY_TIMEOUT_S = 25
-        private val ENDPOINTS = listOf(
+        private val DEFAULT_ENDPOINTS = listOf(
             "https://overpass.deflock.org/api/interpreter",
             "https://overpass-api.de/api/interpreter"
         )
@@ -54,7 +62,9 @@ class DeflockClient(context: Context) {
         data class Failed(val reason: String) : FetchResult()
     }
 
-    private val cacheDir: File = File(context.cacheDir, "deflock").apply { mkdirs() }
+    init {
+        cacheDir.mkdirs()
+    }
 
     suspend fun fetchAround(lat: Double, lon: Double): FetchResult = withContext(Dispatchers.IO) {
         val key = cacheKeyFor(lat, lon)
@@ -103,7 +113,7 @@ class DeflockClient(context: Context) {
     /** Try each endpoint in order until one returns 2xx. Returns body + last error message. */
     private fun downloadFromAny(query: String): Pair<String?, String?> {
         var lastError: String? = null
-        for (endpoint in ENDPOINTS) {
+        for (endpoint in endpoints) {
             val (body, err) = postQuery(endpoint, query)
             if (body != null) return body to null
             lastError = err

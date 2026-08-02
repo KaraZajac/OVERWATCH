@@ -19,11 +19,14 @@ import org.json.JSONObject
  * No auth, no rate-limit headers observed. Be a good citizen (heh) — only fetch
  * detail for IDs we haven't already seen.
  */
-class CitizenClient {
+class CitizenClient(
+    baseUrl: String = "https://citizen.com/api/incident"
+) {
+
+    private val base = baseUrl.trimEnd('/')
 
     companion object {
         private const val TAG = "CitizenClient"
-        private const val BASE = "https://citizen.com/api/incident"
         private const val USER_AGENT =
             "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) " +
                 "Chrome/121.0.0.0 Mobile Safari/537.36"
@@ -55,7 +58,7 @@ class CitizenClient {
         val left = lon - BBOX_HALF_DEG
         val right = lon + BBOX_HALF_DEG
         val url = URL(
-            "$BASE/trending?lowerLatitude=$bottom&upperLatitude=$top" +
+            "$base/trending?lowerLatitude=$bottom&upperLatitude=$top" +
                 "&lowerLongitude=$left&upperLongitude=$right&limit=$LIMIT"
         )
         when (val raw = httpGetJson(url)) {
@@ -79,7 +82,7 @@ class CitizenClient {
 
     /** Returns null on any failure (parse, network, missing fields). */
     suspend fun fetchIncident(id: String): Incident? = withContext(Dispatchers.IO) {
-        val url = URL("$BASE/$id")
+        val url = URL("$base/$id")
         val body = (httpGetJson(url) as? RawResult.Success)?.body ?: return@withContext null
         try {
             val o = JSONObject(body)

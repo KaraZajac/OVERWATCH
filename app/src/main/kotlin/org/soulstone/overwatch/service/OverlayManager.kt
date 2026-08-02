@@ -1,6 +1,5 @@
 package org.soulstone.overwatch.service
 
-import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.graphics.Canvas
@@ -125,7 +124,33 @@ class OverlayManager(
             y = (INITIAL_Y_DP * density).toInt()
         }
 
-        wrapper.setOnTouchListener(DragHandler(lp))
+        var dragStartX = lp.x
+        var dragStartY = lp.y
+        wrapper.setOnClickListener { openMainActivity() }
+        wrapper.setOnTouchListener(
+            OverlayTouchHandler(
+                tapSlopPx = TAP_SLOP_PX.toFloat(),
+                onGestureStarted = {
+                    dragStartX = lp.x
+                    dragStartY = lp.y
+                },
+                onDragStart = { showDismissZone() },
+                onMove = { view, dx, dy ->
+                    lp.x = dragStartX + dx.toInt()
+                    lp.y = dragStartY + dy.toInt()
+                    try { wm.updateViewLayout(view, lp) } catch (_: Exception) {}
+                    dismissView?.setHighlighted(isOverDismiss(lp.x, lp.y))
+                },
+                isOverDismiss = { isOverDismiss(lp.x, lp.y) },
+                onDropOnDismiss = {
+                    // Tear down and signal the caller so the persisted setting
+                    // flips off too.
+                    hide()
+                    onDismissed()
+                },
+                onGestureFinished = { hideDismissZone() }
+            )
+        )
 
         try {
             wm.addView(wrapper, lp)
@@ -192,6 +217,13 @@ class OverlayManager(
         dismissView = null
     }
 
+    private fun openMainActivity() {
+        val intent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
+        try { context.startActivity(intent) } catch (_: Exception) {}
+    }
+
     private fun isOverDismiss(bubbleX: Int, bubbleY: Int): Boolean {
         if (dismissView == null) return false
         val cx = bubbleX + bubbleSizePx / 2f
@@ -201,73 +233,13 @@ class OverlayManager(
         return sqrt((dx * dx + dy * dy).toDouble()) < dismissHitRadius
     }
 
-    /** Drag with raw coords; tap if movement stayed under [TAP_SLOP_PX]. */
-    private inner class DragHandler(private val lp: WindowManager.LayoutParams) :
-        View.OnTouchListener {
-
-        private var startX = 0
-        private var startY = 0
-        private var touchDownX = 0f
-        private var touchDownY = 0f
-        private var moved = false
-
-        @SuppressLint("ClickableViewAccessibility")
-        override fun onTouch(v: View, ev: MotionEvent): Boolean {
-            return when (ev.action) {
-                MotionEvent.ACTION_DOWN -> {
-                    startX = lp.x
-                    startY = lp.y
-                    touchDownX = ev.rawX
-                    touchDownY = ev.rawY
-                    moved = false
-                    true
-                }
-                MotionEvent.ACTION_MOVE -> {
-                    val dx = ev.rawX - touchDownX
-                    val dy = ev.rawY - touchDownY
-                    if (!moved && (abs(dx) > TAP_SLOP_PX || abs(dy) > TAP_SLOP_PX)) {
-                        moved = true
-                        showDismissZone()
-                    }
-                    if (moved) {
-                        lp.x = startX + dx.toInt()
-                        lp.y = startY + dy.toInt()
-                        try { wm.updateViewLayout(v, lp) } catch (_: Exception) {}
-                        dismissView?.setHighlighted(isOverDismiss(lp.x, lp.y))
-                    }
-                    true
-                }
-                MotionEvent.ACTION_UP -> {
-                    if (moved && isOverDismiss(lp.x, lp.y)) {
-                        // Released on the X — tear down and signal the caller
-                        // so the persisted setting flips off too.
-                        hide()
-                        onDismissed()
-                    } else if (!moved) {
-                        // Tap → bring the host app forward.
-                        val intent = Intent(context, MainActivity::class.java).apply {
-                            flags = Intent.FLAG_ACTIVITY_NEW_TASK or
-                                Intent.FLAG_ACTIVITY_SINGLE_TOP
-                        }
-                        try { context.startActivity(intent) } catch (_: Exception) {}
-                    }
-                    hideDismissZone()
-                    true
-                }
-                MotionEvent.ACTION_CANCEL -> {
-                    hideDismissZone()
-                    true
-                }
-                else -> false
-            }
-        }
-    }
-
     /** Always-claiming wrapper. Without this, the osmdroid MapView descendant
      *  consumes ACTION_DOWN for pan handling and the OnTouchListener never
      *  fires — drags pan the map instead of moving the bubble. */
     private class TouchInterceptor(context: Context) : FrameLayout(context) {
         override fun onInterceptTouchEvent(ev: MotionEvent): Boolean = true
+
+        override fun performClick(): Boolean = super.performClick()
     }
 
     /** Bottom-center dismiss target — translucent dark circle with a white X
@@ -326,5 +298,58 @@ class OverlayManager(
         fun destroy() {
             lifecycleReg.currentState = Lifecycle.State.DESTROYED
         }
+    }
+}
+
+/**
+ * Shared touch state machine for the overlay bubble. A movement past the tap
+ * slop starts a drag; only a stationary ACTION_UP calls performClick().
+ */
+class OverlayTouchHandler(
+    private val tapSlopPx: Float,
+    private val onGestureStarted: () -> Unit,
+    private val onDragStart: () -> Unit,
+    private val onMove: (View, Float, Float) -> Unit,
+    private val isOverDismiss: () -> Boolean,
+    private val onDropOnDismiss: () -> Unit,
+    private val onGestureFinished: () -> Unit
+) : View.OnTouchListener {
+
+    private var touchDownX = 0f
+    private var touchDownY = 0f
+    private var moved = false
+
+    override fun onTouch(v: View, ev: MotionEvent): Boolean = when (ev.actionMasked) {
+        MotionEvent.ACTION_DOWN -> {
+            touchDownX = ev.rawX
+            touchDownY = ev.rawY
+            moved = false
+            onGestureStarted()
+            true
+        }
+        MotionEvent.ACTION_MOVE -> {
+            val dx = ev.rawX - touchDownX
+            val dy = ev.rawY - touchDownY
+            if (!moved && (abs(dx) > tapSlopPx || abs(dy) > tapSlopPx)) {
+                moved = true
+                onDragStart()
+            }
+            if (moved) onMove(v, dx, dy)
+            true
+        }
+        MotionEvent.ACTION_UP -> {
+            if (moved && isOverDismiss()) {
+                onDropOnDismiss()
+            } else if (!moved) v.performClick()
+            onGestureFinished()
+            moved = false
+            true
+        }
+        MotionEvent.ACTION_CANCEL -> {
+            onGestureFinished()
+            moved = false
+            true
+        }
+        else -> false
     }
 }

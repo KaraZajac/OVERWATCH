@@ -17,6 +17,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import org.soulstone.overwatch.data.targets.KnownLocalWifiPrefixes
 import org.soulstone.overwatch.data.targets.MicTargets
 import org.soulstone.overwatch.data.targets.Patterns
 import org.soulstone.overwatch.data.targets.WifiOuis
@@ -48,7 +49,6 @@ class WifiScanner(
 
     companion object {
         private const val TAG = "WifiScanner"
-        private const val ALARM_THRESHOLD = 40
         private const val SCAN_INTERVAL_MS = 35_000L
     }
 
@@ -171,6 +171,7 @@ class WifiScanner(
             val ssid = readSsid(r)
 
             val isSurveillance = WifiOuis.matches(bssid) ||
+                KnownLocalWifiPrefixes.matches(bssid) ||
                 Patterns.ssidGenericMatch(ssid) ||
                 Patterns.ssidFlockFormat(ssid)
             val isMic = micEnabled() && MicTargets.couldBeMicWifi(bssid, ssid)
@@ -184,7 +185,7 @@ class WifiScanner(
                     bssid = bssid, ssid = ssid, rssi = r.level, isStationary = stationary
                 )
                 val scored = ConfidenceEngine.scoreWifi(obs)
-                if (scored.score >= ALARM_THRESHOLD) {
+                if (scored.score >= ConfidenceEngine.WIFI_SUBMISSION_THRESHOLD) {
                     store.submit(
                         DetectionEvent(
                             source = DetectionSource.WIFI,
@@ -202,7 +203,7 @@ class WifiScanner(
                     bssid = bssid, ssid = ssid, rssi = r.level, isStationary = stationary
                 )
                 val scored = ConfidenceEngine.scoreMicWifi(obs)
-                if (scored.score >= ALARM_THRESHOLD) {
+                if (scored.score >= ConfidenceEngine.WIFI_SUBMISSION_THRESHOLD) {
                     store.submit(
                         DetectionEvent(
                             source = DetectionSource.MIC,

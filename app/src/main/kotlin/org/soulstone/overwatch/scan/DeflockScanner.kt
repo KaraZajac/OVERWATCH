@@ -37,6 +37,15 @@ class DeflockScanner(
         private const val REFETCH_THRESHOLD_M = 1500f
         /** Don't retry an Overpass POST within this window after a failure. */
         private const val FAILURE_BACKOFF_MS = 60_000L
+
+        internal fun shouldRefetchAfterAttempt(
+            lastAttemptOk: Boolean,
+            elapsedMs: Long,
+            distanceMeters: Float
+        ): Boolean {
+            if (!lastAttemptOk) return elapsedMs >= FAILURE_BACKOFF_MS
+            return distanceMeters > REFETCH_THRESHOLD_M
+        }
     }
 
     private var job: Job? = null
@@ -158,12 +167,9 @@ class DeflockScanner(
         val lon = lastFetchLon ?: return true
         // After a failed attempt, hold off for FAILURE_BACKOFF_MS even if the
         // user hasn't moved — avoids hammering Overpass when it's struggling.
-        if (!lastAttemptOk &&
-            System.currentTimeMillis() - lastAttemptMs < FAILURE_BACKOFF_MS) {
-            return false
-        }
+        val elapsedMs = System.currentTimeMillis() - lastAttemptMs
         val out = FloatArray(1)
         Location.distanceBetween(lat, lon, fix.latitude, fix.longitude, out)
-        return out[0] > REFETCH_THRESHOLD_M
+        return shouldRefetchAfterAttempt(lastAttemptOk, elapsedMs, out[0])
     }
 }
