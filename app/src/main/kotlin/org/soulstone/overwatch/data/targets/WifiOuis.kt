@@ -4,7 +4,9 @@ package org.soulstone.overwatch.data.targets
  * WiFi BSSID OUI prefixes for Flock Safety infrastructure.
  *
  * 31-prefix superset from flock-you (research by NitekryDPaul + DeFlockJoplin),
- * plus the overlap with flock-detection's 24-prefix list.
+ * plus the overlap with flock-detection's 24-prefix list, plus the 18
+ * IEEE-verified vendor registrations from [VendorOuis] (WatchGuard 4RE in-car
+ * APs, Openpath/Alta readers, WiFi-capable cameras and transit recorders).
  *
  * Note: Android's WifiManager only exposes BSSID; the addr1 / wildcard-probe
  * tricks from flock-you's promiscuous mode aren't accessible — match BSSID only.
@@ -19,7 +21,7 @@ object WifiOuis {
         "70:08:94", "58:8e:81", "ec:1b:bd", "3c:71:bf", "58:00:e3",
         "90:35:ea", "5c:93:a2", "64:6e:69", "48:27:ea", "a4:cf:12",
         "82:6b:f2"
-    )
+    ) + VendorOuis.ALL
 
     fun matches(bssid: String): Boolean {
         val lower = bssid.lowercase()

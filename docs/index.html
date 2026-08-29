@@ -57,7 +57,7 @@
   <div class="container hero-inner">
     <div class="hero-eyebrow">
       <span class="dot dot-pulse"></span>
-      v0.5.3 · Android · passive
+      v0.5.4 · Android · passive
     </div>
     <h1 class="hero-title">
       <span class="display-wordmark">OVERWATCH</span>
@@ -79,7 +79,7 @@
       <div class="stat-chip"><span class="num" data-target="6">0</span><span>fused sources</span></div>
       <div class="stat-chip stat-vfy"><span class="num" data-target="4">0</span><span>threat tiers</span></div>
       <div class="stat-chip"><span class="num" data-target="0">0</span><span>packets sent</span></div>
-      <div class="stat-chip"><span class="num" data-target="17">0</span><span>releases</span></div>
+      <div class="stat-chip"><span class="num" data-target="19">0</span><span>releases</span></div>
     </div>
 
     <div class="cta-row">
@@ -197,8 +197,11 @@
         <p>
           Vendor MAC OUIs (Axon, Flock Penguin / Raven, XUNTONG mfg id
           <code>0x09C8</code>, "TN" serial pattern), Raven service UUIDs, and
-          device-name patterns. Iterates <em>every</em> manufacturer-data entry
-          per advert — not just the first — so it doesn't miss a buried match.
+          device-name patterns — plus 18 IEEE-verified vendor OUIs: ShotSpotter,
+          WatchGuard, Verkada, Avigilon Alta readers, Axis body cams, FLIR and
+          more, with police-exclusive vendors scoring ORANGE on sight. Iterates
+          <em>every</em> manufacturer-data entry per advert — not just the
+          first — so it doesn't miss a buried match.
         </p>
       </article>
 
@@ -206,9 +209,10 @@
         <div class="bento-icon">📡</div>
         <h3>WiFi</h3>
         <p>
-          BSSID OUI prefixes for Flock infrastructure (31-prefix superset) and
-          <code>Flock-XXXX</code> SSID patterns, polled every 35 s — just under
-          the Android 11+ scan throttle.
+          BSSID OUI prefixes for Flock infrastructure (31-prefix superset), the
+          same 18 surveillance-vendor OUIs (WatchGuard in-car APs, Alta readers,
+          WiFi cameras), and <code>Flock-XXXX</code> SSID patterns, polled every
+          35 s — just under the Android 11+ scan throttle.
         </p>
       </article>
 
@@ -425,7 +429,7 @@
           <ul>
             <li>Grab the latest debug-signed APK from
               <a href="https://github.com/KaraZajac/OVERWATCH/releases/latest">Releases</a>
-              (currently <strong>v0.5.3</strong>).</li>
+              (currently <strong>v0.5.4</strong>).</li>
           </ul>
         </div>
         <div class="tl-col tl-active">
@@ -495,7 +499,7 @@
       transmit, probe, jam, or interfere with any device or network.
     </p>
     <p class="footer-meta">
-      v0.5.3 · <a href="https://github.com/KaraZajac/OVERWATCH">github.com/KaraZajac/OVERWATCH</a>
+      v0.5.4 · <a href="https://github.com/KaraZajac/OVERWATCH">github.com/KaraZajac/OVERWATCH</a>
     </p>
   </div>
 </footer>

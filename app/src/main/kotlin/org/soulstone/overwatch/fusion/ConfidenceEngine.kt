@@ -12,6 +12,10 @@ object ConfidenceEngine {
     // Single-method base weights (BLE)
     const val W_BLE_OUI = 40
     const val W_BLE_OUI_AXON = 80
+    // Police-exclusive vendor OUIs (WatchGuard, ShotSpotter) — same rationale as
+    // Axon: these prefixes appear on nothing consumer, so a hit is ORANGE-grade
+    // on its own.
+    const val W_BLE_OUI_POLICE = 75
     const val W_BLE_NAME = 45
     const val W_BLE_NAME_PENGUIN_NUMERIC = 15
     const val W_BLE_MFG_XUNTONG = 60
@@ -21,6 +25,7 @@ object ConfidenceEngine {
 
     // Single-method base weights (WiFi — wired in Phase 2)
     const val W_WIFI_OUI = 40
+    const val W_WIFI_OUI_POLICE = 75  // WatchGuard 4RE cruiser APs, ShotSpotter backhaul
     const val W_WIFI_SSID_GENERIC = 50
     const val W_WIFI_SSID_FLOCK_FMT = 65
 
@@ -126,6 +131,10 @@ object ConfidenceEngine {
             score += W_BLE_OUI_AXON
             methods.append("axon_oui ")
             ouiHit = true; isAxon = true
+        } else if (org.soulstone.overwatch.data.targets.VendorOuis.isPoliceExclusive(obs.mac)) {
+            score += W_BLE_OUI_POLICE
+            methods.append("police_oui ")
+            ouiHit = true
         } else if (org.soulstone.overwatch.data.targets.BleOuis.matches(obs.mac)) {
             score += W_BLE_OUI
             methods.append("oui ")
@@ -191,9 +200,13 @@ object ConfidenceEngine {
 
         score = score.coerceAtMost(100)
 
+        val vendor = org.soulstone.overwatch.data.targets.VendorOuis.label(obs.mac)
         val label = when {
             isAxon -> "Axon body cam (${obs.mac})"
             ravenHit -> "Raven gunshot detector (${obs.mac})"
+            vendor != null && !obs.deviceName.isNullOrBlank() ->
+                "$vendor — ${obs.deviceName} (${obs.mac})"
+            vendor != null -> "$vendor (${obs.mac})"
             !obs.deviceName.isNullOrBlank() -> "${obs.deviceName} (${obs.mac})"
             else -> "Surveillance BLE (${obs.mac})"
         }
@@ -350,8 +363,13 @@ object ConfidenceEngine {
         val methods = StringBuilder()
         var methodCount = 0
 
-        val ouiHit = org.soulstone.overwatch.data.targets.WifiOuis.matches(obs.bssid)
-        if (ouiHit) {
+        val policeOui = org.soulstone.overwatch.data.targets.VendorOuis.isPoliceExclusive(obs.bssid)
+        val ouiHit = policeOui || org.soulstone.overwatch.data.targets.WifiOuis.matches(obs.bssid)
+        if (policeOui) {
+            score += W_WIFI_OUI_POLICE
+            methods.append("police_oui ")
+            methodCount++
+        } else if (ouiHit) {
             score += W_WIFI_OUI
             methods.append("oui ")
             methodCount++
@@ -384,8 +402,13 @@ object ConfidenceEngine {
 
         score = score.coerceAtMost(100)
 
-        val label = if (!obs.ssid.isNullOrBlank()) "${obs.ssid} (${obs.bssid})"
-            else "Surveillance WiFi (${obs.bssid})"
+        val vendor = org.soulstone.overwatch.data.targets.VendorOuis.label(obs.bssid)
+        val label = when {
+            vendor != null && !obs.ssid.isNullOrBlank() -> "$vendor — ${obs.ssid} (${obs.bssid})"
+            vendor != null -> "$vendor (${obs.bssid})"
+            !obs.ssid.isNullOrBlank() -> "${obs.ssid} (${obs.bssid})"
+            else -> "Surveillance WiFi (${obs.bssid})"
+        }
 
         return Scored(score, methods.toString().trim(), label, isAxon = false)
     }

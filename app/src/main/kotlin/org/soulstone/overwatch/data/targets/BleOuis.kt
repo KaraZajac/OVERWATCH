@@ -6,6 +6,9 @@ package org.soulstone.overwatch.data.targets
  * Sources:
  *  - flock-detection (24 prefixes — Flock, LiteOn, Cradlepoint, Murata, Espressif, Penguin BLE)
  *  - AxonCadabra (Axon body cam manufacturer prefix 00:25:DF)
+ *  - [VendorOuis] (18 IEEE-verified surveillance-vendor registrations — ShotSpotter,
+ *    WatchGuard, Verkada, Avigilon Alta, Axis body cams, FLIR, and the wired-video
+ *    vendors, merged below)
  *
  * Match by lowercased "xx:xx:xx" prefix on the device MAC.
  */
@@ -23,7 +26,7 @@ object BleOuis {
         "d8:f3:bc", "80:30:49", "14:5a:fc", "9c:2f:9d", "94:08:53",
         "e4:aa:ea", "48:e7:29", "c8:c9:a3", "74:4c:a1", "70:c9:4e",
         "04:0d:84", "08:3a:88", "a4:cf:12", "d8:a0:d8"
-    )
+    ) + VendorOuis.ALL
 
     fun matches(mac: String): Boolean {
         val lower = mac.lowercase()
