@@ -1,19 +1,21 @@
 plugins {
+    // AGP 9 has built-in Kotlin support, so the standalone
+    // org.jetbrains.kotlin.android plugin is gone — AGP refuses to apply it.
+    // The Compose compiler plugin is still applied separately.
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
 }
 
 android {
     namespace = "org.soulstone.overwatch"
-    compileSdk = 35
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "org.soulstone.overwatch"
         minSdk = 26
         targetSdk = 35
-        versionCode = 20
-        versionName = "0.5.4"
+        versionCode = 21
+        versionName = "0.5.5"
     }
 
     // Fixed debug keystore committed to the repo (a debug key is non-secret — its

@@ -8,7 +8,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
 /**
- * Public Citizen.com endpoints (verified 2026-04-29):
+ * Public Citizen.com endpoints (originally verified 2026-04-29):
  *
  *  GET /api/incident/trending?lowerLatitude=&upperLatitude=&lowerLongitude=&upperLongitude=&limit=20
  *      → { "results": ["<incidentId>", ...] }
@@ -18,6 +18,23 @@ import org.json.JSONObject
  *
  * No auth, no rate-limit headers observed. Be a good citizen (heh) — only fetch
  * detail for IDs we haven't already seen.
+ *
+ * **Feed retired upstream — re-verified 2026-08-28.** Citizen ended the
+ * police-dispatch data partnership behind this feed in June 2026 and stubbed the
+ * public endpoints. They now answer HTTP 200 with no usable payload:
+ *  - `/api/incident/trending` → a bare JSON empty string (`""`)
+ *  - `/api/incident/{id}` → `{}` for every id, real or invented
+ *  - `data.sp0n.io/v1/incidents/trending` (the host the current web app uses)
+ *    → 200 with a zero-byte body, even with no query params at all
+ * Every sibling path (`nearby`, `recent`, `latest`, `map`, `list`, `active`)
+ * returns `{}`, so this is a decommissioned surface, not a changed contract.
+ * Structured incident data is now Citizen's paid Enterprise API only.
+ *
+ * That `""` is why this source used to surface a raw Java parse error: passing
+ * an empty JSON string to JSONObject throws "Value of type java.lang.String
+ * cannot be converted to JSONObject". [TrendingResult.Retired] now models the
+ * stub explicitly so the UI can say what actually happened, and so the scanner
+ * can back off instead of polling a dead endpoint every 60 s.
  */
 class CitizenClient {
 
@@ -46,6 +63,11 @@ class CitizenClient {
 
     sealed class TrendingResult {
         data class Success(val ids: List<String>) : TrendingResult()
+        /** HTTP 200 carrying no usable payload — the retired-stub signature
+         *  described in the class KDoc. Distinct from [Failed] (a network or
+         *  HTTP error, which may be transient) and from a [Success] holding an
+         *  empty list (feed alive, genuinely nothing nearby). */
+        object Retired : TrendingResult()
         data class Failed(val reason: String) : TrendingResult()
     }
 
@@ -59,22 +81,35 @@ class CitizenClient {
                 "&lowerLongitude=$left&upperLongitude=$right&limit=$LIMIT"
         )
         when (val raw = httpGetJson(url)) {
-            is RawResult.Success -> {
-                try {
-                    val arr = JSONObject(raw.body).optJSONArray("results")
-                        ?: return@withContext TrendingResult.Success(emptyList())
-                    val out = ArrayList<String>(arr.length())
-                    for (i in 0 until arr.length()) {
-                        val id = arr.optString(i)
-                        if (id.isNotBlank()) out.add(id)
-                    }
-                    TrendingResult.Success(out)
-                } catch (e: Exception) {
-                    TrendingResult.Failed("parse: ${e.message}")
-                }
-            }
+            is RawResult.Success -> parseTrending(raw.body)
             is RawResult.Failed -> TrendingResult.Failed(raw.reason)
         }
+    }
+
+    /**
+     * A well-formed object carrying a `results` array is the only shape that
+     * counts as a live feed. Anything else the stubbed endpoint can hand back —
+     * an empty body, a bare JSON string, a bare `{}`, or unparseable text — is
+     * reported as [TrendingResult.Retired] rather than thrown, so a dead
+     * upstream never surfaces as a JSON exception in the drill-down.
+     */
+    private fun parseTrending(body: String): TrendingResult {
+        val trimmed = body.trim()
+        if (trimmed.isEmpty()) return TrendingResult.Retired
+        val root = try {
+            JSONObject(trimmed)
+        } catch (e: Exception) {
+            Log.w(TAG, "trending returned non-object payload (${trimmed.take(40)})")
+            return TrendingResult.Retired
+        }
+        // Key absent → stub. Key present but empty → feed alive, nothing nearby.
+        val arr = root.optJSONArray("results") ?: return TrendingResult.Retired
+        val out = ArrayList<String>(arr.length())
+        for (i in 0 until arr.length()) {
+            val id = arr.optString(i)
+            if (id.isNotBlank()) out.add(id)
+        }
+        return TrendingResult.Success(out)
     }
 
     /** Returns null on any failure (parse, network, missing fields). */

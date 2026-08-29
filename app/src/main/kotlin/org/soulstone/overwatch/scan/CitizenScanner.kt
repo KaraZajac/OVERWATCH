@@ -34,6 +34,11 @@ class CitizenScanner(
     companion object {
         private const val TAG = "CitizenScanner"
         private const val POLL_INTERVAL_MS = 60_000L
+        /** Poll interval once the feed has answered with the retired-stub shape.
+         *  Citizen shut the public feed down in June 2026 (see [CitizenClient]),
+         *  so this is almost certainly permanent — but it's cheap to keep a slow
+         *  heartbeat so the source recovers on its own if it ever returns. */
+        private const val RETIRED_RETRY_MS = 30L * 60L * 1000L
         private const val MAX_AGE_MS = 30L * 60L * 1000L
 
         /** Skip incidents whose title is purely fire/medical with no police implication. */
@@ -54,6 +59,8 @@ class CitizenScanner(
     private var job: Job? = null
     /** Detail cache for the lifetime of one start/stop cycle. */
     private val incidentCache = mutableMapOf<String, CitizenClient.Incident>()
+    /** Set once the feed answers with the retired-stub shape; slows the poll. */
+    private var feedRetired = false
 
     fun start(scope: CoroutineScope): Boolean {
         if (job != null) return true
@@ -64,7 +71,7 @@ class CitizenScanner(
             while (isActive) {
                 val fix = locationProvider.location.value
                 if (fix != null) pollOnce(fix)
-                delay(POLL_INTERVAL_MS)
+                delay(if (feedRetired) RETIRED_RETRY_MS else POLL_INTERVAL_MS)
             }
         }
         Log.i(TAG, "CitizenScanner started (interval=${POLL_INTERVAL_MS}ms)")
@@ -75,11 +82,26 @@ class CitizenScanner(
         job?.cancel()
         job = null
         incidentCache.clear()
+        feedRetired = false
         Log.i(TAG, "CitizenScanner stopped")
     }
 
     private suspend fun pollOnce(fix: Location) {
         when (val trending = client.trendingNear(fix.latitude, fix.longitude)) {
+            is CitizenClient.TrendingResult.Retired -> {
+                // Upstream shutdown, not a fault on this device — say so plainly
+                // so the row doesn't read like a fixable connectivity problem.
+                if (!feedRetired) {
+                    feedRetired = true
+                    Log.w(TAG, "Citizen public feed retired — backing off to ${RETIRED_RETRY_MS}ms")
+                }
+                SourceHealth.record(
+                    DetectionSource.CITIZEN,
+                    ok = false,
+                    message = "Citizen public feed retired upstream (June 2026) — no data available"
+                )
+                return
+            }
             is CitizenClient.TrendingResult.Failed -> {
                 SourceHealth.record(
                     DetectionSource.CITIZEN,
@@ -89,6 +111,7 @@ class CitizenScanner(
                 return
             }
             is CitizenClient.TrendingResult.Success -> {
+                feedRetired = false
                 SourceHealth.record(DetectionSource.CITIZEN, ok = true)
                 handleIds(fix, trending.ids)
             }

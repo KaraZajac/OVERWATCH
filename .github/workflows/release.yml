@@ -13,16 +13,16 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '17'
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
 
       - name: Build debug APK
         run: |
@@ -37,7 +37,7 @@ jobs:
       # Uploaded on every run (incl. workflow_dispatch) so a build can be
       # validated without cutting a release.
       - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: overwatch-apk
           path: out/*.apk
@@ -45,7 +45,7 @@ jobs:
       # Only tag pushes (v*) create a GitHub Release with the APK attached.
       - name: Publish Release
         if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: out/*.apk
           generate_release_notes: true

@@ -12,7 +12,7 @@ on upward escalations — you don't have to be looking at the screen.
 > advertise/fuzz code from one of the reference projects is intentionally
 > excluded.
 
-Website: **[overwatch.netslum.io](https://overwatch.netslum.io)**  ·  Latest release: [v0.5.4](https://github.com/KaraZajac/OVERWATCH/releases) (debug-signed APK, sideload).
+Website: **[overwatch.netslum.io](https://overwatch.netslum.io)**  ·  Latest release: [v0.5.5](https://github.com/KaraZajac/OVERWATCH/releases) (debug-signed APK, sideload).
 
 ---
 
@@ -37,9 +37,23 @@ Website: **[overwatch.netslum.io](https://overwatch.netslum.io)**  ·  Latest re
 | **BLE** | Bluetooth-LE advertisements: vendor MAC OUIs (Axon, Flock Penguin / Raven, XUNTONG mfg id `0x09C8`, "TN" serial pattern), Raven service UUIDs, device-name patterns — plus 18 IEEE-verified surveillance-vendor OUIs (ShotSpotter, WatchGuard/Motorola, Verkada, Avigilon Alta, Axis body cams, FLIR, Hanwha, March Networks, GeoVision, Mobotix, Sunell) with vendor-named labels | Local radio scan (BLE callback API). Iterates every manufacturer-specific data entry to find XUNTONG, not just the first. Police-exclusive OUIs (WatchGuard, ShotSpotter) score ORANGE on sight, same rationale as Axon. |
 | **WiFi** | BSSID OUI prefixes for Flock infrastructure (31-prefix superset) + the same 18 vendor OUIs (WatchGuard 4RE in-car APs, Openpath/Alta readers, WiFi-capable cameras), `Flock-XXXX` and other generic SSID patterns | `WifiManager.getScanResults()` polled every 35 s (just under the Android 11+ 4-scans/2-min throttle) |
 | **DEFLOCK** | Crowdsourced ALPR locations within configurable proximity (default 200 m) | POST to Overpass API (`overpass.deflock.org` → fallback `overpass-api.de`) for `man_made=surveillance + surveillance:type=ALPR` in a 5 km bbox; 24 h on-disk cache by 0.05° grid cell. Refetches when the user moves > 1.5 km from the last fetch center. Backoffs after Overpass failures; treats `{"remark": "...timed out..."}` 200-responses as failure so timeouts don't poison the cache. |
-| **CITIZEN** | Real-time public-safety incidents (police-relevant only — fire/medical-only events filtered out) within configurable proximity, < 30 min old | `citizen.com/api/incident/trending` (bbox) polled every 60 s, then per-incident detail via `/api/incident/{id}` with an in-memory cache so each incident is fetched once per session. First poll fires immediately on the first location fix. |
+| **CITIZEN** | ⚠️ **Feed retired upstream (June 2026)** — see the note below. Previously: real-time public-safety incidents (police-relevant only) within proximity, < 30 min old | `citizen.com/api/incident/trending` (bbox) polled every 60 s, then per-incident detail via `/api/incident/{id}`. The endpoints now return empty stubs, so the source reports "feed retired upstream" and backs off to a 30-min heartbeat instead of polling a dead endpoint. |
 | **WAZE** | User-reported `POLICE` alerts still active in the feed within configurable proximity (default 500 m), up to ~45 min old | `api.blackflagintel.com/waze/alerts-and-jams` — the OVERWATCH proxy (Caddy) that injects the OpenWeb Ninja key server-side and forwards to their hosted Waze scrape, sidestepping the reCAPTCHA gating that 403s direct `live-map/api/georss` calls. The app authenticates with an `X-App-Token` entered in Settings (encrypted on-device); the paid key never ships in the APK. Polled every ~4 min. Upstream ignores type filtering and caps at 200 alerts, so the client pulls the full page and filters to `POLICE` itself. Alerts carry confidence (0–5) + reliability (0–10); high values nudge the score up. No token → source shows "not configured" in the drill-down. |
 | **COMMERCIAL** | Nearby consumer smart-home / voice gear (Nest, Ring, Echo, hidden cams) and camera-bearing smart glasses (Meta, Snap, Vuzix) as a secondary situational signal | Rides the BLE + WiFi scans — OUI / device-name / service-UUID / SSID matches plus Bluetooth SIG company IDs from `MicTargets`. Score-capped at ORANGE so a cluster of doorbells (or a passing pair of Ray-Bans) never reads as ALPR-grade certainty. |
+
+> **Citizen went dark (v0.5.5).** Citizen ended the police-dispatch data
+> partnership behind its public feed in June 2026 and stubbed the endpoints.
+> Verified 2026-08-28: `/api/incident/trending` answers HTTP 200 with a bare
+> JSON empty string, `/api/incident/{id}` returns `{}` for every id (real or
+> invented), and `data.sp0n.io/v1/incidents/trending` — the host the current web
+> app uses — returns a zero-byte body even with no query params at all. Every
+> sibling path (`nearby`, `recent`, `latest`, `map`, `list`, `active`) returns
+> `{}`. That is a decommissioned surface, not a changed contract, so there is no
+> parameter or host fix; structured incident data is now Citizen's paid
+> Enterprise API only. The app no longer leaks the resulting JSON parse error
+> into the drill-down — it reports the shutdown plainly and stops hammering the
+> endpoint. Police presence is still covered by Waze (denser for roadway stops
+> anyway) and DeFlock.
 
 > **Waze is back (v0.4.0+), via a key-protected proxy.** Waze reCAPTCHA-gated its `live-map/api/georss` endpoint in 2025/2026 — automated calls get HTTP 403 regardless of IP or headless-vs-headful browser (it scores browser *reputation*, verified by direct testing), which is why v0.1.5 removed the original integration and why no free scraper survives. OVERWATCH reads Waze POLICE alerts through [OpenWeb Ninja](https://www.openwebninja.com)'s hosted feed (pay-as-you-go ~$0.005/req, ≈ $1–3/mo at the 4-min poll). To keep the paid key off every device, the app doesn't hold it: a Caddy reverse proxy at `api.blackflagintel.com` injects the key server-side, and the app authenticates with a scoped, revocable `X-App-Token` entered in Settings (stored encrypted via the Android Keystore). The Waze for Cities partner feed was ruled out — it excludes POLICE and is agency-only. Waze complements Citizen: denser for roadway stops / speed traps.
 
@@ -124,8 +138,14 @@ into a stuck state.
 ## Build & install
 
 Requires:
-- **JDK 17** (17 or 21; Android Gradle Plugin 8.7.x rejects JDK 26)
-- **Android Studio** with SDK Platform 35 + Build-Tools 35.x + Platform-Tools
+- **JDK 17+** (built and verified on 17; Gradle 9.x runs on 17 or 21)
+- **Android Studio** with SDK Platform 37 + Build-Tools 36.x + Platform-Tools
+
+Toolchain as of v0.5.5: AGP 9.3.2 / Gradle 9.7.1 / Kotlin 2.4.10, `compileSdk`
+37. `targetSdk` stays at **35** deliberately — API 36+ tightens foreground-service
+behavior, and screen-off scanning is the core feature, so the runtime opt-in is
+kept separate from the compile-time bump. Note AGP 9 folds in Kotlin support, so
+there is no longer a standalone `kotlin.android` plugin in the build file.
 
 ```sh
 # 1) Copy the example local.properties and point sdk.dir at your install
@@ -211,7 +231,7 @@ These live under `REFERENCES/` (gitignored):
 ## Status
 
 Phases 1–5 (skeleton, BLE, WiFi, DeFlock, Citizen, polish) complete and
-field-tested. Current release **v0.5.4**. Notable changes:
+field-tested. Current release **v0.5.5**. Notable changes:
 
 - v0.1.2 — Android 14+ foreground service type fix; NaN-coordinate filter on map data.
 - v0.1.3 — DeFlock CDN replaced by direct Overpass calls (Cloudflare-blocked).
@@ -227,6 +247,7 @@ field-tested. Current release **v0.5.4**. Notable changes:
 - v0.5.2 — Committed a fixed debug keystore so CI + local builds sign identically; updates now install in place (no functional changes).
 - v0.5.3 — Detect Meta / Snap / Vuzix smart glasses in the COMMERCIAL source (BLE company-id + name vectors); new radar app icon (launcher, themed, and notification).
 - v0.5.4 — 18 IEEE-verified surveillance-vendor OUIs across BLE + WiFi (ShotSpotter, WatchGuard/Motorola, Verkada, Avigilon Alta, Axis, FLIR, Hanwha, March Networks, GeoVision, Mobotix, Sunell); police-exclusive vendors (WatchGuard, ShotSpotter) score ORANGE on sight; vendor-named drill-down labels.
+- v0.5.5 — Citizen feed confirmed retired upstream; the source now reports the shutdown instead of leaking a JSON parse error, and backs off to a 30-min heartbeat. Toolchain modernized: AGP 9.3.2, Gradle 9.7.1, Kotlin 2.4.10, Compose BOM 2026.08.00, `compileSdk` 37 (`targetSdk` held at 35); CI actions bumped off deprecated Node-20 versions.
 
 ## License
 
