@@ -1182,3 +1182,29 @@ pre.code .prompt { color: var(--accent-hot); user-select: none; }
   .shots { grid-template-columns: 1fr; gap: 3rem; }
   .shots .phone { width: 256px; }
 }
+
+/* Tor onion mirror. currentColor + opacity so this inherits each footer's own
+   colour rather than needing per-site theme variables. user-select:all lets one
+   click grab the whole 56-character address; word-break stops it overflowing on
+   a phone. No JS, so it still works at Tor Browser's Safest level. */
+.onion-line {
+  margin-top: 1.1em;
+  font-size: 0.72rem;
+  line-height: 1.55;
+}
+.onion-line .onion-label {
+  display: block;
+  opacity: 0.55;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.onion-line a {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  word-break: break-all;
+  -webkit-user-select: all;
+  user-select: all;
+  color: currentColor;
+  opacity: 0.75;
+  text-decoration: none;
+}
+.onion-line a:hover { opacity: 1; text-decoration: underline; }
