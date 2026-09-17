@@ -29,7 +29,7 @@ import org.soulstone.overwatch.fusion.SourceHealth
  * clear reason) and skips the network call rather than hammering a 401.
  *
  * The last fetched alert set is cached so [refresh] can re-evaluate against a
- * moved proximity slider without a network refetch (mirrors CitizenScanner).
+ * moved proximity slider without a network refetch.
  */
 class WazeScanner(
     private val store: DetectionStore,
@@ -45,7 +45,8 @@ class WazeScanner(
         // real police sightings routinely arrive already 20-30 min old. A 10-min
         // cutoff (fine for the old direct-live feed) would drop nearly all of
         // them; 45 min matches what the feed actually serves as "current."
-        private const val MAX_AGE_MS = 45L * 60L * 1000L
+        /** Shared with ConfidenceEngine, which decays the score across this window. */
+        private const val MAX_AGE_MS = ConfidenceEngine.WAZE_MAX_AGE_MS
     }
 
     private var job: Job? = null
@@ -99,7 +100,7 @@ class WazeScanner(
                 // still-present alerts by key (dedup) and lets vanished ones age
                 // out via the store's 5-min TTL. Clearing every poll would briefly
                 // drop the tier and re-raise it, double-firing the escalation
-                // vibration each cycle. (Mirrors CitizenScanner.)
+                // vibration each cycle.
                 emitProximityEvents(fix, result.alerts)
             }
         }

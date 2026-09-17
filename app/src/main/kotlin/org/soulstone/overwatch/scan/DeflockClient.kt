@@ -17,9 +17,16 @@ import org.json.JSONObject
  * gated behind Cloudflare bot mitigation that we cannot pass from a mobile HTTP
  * client.
  *
+ * Covers three kinds of mapped fixed surveillance, not just ALPR — see [Kind].
+ * Measured node counts in a 5 km bbox (2026-09-17): northern Virginia
+ * ALPR 166 / speed 31 / all-surveillance 189; Manhattan ALPR 292 / speed 12 /
+ * all-surveillance 515. So pulling every `man_made=surveillance` node roughly
+ * doubles the worst-case payload rather than exploding it, which is why the
+ * generic camera class is worth carrying.
+ *
  * Strategy:
- *  - POST an Overpass-QL query for `man_made=surveillance + surveillance:type=ALPR`
- *    inside a small bbox around the user.
+ *  - POST one Overpass-QL union for `man_made=surveillance` (ALPR is a subtype)
+ *    and `highway=speed_camera` inside a small bbox around the user.
  *  - Try `overpass.deflock.org` first (less rate-limited for this use case),
  *    fall back to public `overpass-api.de`.
  *  - Cache the JSON response on disk by 0.05° grid cell (24h TTL). Revisits to
@@ -40,17 +47,28 @@ class DeflockClient(context: Context) {
         )
     }
 
-    data class AlprPoint(
+    /**
+     * What a mapped node actually is. These are scored very differently: an
+     * ALPR reads and records your plate into a searchable network, a speed
+     * camera is fixed enforcement that only matters if you're speeding, and a
+     * generic `man_made=surveillance` node is as likely to be a shop's CCTV as
+     * anything aimed at the street. Lumping them together would let a corner
+     * store's camera raise the same alarm as a Flock installation.
+     */
+    enum class Kind { ALPR, SPEED_CAMERA, CAMERA }
+
+    data class SurveillancePoint(
         val id: Long,
         val lat: Double,
         val lon: Double,
+        val kind: Kind = Kind.ALPR,
         val operator: String? = null,
         val manufacturer: String? = null
     )
 
     /** Outcome of a fetch — distinguishes "no ALPRs in area" from "couldn't reach the API." */
     sealed class FetchResult {
-        data class Success(val points: List<AlprPoint>) : FetchResult()
+        data class Success(val points: List<SurveillancePoint>) : FetchResult()
         data class Failed(val reason: String) : FetchResult()
     }
 
@@ -85,7 +103,9 @@ class DeflockClient(context: Context) {
         // same cache key, so micro-movements don't refetch.
         val latStep = floor(lat / FETCH_RADIUS_DEG).toInt()
         val lonStep = floor(lon / FETCH_RADIUS_DEG).toInt()
-        return "deflock_${latStep}_${lonStep}"
+        // v2 prefix: v1 cached ALPR-only responses, which would otherwise be
+        // served for up to 24 h after this build widened the query.
+        return "deflock2_${latStep}_${lonStep}"
     }
 
     private fun cachedJson(key: String): String? {
@@ -95,10 +115,15 @@ class DeflockClient(context: Context) {
         return try { f.readText() } catch (e: Exception) { null }
     }
 
-    private fun buildQuery(south: Double, west: Double, north: Double, east: Double): String =
-        "[out:json][timeout:$OVERPASS_QUERY_TIMEOUT_S];" +
-            "(node[\"man_made\"=\"surveillance\"][\"surveillance:type\"=\"ALPR\"]" +
-            "($south,$west,$north,$east););out body;"
+    private fun buildQuery(south: Double, west: Double, north: Double, east: Double): String {
+        val bbox = "($south,$west,$north,$east)"
+        // man_made=surveillance is the superset that already contains the
+        // surveillance:type=ALPR nodes, so asking for ALPR separately would
+        // just duplicate them; the parser sorts the classes out by tag.
+        return "[out:json][timeout:$OVERPASS_QUERY_TIMEOUT_S];" +
+            "(node[\"man_made\"=\"surveillance\"]$bbox;" +
+            "node[\"highway\"=\"speed_camera\"]$bbox;);out body;"
+    }
 
     /** Try each endpoint in order until one returns 2xx. Returns body + last error message. */
     private fun downloadFromAny(query: String): Pair<String?, String?> {
@@ -159,12 +184,12 @@ class DeflockClient(context: Context) {
             lower.contains("rate_limited")
     }
 
-    private fun parseSafely(json: String): List<AlprPoint> {
+    private fun parseSafely(json: String): List<SurveillancePoint> {
         if (json.isBlank()) return emptyList()
         return try {
             val root = JSONObject(json)
             val elements = root.optJSONArray("elements") ?: return emptyList()
-            val out = ArrayList<AlprPoint>(elements.length())
+            val out = ArrayList<SurveillancePoint>(elements.length())
             for (i in 0 until elements.length()) {
                 val el = elements.optJSONObject(i) ?: continue
                 if (el.optString("type") != "node") continue
@@ -172,11 +197,19 @@ class DeflockClient(context: Context) {
                 val lon = el.optDouble("lon")
                 if (lat.isNaN() || lon.isNaN()) continue
                 val tags = el.optJSONObject("tags")
+                val surveillanceType = tags?.optString("surveillance:type").orEmpty()
+                val kind = when {
+                    surveillanceType.equals("ALPR", ignoreCase = true) -> Kind.ALPR
+                    tags?.optString("highway").orEmpty()
+                        .equals("speed_camera", ignoreCase = true) -> Kind.SPEED_CAMERA
+                    else -> Kind.CAMERA
+                }
                 out.add(
-                    AlprPoint(
+                    SurveillancePoint(
                         id = el.optLong("id", 0L),
                         lat = lat,
                         lon = lon,
+                        kind = kind,
                         operator = tags?.optString("operator")?.ifBlank { null }
                             ?: tags?.optString("surveillance:operator")?.ifBlank { null },
                         manufacturer = tags?.optString("manufacturer")?.ifBlank { null }

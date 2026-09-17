@@ -44,10 +44,10 @@ class DeflockScanner(
     private var lastFetchLon: Double? = null
     private var lastAttemptMs: Long = 0L
     private var lastAttemptOk: Boolean = false
-    private val _cachedPoints = MutableStateFlow<List<DeflockClient.AlprPoint>>(emptyList())
+    private val _cachedPoints = MutableStateFlow<List<DeflockClient.SurveillancePoint>>(emptyList())
     /** All ALPR points in the current cell — exposed so the UI map can render them.
      *  Distinct from the proximity-filtered DetectionEvents on [DetectionStore]. */
-    val cachedPoints: StateFlow<List<DeflockClient.AlprPoint>> = _cachedPoints.asStateFlow()
+    val cachedPoints: StateFlow<List<DeflockClient.SurveillancePoint>> = _cachedPoints.asStateFlow()
 
     fun start(scope: CoroutineScope): Boolean {
         if (job != null) return true
@@ -85,7 +85,7 @@ class DeflockScanner(
                     SourceHealth.record(DetectionSource.DEFLOCK, ok = true)
                     Log.i(
                         TAG,
-                        "Loaded ${result.points.size} ALPRs around " +
+                        "Loaded ${result.points.size} surveillance nodes around " +
                             "(${fix.latitude}, ${fix.longitude})"
                     )
                 }
@@ -134,6 +134,7 @@ class DeflockScanner(
             val obs = ConfidenceEngine.DeflockObservation(
                 osmId = p.id,
                 distanceMeters = dist,
+                kind = p.kind,
                 operator = p.operator,
                 manufacturer = p.manufacturer
             )

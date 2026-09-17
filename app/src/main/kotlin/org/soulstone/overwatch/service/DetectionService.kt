@@ -34,17 +34,17 @@ import org.soulstone.overwatch.fusion.DetectionSource
 import org.soulstone.overwatch.fusion.DetectionStore
 import org.soulstone.overwatch.fusion.SourceHealth
 import org.soulstone.overwatch.fusion.ThreatLevel
+import org.soulstone.overwatch.scan.AircraftScanner
 import org.soulstone.overwatch.scan.BleScanner
-import org.soulstone.overwatch.scan.CitizenScanner
 import org.soulstone.overwatch.scan.DeflockClient
 import org.soulstone.overwatch.scan.DeflockScanner
-import org.soulstone.overwatch.scan.DeflockClient.AlprPoint
+import org.soulstone.overwatch.scan.DeflockClient.SurveillancePoint
 import org.soulstone.overwatch.scan.WazeClient
 import org.soulstone.overwatch.scan.WazeScanner
 import org.soulstone.overwatch.scan.WifiScanner
 
 /**
- * Foreground service that owns all four scanners (BLE, WiFi, DeFlock, Citizen)
+ * Foreground service that owns all four scanners (BLE, WiFi, DeFlock, Waze)
  * and the [DetectionStore]. UI observes companion-object state flows directly.
  *
  * Responsibilities beyond scanner orchestration:
@@ -75,8 +75,8 @@ class DetectionService : LifecycleService() {
 
         /** Latest ALPR cell cache — UI map renders these as pins. Mirrored from
          *  the active DeflockScanner while the service is running; cleared on stop. */
-        private val _mapPoints = MutableStateFlow<List<AlprPoint>>(emptyList())
-        val mapPoints: StateFlow<List<AlprPoint>> = _mapPoints.asStateFlow()
+        private val _mapPoints = MutableStateFlow<List<SurveillancePoint>>(emptyList())
+        val mapPoints: StateFlow<List<SurveillancePoint>> = _mapPoints.asStateFlow()
 
         /** Latest fused location fix — UI map centers on this. */
         private val _location = MutableStateFlow<Location?>(null)
@@ -106,22 +106,21 @@ class DetectionService : LifecycleService() {
     private lateinit var wifiScanner: WifiScanner
     private lateinit var locationProvider: LocationProvider
     private lateinit var deflockScanner: DeflockScanner
-    private lateinit var citizenScanner: CitizenScanner
     private lateinit var wazeScanner: WazeScanner
+    private lateinit var aircraftScanner: AircraftScanner
     private lateinit var overlayManager: OverlayManager
     private var pruneJob: Job? = null
     private var observerJob: Job? = null
     private var mapPointsJob: Job? = null
     private var locationJob: Job? = null
     private var deflockProxJob: Job? = null
-    private var citizenProxJob: Job? = null
     private var wazeProxJob: Job? = null
     private var overlayJob: Job? = null
     private var bleStarted = false
     private var wifiStarted = false
     private var deflockStarted = false
-    private var citizenStarted = false
     private var wazeStarted = false
+    private var aircraftStarted = false
     /** Last threat tier the notification displayed; tracks upward transitions for vibration. */
     private var lastNotifiedTier: ThreatLevel = ThreatLevel.GREEN
 
@@ -133,17 +132,14 @@ class DetectionService : LifecycleService() {
         locationProvider = LocationProvider(this)
         deflockScanner = DeflockScanner(
             store, locationProvider, DeflockClient(this),
-            proximityMeters = { settings.deflockProximityM.value.toFloat() }
-        )
-        citizenScanner = CitizenScanner(
-            store, locationProvider,
-            proximityMeters = { settings.citizenProximityM.value.toFloat() }
+            proximityMeters = { settings.detectionRadiusM.value.toFloat() }
         )
         wazeScanner = WazeScanner(
             store, locationProvider,
             client = WazeClient(apiKey = { settings.wazeApiKey.value }),
-            proximityMeters = { settings.wazeProximityM.value.toFloat() }
+            proximityMeters = { settings.detectionRadiusM.value.toFloat() }
         )
+        aircraftScanner = AircraftScanner(this, store, locationProvider)
         overlayManager = OverlayManager(
             context = this,
             // User dragged the bubble onto the X — flip the persisted toggle
@@ -182,8 +178,8 @@ class DetectionService : LifecycleService() {
             wifiStarted = wifiScanner.start(lifecycleScope)
             if (!wifiStarted) Log.w(TAG, "WifiScanner.start() returned false (permission/adapter)")
         }
-        val needsLocation = settings.deflockEnabled.value || settings.citizenEnabled.value ||
-            settings.wazeEnabled.value
+        val needsLocation = settings.deflockEnabled.value || settings.wazeEnabled.value ||
+            settings.aircraftEnabled.value
         if (needsLocation) {
             val locOk = locationProvider.start()
             if (!locOk) {
@@ -192,16 +188,17 @@ class DetectionService : LifecycleService() {
                 if (settings.deflockEnabled.value) {
                     deflockScanner.start(lifecycleScope); deflockStarted = true
                 }
-                if (settings.citizenEnabled.value) {
-                    citizenScanner.start(lifecycleScope); citizenStarted = true
-                }
                 if (settings.wazeEnabled.value) {
                     wazeScanner.start(lifecycleScope); wazeStarted = true
+                }
+                if (settings.aircraftEnabled.value) {
+                    aircraftScanner.start(lifecycleScope); aircraftStarted = true
                 }
             }
         }
 
-        val anyStarted = bleStarted || wifiStarted || deflockStarted || citizenStarted || wazeStarted
+        val anyStarted = bleStarted || wifiStarted || deflockStarted || wazeStarted ||
+            aircraftStarted
         if (!anyStarted) {
             Log.w(TAG, "No scanner started — endScanning + stopSelf")
             endScanning()
@@ -259,22 +256,14 @@ class DetectionService : LifecycleService() {
         // Live re-eval when the user moves a proximity slider. drop(1) skips
         // the StateFlow's initial replay so we don't redundantly clear+re-emit
         // the events the scanner just produced from its first handleFix call.
+        // One radius now drives both location sources, so one collector
+        // re-evaluates whichever of them is running.
         deflockProxJob?.cancel()
-        if (deflockStarted) {
-            deflockProxJob = lifecycleScope.launch {
-                settings.deflockProximityM.drop(1).collect { deflockScanner.refresh() }
-            }
-        }
-        citizenProxJob?.cancel()
-        if (citizenStarted) {
-            citizenProxJob = lifecycleScope.launch {
-                settings.citizenProximityM.drop(1).collect { citizenScanner.refresh() }
-            }
-        }
         wazeProxJob?.cancel()
-        if (wazeStarted) {
-            wazeProxJob = lifecycleScope.launch {
-                settings.wazeProximityM.drop(1).collect { wazeScanner.refresh() }
+        deflockProxJob = lifecycleScope.launch {
+            settings.detectionRadiusM.drop(1).collect {
+                if (deflockStarted) deflockScanner.refresh()
+                if (wazeStarted) wazeScanner.refresh()
             }
         }
 
@@ -290,15 +279,15 @@ class DetectionService : LifecycleService() {
     }
 
     private fun endScanning() {
-        if (!_running.value && !bleStarted && !wifiStarted && !deflockStarted && !citizenStarted) {
+        if (!_running.value && !bleStarted && !wifiStarted && !deflockStarted && !wazeStarted) {
             return
         }
         _running.value = false
         if (bleStarted) { bleScanner.stop(); bleStarted = false }
         if (wifiStarted) { wifiScanner.stop(); wifiStarted = false }
         if (deflockStarted) { deflockScanner.stop(); deflockStarted = false }
-        if (citizenStarted) { citizenScanner.stop(); citizenStarted = false }
         if (wazeStarted) { wazeScanner.stop(); wazeStarted = false }
+        if (aircraftStarted) { aircraftScanner.stop(); aircraftStarted = false }
         locationProvider.stop()
         store.clear()
         SourceHealth.reset()
@@ -307,7 +296,6 @@ class DetectionService : LifecycleService() {
         mapPointsJob?.cancel(); mapPointsJob = null
         locationJob?.cancel(); locationJob = null
         deflockProxJob?.cancel(); deflockProxJob = null
-        citizenProxJob?.cancel(); citizenProxJob = null
         wazeProxJob?.cancel(); wazeProxJob = null
         overlayJob?.cancel(); overlayJob = null
         overlayManager.hide()
@@ -371,7 +359,7 @@ class DetectionService : LifecycleService() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             // Android 14+ requires the runtime type to cover every capability the
             // service uses. We declare both in the manifest; pass both here so
-            // location-using sources (DeFlock, Citizen) keep working with the
+            // location-using sources (DeFlock, Waze) keep working with the
             // screen off.
             val type = ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION

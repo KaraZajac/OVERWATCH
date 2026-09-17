@@ -4,9 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>OVERWATCH — passive surveillance detection for Android</title>
-<meta name="description" content="A native Android app that passively flags nearby Flock Safety ALPRs, Axon body cameras, and police presence. Fuses BLE/WiFi radio scans, the DeFlock ALPR map, and Citizen/Waze feeds into a green→red threat tier. Listens only — never transmits.">
+<meta name="description" content="A native Android app that passively flags nearby Flock Safety ALPRs, Axon body cameras, and police presence. Fuses BLE/WiFi radio scans, the DeFlock ALPR map, and live Waze police reports into a green→red threat tier. Listens only — never transmits.">
 <meta property="og:title" content="OVERWATCH — passive surveillance detection">
-<meta property="og:description" content="Android app that flags nearby Flock ALPRs, Axon body cams, and police by fusing BLE/WiFi + the DeFlock map + Citizen/Waze. Passive only — it never transmits.">
+<meta property="og:description" content="Android app that flags nearby Flock ALPRs, Axon body cams, and police by fusing BLE/WiFi + the DeFlock map + Waze police reports. Passive only — it never transmits.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://overwatch.netslum.io/">
 <meta property="og:image" content="https://overwatch.netslum.io/og.png">
@@ -16,7 +16,6 @@
 <meta name="twitter:image" content="https://overwatch.netslum.io/og.png">
 <meta name="theme-color" content="#07070d">
 <link rel="icon" type="image/svg+xml" href="logo.svg">
-
 
 <link rel="stylesheet" href="style.css?v=2">
 </head>
@@ -54,7 +53,7 @@
   <div class="container hero-inner">
     <div class="hero-eyebrow">
       <span class="dot dot-pulse"></span>
-      v0.5.6 · Android · passive
+      v0.5.8 · Android · passive
     </div>
     <h1 class="hero-title">
       <span class="display-wordmark">OVERWATCH</span>
@@ -76,7 +75,7 @@
       <div class="stat-chip"><span class="num" data-target="6">0</span><span>fused sources</span></div>
       <div class="stat-chip stat-vfy"><span class="num" data-target="4">0</span><span>threat tiers</span></div>
       <div class="stat-chip"><span class="num" data-target="0">0</span><span>packets sent</span></div>
-      <div class="stat-chip"><span class="num" data-target="21">0</span><span>releases</span></div>
+      <div class="stat-chip"><span class="num" data-target="23">0</span><span>releases</span></div>
     </div>
 
     <div class="cta-row">
@@ -102,8 +101,8 @@
       <ul class="trust-items">
         <li>Bluetooth-LE + WiFi radio</li>
         <li>DeFlock ALPR map</li>
-        <li>Citizen incidents</li>
         <li>Waze police alerts</li>
+        <li>ADS-B aircraft</li>
         <li>OpenStreetMap · Overpass</li>
       </ul>
     </div>
@@ -129,7 +128,7 @@
     <div class="feature-split">
       <div class="phone-frame">
         <img class="phone" src="img/overwatch-sources.png" width="856" height="2000"
-          alt="Detection-sources drill-down: BLE, WiFi, DeFlock, Citizen, Waze and Commercial rows, each with a color tier dot and the observations that fired it." loading="lazy">
+          alt="Detection-sources drill-down: BLE, WiFi, DeFlock, Waze and Commercial rows, each with a color tier dot and the observations that fired it." loading="lazy">
       </div>
       <div class="explain-annotations">
         <div class="annotation">
@@ -147,7 +146,8 @@
             <strong>Source-color dots</strong>
             <p><span class="legend-dot red"></span> Flock / DeFlock cameras red ·
             <span class="legend-dot blue"></span> Waze police blue ·
-            <span class="legend-dot purple"></span> Citizen incidents purple.
+            <span class="legend-dot" style="background:#7C4DFF"></span> aircraft violet ·
+            user position as a ⌖ crosshair.
             Tap any row for coordinates + a Maps deep-link.</p>
           </div>
         </div>
@@ -202,6 +202,21 @@
         </p>
       </article>
 
+      <article class="bento-card bento-lg">
+        <div class="bento-icon">✈️</div>
+        <h3>Aircraft — eyes above</h3>
+        <p>
+          Police and surveillance aircraft overhead, from the free community
+          <a href="https://adsb.fi">ADS-B</a> networks — used specifically
+          because the commercial trackers filter law-enforcement flights at
+          government request. Contacts are matched by ICAO address against a
+          bundled registry of <strong>1,971 US law-enforcement airframes</strong>,
+          and scored by distance, altitude and <em>orbit behaviour</em> — because
+          surveillance aircraft circle, and airliners don't. An unlisted aircraft
+          loitering low and slow overhead still registers.
+        </p>
+      </article>
+
       <article class="bento-card">
         <div class="bento-icon">📡</div>
         <h3>WiFi</h3>
@@ -221,20 +236,6 @@
           the Overpass API (<code>overpass.deflock.org</code> → fallback
           <code>overpass-api.de</code>), with a 24 h on-disk cache and failure
           backoff. Refetches when you move &gt; 1.5 km.
-        </p>
-      </article>
-
-      <article class="bento-card">
-        <div class="bento-icon">🚨</div>
-        <h3>Citizen <span style="font-size:.72em;opacity:.75">— retired upstream</span></h3>
-        <p>
-          Real-time public-safety incidents — police-relevant only,
-          fire/medical filtered out — within range and under 30 min old.
-          Citizen ended the police-dispatch partnership behind its public feed
-          in <strong>June 2026</strong> and stubbed the endpoints, so this
-          source now reports the shutdown plainly and backs off instead of
-          polling a dead API. Police presence is still covered by Waze and
-          DeFlock.
         </p>
       </article>
 
@@ -319,7 +320,7 @@
       </figure>
       <figure class="shot">
         <img class="phone" src="img/overwatch-sources.png" width="856" height="2000"
-          alt="Detection-sources drill-down: BLE, WiFi, DeFlock, Citizen, Waze and Commercial rows, each with a color tier dot and the observations that fired it." loading="lazy">
+          alt="Detection-sources drill-down: BLE, WiFi, DeFlock, Waze and Commercial rows, each with a color tier dot and the observations that fired it." loading="lazy">
         <figcaption><strong>Source drill-down</strong>Tap the ring for every source, its live tier, and the exact observation that fired it.</figcaption>
       </figure>
       <figure class="shot">
@@ -423,7 +424,7 @@
     <div class="feature-split">
       <div class="phone-frame">
         <img class="phone" src="img/overwatch-settings.png" width="856" height="2000"
-          alt="Settings screen: per-source toggles (BLE, WiFi, DeFlock, Citizen, Waze, Commercial), proximity distance sliders, and the encrypted Waze API key field." loading="lazy">
+          alt="Settings screen: per-source toggles (BLE, WiFi, DeFlock, Waze, Commercial), proximity distance sliders, and the encrypted Waze API key field." loading="lazy">
       </div>
       <div class="timeline dl-steps">
         <div class="tl-col tl-shipped">
@@ -431,7 +432,7 @@
           <ul>
             <li>Grab the latest debug-signed APK from
               <a href="https://github.com/KaraZajac/OVERWATCH/releases/latest">Releases</a>
-              (currently <strong>v0.5.6</strong>).</li>
+              (currently <strong>v0.5.8</strong>).</li>
           </ul>
         </div>
         <div class="tl-col tl-active">
@@ -482,7 +483,6 @@
       <h4>Signal from</h4>
       <ul>
         <li><a href="https://deflock.me">DeFlock ALPR map</a></li>
-        <li><a href="https://citizen.com">Citizen</a></li>
         <li><a href="https://www.waze.com">Waze</a></li>
         <li><a href="https://www.openstreetmap.org">OpenStreetMap</a></li>
       </ul>
@@ -501,7 +501,7 @@
       transmit, probe, jam, or interfere with any device or network.
     </p>
     <p class="footer-meta">
-      v0.5.6 · <a href="https://github.com/KaraZajac/OVERWATCH">github.com/KaraZajac/OVERWATCH</a>
+      v0.5.8 · <a href="https://github.com/KaraZajac/OVERWATCH">github.com/KaraZajac/OVERWATCH</a>
     </p>
     <div class="onion-line">
       <span class="onion-label">Also on Tor</span>

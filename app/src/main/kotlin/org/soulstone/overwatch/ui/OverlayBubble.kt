@@ -1,10 +1,5 @@
 package org.soulstone.overwatch.ui
 
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -17,7 +12,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -28,6 +22,7 @@ import org.osmdroid.util.BoundingBox
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
+import org.soulstone.overwatch.scan.DeflockClient
 import org.soulstone.overwatch.data.settings.Settings
 import org.soulstone.overwatch.fusion.DetectionSource
 import org.soulstone.overwatch.fusion.ThreatLevel
@@ -56,10 +51,8 @@ fun OverlayBubble() {
     val userLocation by DetectionService.location.collectAsState()
     val mapPoints by DetectionService.mapPoints.collectAsState()
     val events by DetectionService.store.events.collectAsState()
-    val deflockProx by settings.deflockProximityM.collectAsState()
-    val citizenProx by settings.citizenProximityM.collectAsState()
-    val wazeProx by settings.wazeProximityM.collectAsState()
-    val radius = max(max(deflockProx, citizenProx), wazeProx).toFloat()
+    val detectionRadius by settings.detectionRadiusM.collectAsState()
+    val radius = detectionRadius.toFloat()
 
     val activeColor = when (threat) {
         ThreatLevel.GREEN -> ThreatColors.Green
@@ -68,21 +61,16 @@ fun OverlayBubble() {
         ThreatLevel.RED -> ThreatColors.Red
     }
 
-    val transition = rememberInfiniteTransition(label = "overlay-pulse")
-    val pulse by transition.animateFloat(
-        initialValue = 0.55f,
-        targetValue = 1.0f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1200),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "overlay-pulse"
-    )
+    // The pulse lives in PulseVisuals' leaves now; reading it here would
+    // recompose the map host every frame.
+    val camera = remember { MapCamera() }
 
     val userMark = remember(ctx) { crosshairDrawable(ctx.resources, 34, MARK_USER_WHITE) }
     val flockDot = remember(ctx) { dotDrawable(ctx.resources, 22, DOT_FLOCK_RED) }
+    val speedDot = remember(ctx) { dotDrawable(ctx.resources, 18, DOT_SPEED_AMBER) }
+    val cameraDot = remember(ctx) { dotDrawable(ctx.resources, 15, DOT_CAMERA_GRAY) }
     val wazeDot = remember(ctx) { dotDrawable(ctx.resources, 22, DOT_WAZE_BLUE) }
-    val citizenDot = remember(ctx) { dotDrawable(ctx.resources, 22, DOT_CITIZEN_PURPLE) }
+    val aircraftDot = remember(ctx) { dotDrawable(ctx.resources, 22, DOT_AIRCRAFT_VIOLET) }
 
     Box(
         modifier = Modifier
@@ -95,17 +83,11 @@ fun OverlayBubble() {
         // map if a future code path lets the composition outlive the service.
         val fix = userLocation
         if (!running || fix == null) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.radialGradient(
-                            colors = listOf(
-                                activeColor.copy(alpha = pulse),
-                                activeColor.copy(alpha = pulse * 0.6f)
-                            )
-                        )
-                    )
+            PulsingDisc(
+                color = activeColor,
+                animating = running,
+                label = null,
+                labelColor = activeColor
             )
         } else {
             AndroidView(
@@ -120,15 +102,18 @@ fun OverlayBubble() {
                     }
                 },
                 update = { map ->
-                    map.controller.setCenter(GeoPoint(fix.latitude, fix.longitude))
                     map.overlays.clear()
                     for (p in mapPoints) {
                         map.overlays.add(
                             Marker(map).apply {
                                 position = GeoPoint(p.lat, p.lon)
                                 setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
-                                icon = flockDot
-                                title = p.operator ?: p.manufacturer ?: "ALPR"
+                                icon = when (p.kind) {
+                                    DeflockClient.Kind.ALPR -> flockDot
+                                    DeflockClient.Kind.SPEED_CAMERA -> speedDot
+                                    DeflockClient.Kind.CAMERA -> cameraDot
+                                }
+                                title = p.operator ?: p.manufacturer ?: p.kind.name
                                 setInfoWindow(null)
                             }
                         )
@@ -138,7 +123,7 @@ fun OverlayBubble() {
                         val lon = e.lon ?: continue
                         val dot = when (e.source) {
                             DetectionSource.WAZE -> wazeDot
-                            DetectionSource.CITIZEN -> citizenDot
+                            DetectionSource.AIRCRAFT -> aircraftDot
                             else -> null
                         } ?: continue
                         map.overlays.add(
@@ -158,28 +143,27 @@ fun OverlayBubble() {
                             setInfoWindow(null)
                         }
                     )
-                    val r = radius.toDouble().coerceAtLeast(50.0)
-                    val latDegPerMeter = 1.0 / 111_000.0
-                    val lonDegPerMeter = 1.0 /
-                        (111_000.0 * cos(Math.toRadians(fix.latitude)).coerceAtLeast(0.01))
-                    val bbox = BoundingBox(
-                        fix.latitude + r * latDegPerMeter,
-                        fix.longitude + r * lonDegPerMeter,
-                        fix.latitude - r * latDegPerMeter,
-                        fix.longitude - r * lonDegPerMeter
-                    )
-                    map.post { map.zoomToBoundingBox(bbox, false, 0) }
+                    // Same camera guard as the in-app circle — see MapCamera.
+                    if (camera.needsMove(fix.latitude, fix.longitude, radius)) {
+                        val r = radius.toDouble().coerceAtLeast(50.0)
+                        val latDegPerMeter = 1.0 / 111_000.0
+                        val lonDegPerMeter = 1.0 /
+                            (111_000.0 * cos(Math.toRadians(fix.latitude)).coerceAtLeast(0.01))
+                        val bbox = BoundingBox(
+                            fix.latitude + r * latDegPerMeter,
+                            fix.longitude + r * lonDegPerMeter,
+                            fix.latitude - r * latDegPerMeter,
+                            fix.longitude - r * lonDegPerMeter
+                        )
+                        map.controller.setCenter(GeoPoint(fix.latitude, fix.longitude))
+                        map.post { map.zoomToBoundingBox(bbox, false, 0) }
+                    }
                     map.invalidate()
                 },
                 onRelease = { map -> map.onDetach() }
             )
-            // Tier scrim — same pulse alpha range as the in-app circle.
-            val scrimAlpha = (0.55f * pulse).coerceIn(0.40f, 0.65f)
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(activeColor.copy(alpha = scrimAlpha))
-            )
+            // Tier scrim — own leaf, so the pulse never recomposes the map.
+            TierScrim(color = activeColor, animating = running)
         }
     }
 }

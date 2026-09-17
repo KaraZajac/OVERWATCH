@@ -3,11 +3,6 @@ package org.soulstone.overwatch.ui
 import android.content.Intent
 import android.location.Location
 import android.net.Uri
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -48,7 +43,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -75,10 +69,10 @@ fun MainScreen(
     threat: ThreatLevel,
     score: Int,
     events: List<DetectionEvent>,
-    mapPoints: List<DeflockClient.AlprPoint>,
+    mapPoints: List<DeflockClient.SurveillancePoint>,
     userLocation: Location?,
     /** Visible radius of the map circle, in meters. Driven by the larger of
-     *  the DeFlock and Citizen proximity sliders so the user sees the full
+     *  the DeFlock and Waze proximity sliders so the user sees the full
      *  area where a detection could fire. */
     mapRadiusMeters: Float,
     onStartStop: () -> Unit,
@@ -239,7 +233,7 @@ private fun ThreatMapCircle(
     level: ThreatLevel,
     animating: Boolean,
     userLocation: Location?,
-    mapPoints: List<DeflockClient.AlprPoint>,
+    mapPoints: List<DeflockClient.SurveillancePoint>,
     events: List<DetectionEvent>,
     mapRadiusMeters: Float,
     onTap: () -> Unit
@@ -255,16 +249,11 @@ private fun ThreatMapCircle(
     // muted gray when idle. Gives the current level at a glance even over the map.
     val ringColor = if (animating) activeColor else idleColor
 
-    val transition = rememberInfiniteTransition(label = "pulse")
-    val pulse by transition.animateFloat(
-        initialValue = if (animating) 0.5f else 1.0f,
-        targetValue = 1.0f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1200),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "pulse"
-    )
+    // No pulse value is read in this scope on purpose — see PulseVisuals.kt.
+    // Reading the infinite animation here recomposed the map host every frame,
+    // which re-ran the AndroidView update block (clearing and reallocating
+    // every marker, and queuing a zoom) ~60 times a second.
+    val camera = remember { MapCamera() }
 
     Box(
         modifier = Modifier
@@ -278,33 +267,13 @@ private fun ThreatMapCircle(
         // solid pulsing circle — a blank/loading map mid-tile-fetch reads as
         // broken. The map only renders once we actually have something to show.
         if (!animating || userLocation == null) {
-            val color = if (animating) activeColor else idleColor
-            val alpha = if (animating) pulse else 1.0f
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.radialGradient(
-                            colors = listOf(
-                                color.copy(alpha = alpha),
-                                color.copy(alpha = alpha * 0.6f)
-                            )
-                        )
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                val labelText = when {
-                    !animating -> "IDLE"
-                    else -> "WAITING FIX"
-                }
-                Text(
-                    text = labelText,
-                    color = if (animating) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.Black,
-                    fontFamily = FontFamily.Monospace
-                )
-            }
+            PulsingDisc(
+                color = if (animating) activeColor else idleColor,
+                animating = animating,
+                label = if (animating) "WAITING FIX" else "IDLE",
+                labelColor = if (animating) Color.White
+                    else MaterialTheme.colorScheme.onSurfaceVariant
+            )
         } else {
             // OSM map snapshot, centered on the user, with red ALPR pins and
             // a blue user-position dot. Non-interactive — touches are captured
@@ -318,8 +287,10 @@ private fun ThreatMapCircle(
             // every recomposition — bitmap allocation isn't free.
             val userMark = remember(ctx) { crosshairDrawable(ctx.resources, 46, MARK_USER_WHITE) }
             val flockDot = remember(ctx) { dotDrawable(ctx.resources, 26, DOT_FLOCK_RED) }
+            val speedDot = remember(ctx) { dotDrawable(ctx.resources, 22, DOT_SPEED_AMBER) }
+            val cameraDot = remember(ctx) { dotDrawable(ctx.resources, 18, DOT_CAMERA_GRAY) }
             val wazeDot = remember(ctx) { dotDrawable(ctx.resources, 26, DOT_WAZE_BLUE) }
-            val citizenDot = remember(ctx) { dotDrawable(ctx.resources, 26, DOT_CITIZEN_PURPLE) }
+            val aircraftDot = remember(ctx) { dotDrawable(ctx.resources, 26, DOT_AIRCRAFT_VIOLET) }
             AndroidView(
                 modifier = Modifier.fillMaxSize(),
                 factory = { c ->
@@ -332,18 +303,21 @@ private fun ThreatMapCircle(
                     }
                 },
                 update = { map ->
-                    map.controller.setCenter(GeoPoint(fix.latitude, fix.longitude))
                     map.overlays.clear()
 
-                    // Source dots first (Flock red, Waze blue, Citizen purple),
+                    // Source dots first (Flock red, Waze blue),
                     // user position last so the crosshair always draws on top.
                     for (p in mapPoints) {
                         map.overlays.add(
                             Marker(map).apply {
                                 position = GeoPoint(p.lat, p.lon)
                                 setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
-                                icon = flockDot
-                                title = p.operator ?: p.manufacturer ?: "ALPR"
+                                icon = when (p.kind) {
+                                    DeflockClient.Kind.ALPR -> flockDot
+                                    DeflockClient.Kind.SPEED_CAMERA -> speedDot
+                                    DeflockClient.Kind.CAMERA -> cameraDot
+                                }
+                                title = p.operator ?: p.manufacturer ?: p.kind.name
                                 setInfoWindow(null)
                             }
                         )
@@ -353,7 +327,7 @@ private fun ThreatMapCircle(
                         val lon = e.lon ?: continue
                         val dot = when (e.source) {
                             DetectionSource.WAZE -> wazeDot
-                            DetectionSource.CITIZEN -> citizenDot
+                            DetectionSource.AIRCRAFT -> aircraftDot
                             else -> null
                         } ?: continue
                         map.overlays.add(
@@ -375,35 +349,32 @@ private fun ThreatMapCircle(
                         }
                     )
 
-                    // Fit the visible radius to the larger of the two proximity
-                    // settings. Defer to map.post so the call lands after layout
-                    // — zoomToBoundingBox needs measured dimensions to compute
-                    // the right zoom level. Latitude-aware longitude scaling so
-                    // the bbox stays roughly square in real meters at any lat.
-                    val r = mapRadiusMeters.toDouble().coerceAtLeast(50.0)
-                    val latDegPerMeter = 1.0 / 111_000.0
-                    val lonDegPerMeter = 1.0 /
-                        (111_000.0 * cos(Math.toRadians(fix.latitude)).coerceAtLeast(0.01))
-                    val bbox = BoundingBox(
-                        fix.latitude + r * latDegPerMeter,
-                        fix.longitude + r * lonDegPerMeter,
-                        fix.latitude - r * latDegPerMeter,
-                        fix.longitude - r * lonDegPerMeter
-                    )
-                    map.post { map.zoomToBoundingBox(bbox, false, 0) }
+                    // Move the camera only when the position or the radius
+                    // actually changed. zoomToBoundingBox has to be deferred to
+                    // map.post because it needs measured dimensions, so issuing
+                    // one per pass built a backlog of stale zooms that fought
+                    // each other — that was the lurching when a slider moved.
+                    if (camera.needsMove(fix.latitude, fix.longitude, mapRadiusMeters)) {
+                        val r = mapRadiusMeters.toDouble().coerceAtLeast(50.0)
+                        val latDegPerMeter = 1.0 / 111_000.0
+                        val lonDegPerMeter = 1.0 /
+                            (111_000.0 * cos(Math.toRadians(fix.latitude)).coerceAtLeast(0.01))
+                        val bbox = BoundingBox(
+                            fix.latitude + r * latDegPerMeter,
+                            fix.longitude + r * lonDegPerMeter,
+                            fix.latitude - r * latDegPerMeter,
+                            fix.longitude - r * lonDegPerMeter
+                        )
+                        map.controller.setCenter(GeoPoint(fix.latitude, fix.longitude))
+                        map.post { map.zoomToBoundingBox(bbox, false, 0) }
+                    }
                     map.invalidate()
                 },
                 onRelease = { map -> map.onDetach() }
             )
-            // Threat-tier scrim — pulses while scanning. Heavier alpha than
-            // the first cut so the tier color reads at a glance over OSM
-            // tiles, which are themselves cream/light by default.
-            val scrimAlpha = (0.55f * pulse).coerceIn(0.40f, 0.65f)
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(activeColor.copy(alpha = scrimAlpha))
-            )
+            // Threat-tier scrim — pulses while scanning, in its own leaf so
+            // the animation never recomposes the map above it.
+            TierScrim(color = activeColor, animating = animating)
         }
         // Click capture sits on top so taps reach onTap regardless of which
         // visual layer was painted underneath.

@@ -59,12 +59,10 @@ fun SettingsScreen(
     val ble by settings.bleEnabled.collectAsState()
     val wifi by settings.wifiEnabled.collectAsState()
     val deflock by settings.deflockEnabled.collectAsState()
-    val citizen by settings.citizenEnabled.collectAsState()
     val waze by settings.wazeEnabled.collectAsState()
+    val aircraft by settings.aircraftEnabled.collectAsState()
     val mic by settings.micEnabled.collectAsState()
-    val deflockProx by settings.deflockProximityM.collectAsState()
-    val citizenProx by settings.citizenProximityM.collectAsState()
-    val wazeProx by settings.wazeProximityM.collectAsState()
+    val detectionRadius by settings.detectionRadiusM.collectAsState()
     val wazeApiKey by settings.wazeApiKey.collectAsState()
     val theme by settings.themeMode.collectAsState()
     val vibrate by settings.vibrateOnAlert.collectAsState()
@@ -98,8 +96,8 @@ fun SettingsScreen(
         SourceToggle("BLE  •  Bluetooth Low Energy", ble) { settings.setBleEnabled(it) }
         SourceToggle("WIFI  •  WiFi BSSID + SSID", wifi) { settings.setWifiEnabled(it) }
         SourceToggle("DEFLOCK  •  ALPR map (Overpass)", deflock) { settings.setDeflockEnabled(it) }
-        SourceToggle("CITIZEN  •  Real-time incident feed", citizen) { settings.setCitizenEnabled(it) }
         SourceToggle("WAZE  •  Live police reports", waze) { settings.setWazeEnabled(it) }
+        SourceToggle("AIRCRAFT  •  Police / surveillance planes", aircraft) { settings.setAircraftEnabled(it) }
         SourceToggle("COMMERCIAL  •  Nest, Ring, Echo, glasses", mic) { settings.setMicEnabled(it) }
         Spacer(Modifier.height(8.dp))
         if (isRunning) {
@@ -127,27 +125,21 @@ fun SettingsScreen(
         }
         Spacer(Modifier.height(16.dp))
 
-        SectionLabel("Proximity thresholds")
-        SliderRow(
-            label = "DeFlock alert distance",
-            persistedValue = deflockProx,
-            range = 50f..1600f,
-            steps = 30,
-            onCommit = { settings.setDeflockProximityM(it) }
+        SectionLabel("Detection radius")
+        Text(
+            "How close a Flock/DeFlock camera or a Waze police report has to be " +
+                "to count. Also the area drawn on the map.",
+            fontSize = 11.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontFamily = FontFamily.Monospace,
+            modifier = Modifier.padding(vertical = 4.dp)
         )
         SliderRow(
-            label = "Citizen alert distance",
-            persistedValue = citizenProx,
-            range = 100f..5000f,
+            label = "Detection radius",
+            persistedValue = detectionRadius,
+            range = Settings.RADIUS_MIN.toFloat()..Settings.RADIUS_MAX.toFloat(),
             steps = 48,
-            onCommit = { settings.setCitizenProximityM(it) }
-        )
-        SliderRow(
-            label = "Waze alert distance",
-            persistedValue = wazeProx,
-            range = 100f..5000f,
-            steps = 48,
-            onCommit = { settings.setWazeProximityM(it) }
+            onCommit = { settings.setDetectionRadiusM(it) }
         )
 
         Spacer(Modifier.height(16.dp))

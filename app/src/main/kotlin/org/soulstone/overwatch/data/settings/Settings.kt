@@ -32,29 +32,22 @@ class Settings private constructor(
     private val _deflockEnabled = MutableStateFlow(prefs.getBoolean(KEY_DEFLOCK, true))
     val deflockEnabled: StateFlow<Boolean> = _deflockEnabled.asStateFlow()
 
-    private val _citizenEnabled = MutableStateFlow(prefs.getBoolean(KEY_CITIZEN, true))
-    val citizenEnabled: StateFlow<Boolean> = _citizenEnabled.asStateFlow()
-
     private val _wazeEnabled = MutableStateFlow(prefs.getBoolean(KEY_WAZE, true))
     val wazeEnabled: StateFlow<Boolean> = _wazeEnabled.asStateFlow()
+
+    private val _aircraftEnabled = MutableStateFlow(prefs.getBoolean(KEY_AIRCRAFT, true))
+    val aircraftEnabled: StateFlow<Boolean> = _aircraftEnabled.asStateFlow()
 
     private val _micEnabled = MutableStateFlow(prefs.getBoolean(KEY_MIC, true))
     val micEnabled: StateFlow<Boolean> = _micEnabled.asStateFlow()
 
-    private val _deflockProximityM = MutableStateFlow(
-        prefs.getInt(KEY_DEFLOCK_PROX, DEFAULT_DEFLOCK_PROX)
+    // One radius for every location-driven source (DeFlock + Waze). Two
+    // separate sliders meant the map had to visualise the larger of them, so
+    // the circle rarely matched what either source was actually using.
+    private val _detectionRadiusM = MutableStateFlow(
+        prefs.getInt(KEY_DETECTION_RADIUS, DEFAULT_DETECTION_RADIUS)
     )
-    val deflockProximityM: StateFlow<Int> = _deflockProximityM.asStateFlow()
-
-    private val _citizenProximityM = MutableStateFlow(
-        prefs.getInt(KEY_CITIZEN_PROX, DEFAULT_CITIZEN_PROX)
-    )
-    val citizenProximityM: StateFlow<Int> = _citizenProximityM.asStateFlow()
-
-    private val _wazeProximityM = MutableStateFlow(
-        prefs.getInt(KEY_WAZE_PROX, DEFAULT_WAZE_PROX)
-    )
-    val wazeProximityM: StateFlow<Int> = _wazeProximityM.asStateFlow()
+    val detectionRadiusM: StateFlow<Int> = _detectionRadiusM.asStateFlow()
 
     // The user's own OpenWeb Ninja API key for the Waze feed. Stored encrypted
     // (Keystore), never baked into the APK, so a published build carries no
@@ -76,26 +69,14 @@ class Settings private constructor(
     fun setBleEnabled(v: Boolean) { prefs.edit { putBoolean(KEY_BLE, v) }; _bleEnabled.value = v }
     fun setWifiEnabled(v: Boolean) { prefs.edit { putBoolean(KEY_WIFI, v) }; _wifiEnabled.value = v }
     fun setDeflockEnabled(v: Boolean) { prefs.edit { putBoolean(KEY_DEFLOCK, v) }; _deflockEnabled.value = v }
-    fun setCitizenEnabled(v: Boolean) { prefs.edit { putBoolean(KEY_CITIZEN, v) }; _citizenEnabled.value = v }
     fun setWazeEnabled(v: Boolean) { prefs.edit { putBoolean(KEY_WAZE, v) }; _wazeEnabled.value = v }
+    fun setAircraftEnabled(v: Boolean) { prefs.edit { putBoolean(KEY_AIRCRAFT, v) }; _aircraftEnabled.value = v }
     fun setMicEnabled(v: Boolean) { prefs.edit { putBoolean(KEY_MIC, v) }; _micEnabled.value = v }
 
-    fun setDeflockProximityM(v: Int) {
-        val clamped = v.coerceIn(50, 1600)
-        prefs.edit { putInt(KEY_DEFLOCK_PROX, clamped) }
-        _deflockProximityM.value = clamped
-    }
-
-    fun setCitizenProximityM(v: Int) {
-        val clamped = v.coerceIn(100, 5000)
-        prefs.edit { putInt(KEY_CITIZEN_PROX, clamped) }
-        _citizenProximityM.value = clamped
-    }
-
-    fun setWazeProximityM(v: Int) {
-        val clamped = v.coerceIn(100, 5000)
-        prefs.edit { putInt(KEY_WAZE_PROX, clamped) }
-        _wazeProximityM.value = clamped
+    fun setDetectionRadiusM(v: Int) {
+        val clamped = v.coerceIn(RADIUS_MIN, RADIUS_MAX)
+        prefs.edit { putInt(KEY_DETECTION_RADIUS, clamped) }
+        _detectionRadiusM.value = clamped
     }
 
     fun setWazeApiKey(v: String) {
@@ -132,21 +113,19 @@ class Settings private constructor(
         private const val KEY_BLE = "src_ble"
         private const val KEY_WIFI = "src_wifi"
         private const val KEY_DEFLOCK = "src_deflock"
-        private const val KEY_CITIZEN = "src_citizen"
         private const val KEY_WAZE = "src_waze"
+        private const val KEY_AIRCRAFT = "src_aircraft"
         private const val KEY_MIC = "src_mic"
-        private const val KEY_DEFLOCK_PROX = "deflock_proximity_m"
-        private const val KEY_CITIZEN_PROX = "citizen_proximity_m"
-        private const val KEY_WAZE_PROX = "waze_proximity_m"
+        private const val KEY_DETECTION_RADIUS = "detection_radius_m"
         private const val KEY_WAZE_API_KEY = "waze_api_key"
         private const val KEY_LEGACY_WAZE_PROXY_TOKEN = "waze_proxy_token"
         private const val KEY_THEME = "theme_mode"
         private const val KEY_VIBRATE = "vibrate_on_alert"
         private const val KEY_OVERLAY = "overlay_enabled"
 
-        const val DEFAULT_DEFLOCK_PROX = 200
-        const val DEFAULT_CITIZEN_PROX = 500
-        const val DEFAULT_WAZE_PROX = 500
+        const val DEFAULT_DETECTION_RADIUS = 500
+        const val RADIUS_MIN = 100
+        const val RADIUS_MAX = 5000
 
         @Volatile private var INSTANCE: Settings? = null
 

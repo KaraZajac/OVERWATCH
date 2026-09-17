@@ -1,5 +1,8 @@
 package org.soulstone.overwatch.fusion
 
+import kotlin.math.roundToInt
+import org.soulstone.overwatch.scan.DeflockClient
+
 /**
  * Confidence scoring — port of flock-detection's algorithm with weights from the OVERWATCH plan.
  *
@@ -29,17 +32,15 @@ object ConfidenceEngine {
     const val W_WIFI_SSID_GENERIC = 50
     const val W_WIFI_SSID_FLOCK_FMT = 65
 
-    // Map (Phase 3)
-    const val W_DEFLOCK_NEAR = 60   // <= 200m
-    const val W_DEFLOCK_VERY_NEAR = 85 // <= 50m
+    // DeFlock + Waze are scored by a continuous distance falloff — see the
+    // FALLOFF tables below. A flat "inside the radius" score made the tier
+    // meaningless once the radius became user-set up to 5 km: in a city there
+    // is always an ALPR within a mile, so the app sat on YELLOW permanently.
 
-    // Citizen (real-time incident feed)
-    const val W_CITIZEN_INCIDENT = 55
-    const val B_CITIZEN_LEVEL_BUMP = 5     // level >= 2
-    const val B_CITIZEN_POLICE_TITLE = 5   // title contains a police-action keyword
-
-    // Waze (live POLICE alerts via the OpenWeb Ninja hosted feed)
-    const val W_WAZE_POLICE = 55
+    /** Waze freshness window — shared with WazeScanner so the two can't drift. */
+    const val WAZE_MAX_AGE_MS = 45L * 60L * 1000L
+    /** Points shed across the full freshness window; police move, old reports rot. */
+    const val B_WAZE_AGE_DECAY = 12f
 
     // Bonuses
     const val B_MULTI_METHOD = 20
@@ -78,24 +79,27 @@ object ConfidenceEngine {
         val isStationary: Boolean = false
     )
 
-    /** A DeFlock map ALPR observed within proximity threshold. */
+    /** A mapped surveillance node observed within the detection radius. */
     data class DeflockObservation(
         val osmId: Long,
         val distanceMeters: Float,
+        val kind: DeflockClient.Kind,
         val operator: String?,
         val manufacturer: String?
     )
 
-    /** A Citizen incident observed within proximity + freshness, after the
-     *  fire/medical filter is applied. */
-    data class CitizenObservation(
-        val incidentId: String,
+    /** An aircraft seen overhead by [org.soulstone.overwatch.scan.AircraftScanner]. */
+    data class AircraftObservation(
+        val icaoHex: String,
         val distanceMeters: Float,
-        val ageMs: Long,
-        val level: Int,             // 0-5 severity (Citizen's own scale)
-        val title: String,
-        val isPoliceTitled: Boolean,
-        val precinct: String?
+        val altitudeFt: Int?,
+        val isKnownLawEnforcement: Boolean,
+        val isLoitering: Boolean,
+        val isLadd: Boolean,
+        val owner: String?,
+        val registration: String?,
+        val aircraftType: String?,
+        val callsign: String?
     )
 
     /** A Waze POLICE alert observed within proximity + freshness thresholds. */
@@ -214,47 +218,155 @@ object ConfidenceEngine {
         return Scored(score, methods.toString().trim(), label, isAxon)
     }
 
-    fun scoreCitizen(obs: CitizenObservation): Scored {
-        var score = W_CITIZEN_INCIDENT
-        val tags = StringBuilder("citizen ")
-        if (obs.level >= 2) {
-            score += B_CITIZEN_LEVEL_BUMP
-            tags.append("L${obs.level} ")
+    fun scoreAircraft(obs: AircraftObservation): Scored {
+        var score = falloff(obs.distanceMeters, AIRCRAFT_FALLOFF)
+        val tags = StringBuilder("aircraft ")
+
+        // Altitude is the strongest discriminator after identity: a known
+        // police airframe at 30,000 ft is an airliner's neighbour, not an
+        // observer. Penalise height rather than filtering, so a high orbit
+        // still shows up quietly.
+        val alt = obs.altitudeFt
+        when {
+            alt == null -> Unit
+            alt <= 3_000 -> { score += 6f; tags.append("very_low ") }
+            alt <= 8_000 -> tags.append("low ")
+            alt <= 15_000 -> { score -= 12f; tags.append("mid_alt ") }
+            else -> { score -= 30f; tags.append("high_alt ") }
         }
-        if (obs.isPoliceTitled) {
-            score += B_CITIZEN_POLICE_TITLE
-            tags.append("police_title ")
+
+        if (obs.isLoitering) { score += 10f; tags.append("loitering ") }
+        if (obs.isKnownLawEnforcement) {
+            tags.append("known_le ")
+        } else {
+            // Behaviour-only: cap it. Circling is suggestive, not proof.
+            score = minOf(score, AIRCRAFT_UNKNOWN_CAP.toFloat())
+            tags.append("unidentified ")
         }
-        if (!obs.precinct.isNullOrBlank()) tags.append("precinct=${obs.precinct} ")
-        score = score.coerceAtMost(100)
-        val ageMin = (obs.ageMs / 60_000L).toInt()
-        val label = "${obs.title} @ ${obs.distanceMeters.toInt()}m, ${ageMin}min ago"
-        return Scored(score, tags.toString().trim(), label, isAxon = false)
+        // The operator asked public trackers to hide this airframe.
+        if (obs.isLadd) { score += 4f; tags.append("ladd ") }
+
+        val final = score.roundToInt().coerceIn(0, 100)
+        val who = obs.owner
+            ?: obs.registration
+            ?: obs.callsign
+            ?: "Unidentified aircraft"
+        val what = obs.aircraftType?.let { " ($it)" } ?: ""
+        val altText = obs.altitudeFt?.let { ", ${it} ft" } ?: ""
+        val verb = if (obs.isLoitering) "circling" else "overhead"
+        val label = "$who$what $verb @ ${obs.distanceMeters.toInt()}m$altText"
+        tags.append("d=${obs.distanceMeters.toInt()}m hex=${obs.icaoHex}")
+        return Scored(final, tags.toString().trim(), label, isAxon = false)
     }
 
     fun scoreWaze(obs: WazeObservation): Scored {
-        // Baseline 55 for any POLICE alert within the proximity + age gate the
-        // caller already applied. Small crowd-trust nudges for high reliability
-        // and high confidence, capped well under the multi-method bonus so a
-        // corroborating BLE/WiFi/DeFlock hit still dominates the global tier.
-        var score = W_WAZE_POLICE
-        if (obs.reliability >= 7) score += 5
-        if (obs.confidence >= 4) score += 5
-        score = score.coerceAtMost(100)
-        val methods = "waze_police rel=${obs.reliability} conf=${obs.confidence}"
+        // Distance first, then the two crowd-trust nudges, then age. Kept well
+        // under the multi-method bonus so a corroborating BLE/WiFi/DeFlock hit
+        // still dominates the global tier.
+        var score = falloff(obs.distanceMeters, WAZE_FALLOFF)
+        if (obs.reliability >= 7) score += 5f
+        if (obs.confidence >= 4) score += 5f
+        // Police move; a report at the far end of the freshness window is much
+        // weaker evidence than one a minute old.
+        val ageFraction = (obs.ageMs.toFloat() / WAZE_MAX_AGE_MS).coerceIn(0f, 1f)
+        score -= B_WAZE_AGE_DECAY * ageFraction
+        val final = score.roundToInt().coerceIn(0, 100)
         val ageMin = (obs.ageMs / 60_000L).toInt()
+        val methods = "waze_police d=${obs.distanceMeters.toInt()}m age=${ageMin}min " +
+            "rel=${obs.reliability} conf=${obs.confidence}"
         val sub = obs.subtype?.let { " ($it)" } ?: ""
         val label = "Police report$sub @ ${obs.distanceMeters.toInt()}m, ${ageMin}min ago"
-        return Scored(score, methods, label, isAxon = false)
+        return Scored(final, methods, label, isAxon = false)
+    }
+
+    /**
+     * Distance falloff anchors, as (metres, score) pairs interpolated linearly
+     * by [falloff].
+     *
+     * These are **absolute distances, deliberately not a fraction of the user's
+     * detection radius.** A camera 200 m away is exactly as close whether the
+     * radius slider reads 300 m or 5 km, so it has to score the same either
+     * way; keying off the radius would make the threat level move when the
+     * user touched a setting, which is the opposite of what the number means.
+     * The radius decides what gets *reported*, never how alarming it is.
+     *
+     * A fixed ALPR's position is surveyed and exact, so it stays alarming
+     * closer in and decays slowly. The 50 m and 200 m values are carried over
+     * from the old step scoring so calibration at typical distances is
+     * unchanged.
+     */
+    private val DEFLOCK_FALLOFF = arrayOf(
+        0f to 92f, 50f to 85f, 200f to 60f, 600f to 45f, 1500f to 30f, 3000f to 22f
+    )
+
+    /**
+     * A fixed speed camera is enforcement infrastructure, but it only acts on
+     * you if you're speeding past it — relevant, not alarming.
+     */
+    private val SPEED_CAMERA_FALLOFF = arrayOf(
+        0f to 75f, 50f to 70f, 200f to 52f, 600f to 40f, 1500f to 28f, 3000f to 20f
+    )
+
+    /**
+     * A generic `man_made=surveillance` node is as likely to be a shop's CCTV
+     * as a street camera, so it peaks below the YELLOW line at any real
+     * distance and never drives the tier on its own.
+     */
+    private val CAMERA_FALLOFF = arrayOf(
+        0f to 55f, 50f to 48f, 200f to 38f, 600f to 30f, 1500f to 22f, 3000f to 18f
+    )
+
+    /**
+     * A Waze police report is a crowd-sourced pin on a moving car: coarser
+     * than a surveyed camera, so it peaks lower and decays faster. 300 m holds
+     * the old flat baseline of 55.
+     */
+    private val WAZE_FALLOFF = arrayOf(
+        0f to 80f, 100f to 70f, 300f to 55f, 800f to 45f, 2000f to 32f, 4000f to 25f
+    )
+
+    /**
+     * Aircraft falloff, over ground distance. Far wider than the ground
+     * sources because an aircraft orbiting 5 km away is still watching you —
+     * unlike a camera 5 km away, which cannot see you at all.
+     */
+    private val AIRCRAFT_FALLOFF = arrayOf(
+        0f to 88f, 1000f to 80f, 3000f to 68f, 6000f to 55f, 10000f to 42f, 15000f to 30f
+    )
+
+    /** An unregistered aircraft is judged on behaviour alone, so it is capped
+     *  below the "certain" band — circling could still be news or survey work. */
+    const val AIRCRAFT_UNKNOWN_CAP = 69
+
+    /** Linear interpolation across [anchors]; clamps outside the first/last. */
+    private fun falloff(distanceMeters: Float, anchors: Array<Pair<Float, Float>>): Float {
+        val d = distanceMeters.coerceAtLeast(0f)
+        if (d <= anchors.first().first) return anchors.first().second
+        for (i in 0 until anchors.size - 1) {
+            val (d0, s0) = anchors[i]
+            val (d1, s1) = anchors[i + 1]
+            if (d <= d1) return s0 + (d - d0) / (d1 - d0) * (s1 - s0)
+        }
+        return anchors.last().second
     }
 
     fun scoreDeflock(obs: DeflockObservation): Scored {
-        val score = if (obs.distanceMeters <= 50f) W_DEFLOCK_VERY_NEAR else W_DEFLOCK_NEAR
-        val rangeTag = if (obs.distanceMeters <= 50f) "deflock<=50m" else "deflock<=200m"
+        val d = obs.distanceMeters
+        val (curve, fallbackName, tag) = when (obs.kind) {
+            DeflockClient.Kind.ALPR -> Triple(DEFLOCK_FALLOFF, "ALPR", "alpr")
+            DeflockClient.Kind.SPEED_CAMERA ->
+                Triple(SPEED_CAMERA_FALLOFF, "Speed camera", "speed_cam")
+            DeflockClient.Kind.CAMERA ->
+                Triple(CAMERA_FALLOFF, "Surveillance camera", "camera")
+        }
+        val score = falloff(d, curve).roundToInt().coerceIn(0, 100)
         val descriptor = listOfNotNull(obs.manufacturer, obs.operator)
-            .joinToString(" / ").ifBlank { "ALPR" }
-        val label = "%s @ %dm (osm:%d)".format(descriptor, obs.distanceMeters.toInt(), obs.osmId)
-        return Scored(score, rangeTag, label, isAxon = false)
+            .joinToString(" / ").ifBlank { fallbackName }
+        // The OSM id rides in the methods line rather than the label: it is
+        // what you need to look a camera up, and nothing you want shouting
+        // from the one-line status on the main screen.
+        val label = "%s @ %dm".format(descriptor, d.toInt())
+        return Scored(score, "$tag d=${d.toInt()}m osm:${obs.osmId}", label, isAxon = false)
     }
 
     /** A BLE mic-bearing-device observation, score-capped at ORANGE. */

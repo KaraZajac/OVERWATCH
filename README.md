@@ -12,7 +12,7 @@ on upward escalations — you don't have to be looking at the screen.
 > advertise/fuzz code from one of the reference projects is intentionally
 > excluded.
 
-Website: **[overwatch.netslum.io](https://overwatch.netslum.io)**  ·  Latest release: [v0.5.6](https://github.com/KaraZajac/OVERWATCH/releases) (debug-signed APK, sideload).
+Website: **[overwatch.netslum.io](https://overwatch.netslum.io)**  ·  Latest release: [v0.5.7](https://github.com/KaraZajac/OVERWATCH/releases) (debug-signed APK, sideload).
 
 ---
 
@@ -36,26 +36,28 @@ Website: **[overwatch.netslum.io](https://overwatch.netslum.io)**  ·  Latest re
 |---|---|---|
 | **BLE** | Bluetooth-LE advertisements: vendor MAC OUIs (Axon, Flock Penguin / Raven, XUNTONG mfg id `0x09C8`, "TN" serial pattern), Raven service UUIDs, device-name patterns — plus 18 IEEE-verified surveillance-vendor OUIs (ShotSpotter, WatchGuard/Motorola, Verkada, Avigilon Alta, Axis body cams, FLIR, Hanwha, March Networks, GeoVision, Mobotix, Sunell) with vendor-named labels | Local radio scan (BLE callback API). Iterates every manufacturer-specific data entry to find XUNTONG, not just the first. Police-exclusive OUIs (WatchGuard, ShotSpotter) score ORANGE on sight, same rationale as Axon. |
 | **WiFi** | BSSID OUI prefixes for Flock infrastructure (31-prefix superset) + the same 18 vendor OUIs (WatchGuard 4RE in-car APs, Openpath/Alta readers, WiFi-capable cameras), `Flock-XXXX` and other generic SSID patterns | `WifiManager.getScanResults()` polled every 35 s (just under the Android 11+ 4-scans/2-min throttle) |
-| **DEFLOCK** | Crowdsourced ALPR locations within configurable proximity (default 200 m) | POST to Overpass API (`overpass.deflock.org` → fallback `overpass-api.de`) for `man_made=surveillance + surveillance:type=ALPR` in a 5 km bbox; 24 h on-disk cache by 0.05° grid cell. Refetches when the user moves > 1.5 km from the last fetch center. Backoffs after Overpass failures; treats `{"remark": "...timed out..."}` 200-responses as failure so timeouts don't poison the cache. |
-| **CITIZEN** | ⚠️ **Feed retired upstream (June 2026)** — see the note below. Previously: real-time public-safety incidents (police-relevant only) within proximity, < 30 min old | `citizen.com/api/incident/trending` (bbox) polled every 60 s, then per-incident detail via `/api/incident/{id}`. The endpoints now return empty stubs, so the source reports "feed retired upstream" and backs off to a 30-min heartbeat instead of polling a dead endpoint. |
-| **WAZE** | User-reported `POLICE` alerts still active in the feed within configurable proximity (default 500 m), up to ~45 min old | `api.openwebninja.com/waze/alerts-and-jams` — [OpenWeb Ninja](https://www.openwebninja.com)'s hosted Waze feed, called directly with **your own API key** (`X-API-Key`) entered in Settings and stored encrypted on-device. Sidesteps the reCAPTCHA gating that 403s direct `live-map/api/georss` calls. Polled every ~4 min with `alert_types=POLICE&max_jams=0` (server-side filtering, ~1.5 KB/poll), and the client re-filters by type so a silent upstream change can't let other alert types through. Alerts carry confidence (0–5) + reliability (0–10); high values nudge the score up. No key → source shows "not configured" in the drill-down. |
+| **DEFLOCK** | Crowdsourced ALPR locations within the detection radius (default 500 m), scored by how close each one actually is | POST to Overpass API (`overpass.deflock.org` → fallback `overpass-api.de`) for `man_made=surveillance + surveillance:type=ALPR` in a 5 km bbox; 24 h on-disk cache by 0.05° grid cell. Refetches when the user moves > 1.5 km from the last fetch center. Backoffs after Overpass failures; treats `{"remark": "...timed out..."}` 200-responses as failure so timeouts don't poison the cache. |
+| **WAZE** | User-reported `POLICE` alerts still active in the feed within the detection radius (default 500 m), up to ~45 min old, scored by distance and age | `api.openwebninja.com/waze/alerts-and-jams` — [OpenWeb Ninja](https://www.openwebninja.com)'s hosted Waze feed, called directly with **your own API key** (`X-API-Key`) entered in Settings and stored encrypted on-device. Sidesteps the reCAPTCHA gating that 403s direct `live-map/api/georss` calls. Polled every ~4 min with `alert_types=POLICE&max_jams=0` (server-side filtering, ~1.5 KB/poll), and the client re-filters by type so a silent upstream change can't let other alert types through. Alerts carry confidence (0–5) + reliability (0–10); high values nudge the score up. No key → source shows "not configured" in the drill-down. |
+| **AIRCRAFT** | Police / surveillance aircraft overhead — identified from a bundled registry of 1,971 US law-enforcement airframes, plus loiter detection for unlisted ones | `opendata.adsb.fi` → fallback `api.adsb.lol`, polled every 60 s. **No API key.** Community ADS-B networks are used specifically because the commercial trackers filter law-enforcement flights at government request. Matched on the ICAO 24-bit address; scored by ground distance, altitude and orbit behaviour. |
 | **COMMERCIAL** | Nearby consumer smart-home / voice gear (Nest, Ring, Echo, hidden cams) and camera-bearing smart glasses (Meta, Snap, Vuzix) as a secondary situational signal | Rides the BLE + WiFi scans — OUI / device-name / service-UUID / SSID matches plus Bluetooth SIG company IDs from `MicTargets`. Score-capped at ORANGE so a cluster of doorbells (or a passing pair of Ray-Bans) never reads as ALPR-grade certainty. |
 
-> **Citizen went dark (v0.5.5).** Citizen ended the police-dispatch data
-> partnership behind its public feed in June 2026 and stubbed the endpoints.
-> Verified 2026-08-28: `/api/incident/trending` answers HTTP 200 with a bare
-> JSON empty string, `/api/incident/{id}` returns `{}` for every id (real or
-> invented), and `data.sp0n.io/v1/incidents/trending` — the host the current web
-> app uses — returns a zero-byte body even with no query params at all. Every
-> sibling path (`nearby`, `recent`, `latest`, `map`, `list`, `active`) returns
-> `{}`. That is a decommissioned surface, not a changed contract, so there is no
-> parameter or host fix; structured incident data is now Citizen's paid
-> Enterprise API only. The app no longer leaks the resulting JSON parse error
-> into the drill-down — it reports the shutdown plainly and stops hammering the
-> endpoint. Police presence is still covered by Waze (denser for roadway stops
-> anyway) and DeFlock.
+> **Citizen was removed (v0.5.7).** Citizen ended the police-dispatch data
+> partnership behind its public feed in June 2026. It first degraded to silent
+> empty stubs, and as of **2026-09-16** `citizen.com/api/incident/trending`
+> returns **HTTP 410 Gone — `{"error":"This endpoint has been removed."}`**,
+> which is upstream formally tombstoning it. `data.sp0n.io` (the host the
+> current web app uses) answers 200 with a zero-byte body even with no query
+> params. Structured incident data is now Citizen's paid Enterprise API only,
+> which needs a business use-case application — not something this app can
+> ship. The source and all its code were therefore deleted rather than left
+> as a permanently-failing row. Police presence is still covered by Waze
+> (denser for roadway stops anyway) and DeFlock.
 
 > **Waze needs your own API key (v0.5.6+).** Waze reCAPTCHA-gated its `live-map/api/georss` endpoint in 2025/2026 — automated calls get HTTP 403 regardless of IP or headless-vs-headful browser (it scores browser *reputation*, verified by direct testing), which is why v0.1.5 removed the original integration and why no free scraper survives. OVERWATCH reads Waze POLICE alerts through [OpenWeb Ninja](https://www.openwebninja.com)'s hosted feed. Earlier builds routed this through a private proxy that injected a shared key, which meant handing out a credential that wasn't the user's; **v0.5.6 calls OpenWeb Ninja directly with a key you supply yourself** — see [Waze setup](#waze-setup-bring-your-own-api-key) below. Nothing is baked into the APK, so a published build carries no credential and each install bills to its own account. The Waze for Cities partner feed was ruled out — it excludes POLICE and is agency-only.
+
+> **Full reference:** [SOURCES.md](SOURCES.md) documents every endpoint, every
+> BLE/WiFi identifier, the scoring tables, and the sources that were tried and
+> rejected (and why).
 
 Every observation is scored 0–100 by `ConfidenceEngine`. The on-screen tier is
 the maximum live score across all sources:
@@ -67,6 +69,29 @@ ORANGE   70 – 84   high confidence
 RED        85 +    certain
 ```
 
+**DeFlock and Waze are scored on a sliding scale, not a flat value.** Both
+carry real coordinates, so the score is a continuous falloff over the actual
+distance — drive toward a camera and the number climbs, drive past and it
+drops. The anchors are absolute metres and deliberately independent of the
+detection-radius setting: a camera 200 m away is equally close whether the
+slider reads 300 m or 5 km, so moving a setting must never move the threat
+level. A Waze report additionally decays by up to 12 points across its 45-min
+freshness window, because police move and a surveyed camera does not.
+
+| Distance | DeFlock ALPR | Waze police (fresh) |
+|---|---|---|
+| 0 m | 92 RED | 80 ORANGE |
+| 50 m | 85 RED | 75 ORANGE |
+| 100 m | 77 ORANGE | 70 ORANGE |
+| 200 m | 60 YELLOW | 62 YELLOW |
+| 600 m | 45 YELLOW | 49 YELLOW |
+| 1200 m | 35 GREEN | 41 YELLOW |
+| 3000 m | 22 GREEN | 28 GREEN |
+
+A fixed ALPR peaks higher and decays faster than a crowd-sourced police pin:
+its position is surveyed and exact, while a Waze report is a coarse pin on a
+car that may be moving toward you.
+
 The user-facing circle uses the full 4-tier mapping. Cross-source corroboration
 naturally pushes the global max upward (a BLE OUI hit *and* a DeFlock map
 match in the same area produce a higher tier than either alone). When idle,
@@ -76,7 +101,7 @@ glance from "scanning, all clear."
 While scanning, the circle becomes a live OpenStreetMap centered on you, wrapped
 in a **threat-color ring** (the current tier at a glance) and marked with a ⌖
 crosshair for your position. Map geodata is color-coded by source — **Flock /
-DeFlock cameras red, Waze police blue, Citizen incidents purple** — so each dot
+DeFlock cameras red, Waze police blue** — so each dot
 is self-explanatory. The same map renders in a smaller floating overlay bubble
 (Settings → Display over other apps) so it works over other apps.
 
@@ -86,7 +111,7 @@ is self-explanatory. The same map renders in a smaller floating overlay bubble
 
 - **In-app**: the threat circle shows a live map with a threat-color ring and
   source-color dots while scanning; tap it to open the bottom-sheet drill-down
-  with per-source rows. DeFlock, Citizen, and Waze events carry coordinates —
+  with per-source rows. DeFlock and Waze events carry coordinates —
   each row has a tap-to-open Maps icon.
 - **Foreground notification**: rebuilt on every threat-tier change. Title
   becomes `OVERWATCH • RED` (or whatever tier); text shows the top
@@ -114,11 +139,12 @@ scan/BleScanner.kt                 BLE callback scanner
 scan/WifiScanner.kt                WifiManager poller + SCAN_RESULTS receiver
 scan/DeflockClient.kt              Overpass POST (deflock.org → overpass-api.de) + 24h cache
 scan/DeflockScanner.kt             location-driven proximity check + failure backoff
-scan/CitizenClient.kt              GET /api/incident/trending + /api/incident/{id}
-scan/CitizenScanner.kt             60 s poller, fire/medical filter, per-id cache
 scan/WazeClient.kt                 GET api.openwebninja.com (X-API-Key, user's own key)
+scan/AircraftClient.kt             GET adsb.fi → adsb.lol (no key), live ADS-B contacts
+scan/AircraftScanner.kt            60 s poller, registry match + loiter/orbit detection
+data/targets/LeAircraft.kt         bundled ICAO-hex table of law-enforcement aircraft
 scan/WazeScanner.kt                ~4 min poller, 200-alert page, client-side POLICE filter
-fusion/ConfidenceEngine.kt         scoring (BLE / WiFi / DeFlock / Citizen / Waze / Commercial)
+fusion/ConfidenceEngine.kt         scoring (BLE / WiFi / DeFlock / Waze / Commercial)
 fusion/RssiTracker.kt              rise-peak-fall stationary-signal detector
 fusion/DetectionStore.kt           in-memory dedup, 5-min retention, max-tier flow
 fusion/SourceHealth.kt             per-source OK/FAILED registry for the drill-down
@@ -212,10 +238,10 @@ without an uninstall.
 |---|---|
 | `BLUETOOTH_SCAN`, `BLUETOOTH_CONNECT` (API 31+) | BLE scanning |
 | `BLUETOOTH`, `BLUETOOTH_ADMIN` (≤ API 30) | BLE scanning, legacy |
-| `ACCESS_FINE_LOCATION` | Required for BLE pre-S, WiFi pre-T, and DeFlock/Citizen proximity |
+| `ACCESS_FINE_LOCATION` | Required for BLE pre-S, WiFi pre-T, and DeFlock/Waze proximity |
 | `NEARBY_WIFI_DEVICES` (API 33+) | WiFi scan results without using location |
 | `ACCESS_WIFI_STATE`, `CHANGE_WIFI_STATE` | Trigger and read scan results |
-| `INTERNET`, `ACCESS_NETWORK_STATE` | DeFlock Overpass, Citizen API, OpenWeb Ninja Waze feed |
+| `INTERNET`, `ACCESS_NETWORK_STATE` | DeFlock Overpass, OpenWeb Ninja Waze feed, ADS-B aircraft feeds |
 | `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_CONNECTED_DEVICE`, `FOREGROUND_SERVICE_LOCATION` | Keep scanning with the screen off |
 | `POST_NOTIFICATIONS` (API 33+) | Foreground-service notification |
 | `VIBRATE` | Haptic alert on threat-tier escalation |
@@ -232,13 +258,13 @@ so you can grant manually.
 
 Tap the gear icon in the top-right.
 
-- **Detection sources**: toggle BLE / WiFi / DeFlock / Citizen / Waze / Commercial independently.
+- **Detection sources**: toggle BLE / WiFi / DeFlock / Waze / Aircraft / Commercial independently.
   Changes take effect on the next Start. While scanning, a **Restart scan to
   apply** button appears that does `stop()` + `start()` in one tap.
-- **Proximity thresholds** (sliders commit on release, not per-pixel):
-  - DeFlock: 50 m – 1600 m (default 200 m)
-  - Citizen: 100 m – 5000 m (default 500 m)
-  - Waze: 100 m – 5000 m (default 500 m)
+- **Detection radius** (one slider for both location sources; commits on
+  release, not per-pixel): 100 m – 5000 m, default 500 m. It sets what gets
+  reported and what the map circle draws — *not* how alarming a hit is, which
+  is purely a function of real distance (see below).
 - **Waze police feed**: paste your own OpenWeb Ninja API key — see
   [Waze setup](#waze-setup-bring-your-own-api-key). Stored encrypted on-device
   (Android Keystore), never baked into the APK. Empty = Waze source off.
@@ -264,12 +290,12 @@ These live under `REFERENCES/` (gitignored):
 
 ## Status
 
-Phases 1–5 (skeleton, BLE, WiFi, DeFlock, Citizen, polish) complete and
-field-tested. Current release **v0.5.6**. Notable changes:
+Phases 1–5 (skeleton, BLE, WiFi, DeFlock, polish) complete and
+field-tested. Current release **v0.5.7**. Notable changes:
 
 - v0.1.2 — Android 14+ foreground service type fix; NaN-coordinate filter on map data.
 - v0.1.3 — DeFlock CDN replaced by direct Overpass calls (Cloudflare-blocked).
-- v0.1.4 — Citizen.com added as 5th source, per-source health registry.
+- v0.1.4 — Citizen.com added as 5th source, per-source health registry. *(source removed in v0.5.7 — feed retired upstream)*
 - v0.1.5 — Waze removed (reCAPTCHA-gated; no clean mobile workaround at the time).
 - v0.1.6 — Dynamic notification with tier + label, haptic alerts, Open-in-Maps for geo events.
 - v0.1.7 — System back from Settings returns to MAIN instead of exiting.
@@ -277,12 +303,14 @@ field-tested. Current release **v0.5.6**. Notable changes:
 - v0.2.1–v0.2.2 — Live proximity refresh, map dot markers, map + Settings UI polish.
 - v0.3.0–v0.3.2 — Floating threat-circle overlay (chat-bubble style) + drag/crash fixes.
 - v0.5.0 — Waze re-added via a key-protected Caddy proxy (`api.blackflagintel.com`): the OpenWeb Ninja key stays server-side, the app uses an encrypted per-device token. GitHub Actions release pipeline added.
-- v0.5.1 — UI: larger map circle with a threat-color ring, ⌖ user crosshair, source-color dots (Flock red / Waze blue / Citizen purple), START moved to the bottom.
+- v0.5.1 — UI: larger map circle with a threat-color ring, ⌖ user crosshair, source-color dots (Flock red / Waze blue), START moved to the bottom.
 - v0.5.2 — Committed a fixed debug keystore so CI + local builds sign identically; updates now install in place (no functional changes).
 - v0.5.3 — Detect Meta / Snap / Vuzix smart glasses in the COMMERCIAL source (BLE company-id + name vectors); new radar app icon (launcher, themed, and notification).
 - v0.5.4 — 18 IEEE-verified surveillance-vendor OUIs across BLE + WiFi (ShotSpotter, WatchGuard/Motorola, Verkada, Avigilon Alta, Axis, FLIR, Hanwha, March Networks, GeoVision, Mobotix, Sunell); police-exclusive vendors (WatchGuard, ShotSpotter) score ORANGE on sight; vendor-named drill-down labels.
 - v0.5.5 — Citizen feed confirmed retired upstream; the source now reports the shutdown instead of leaking a JSON parse error, and backs off to a 30-min heartbeat. Toolchain modernized: AGP 9.3.2, Gradle 9.7.1, Kotlin 2.4.10, Compose BOM 2026.08.00, `compileSdk` 37 (`targetSdk` held at 35); CI actions bumped off deprecated Node-20 versions.
 - v0.5.6 — Waze now calls OpenWeb Ninja directly with **your own API key** instead of a shared proxy token; the `api.blackflagintel.com` proxy is no longer used and the stale token is purged from the secret store on upgrade. Requests add `alert_types=POLICE&max_jams=0` (~18 KB → ~1.5 KB per poll). See [Waze setup](#waze-setup-bring-your-own-api-key).
+- v0.5.7 — Citizen source **removed entirely** (client, scanner, scoring, settings, map dots and the drill-down row). Its endpoint now returns HTTP 410 Gone, so there was nothing left to degrade gracefully into. OVERWATCH is now a five-source app: BLE, WiFi, DeFlock, Waze, Commercial.
+- v0.5.8 — **AIRCRAFT source**: police / surveillance aircraft overhead via free community ADS-B feeds, matched against a bundled 1,971-entry registry of US law-enforcement airframes (regenerate with `scripts/gen-le-aircraft.py`), plus loiter/orbit detection so unlisted aircraft circling overhead still register. Overpass query widened to speed cameras and generic surveillance nodes, each scored on its own curve. DeFlock/Waze/aircraft all scored by continuous distance falloff. New [SOURCES.md](SOURCES.md) reference.
 
 ## License
 

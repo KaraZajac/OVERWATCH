@@ -39,8 +39,19 @@ class LocationProvider(private val context: Context) {
     private val _location = MutableStateFlow<Location?>(null)
     val location: StateFlow<Location?> = _location.asStateFlow()
 
+    // HIGH_ACCURACY, not BALANCED. Two reasons:
+    //  - Proximity thresholds go down to 50 m (DeFlock's "very near" band).
+    //    BALANCED resolves via wifi/cell to roughly a city block, which is
+    //    coarser than the distances this app makes decisions at.
+    //  - BALANCED asks Play services for the network provider and never
+    //    escalates to GPS, so on a device with no usable wifi-scan geolocation
+    //    (notably an emulator) the fused provider parks at ProviderRequest[OFF]
+    //    and no fix is ever delivered — every location-driven source then sits
+    //    at "no detections" forever.
+    // GPS cost is minor next to the continuous SCAN_MODE_LOW_LATENCY BLE scan
+    // this service already runs, and scanning is explicitly user-started.
     private val request: LocationRequest = LocationRequest.Builder(
-        Priority.PRIORITY_BALANCED_POWER_ACCURACY,
+        Priority.PRIORITY_HIGH_ACCURACY,
         INTERVAL_MS
     )
         .setMinUpdateIntervalMillis(MIN_INTERVAL_MS)

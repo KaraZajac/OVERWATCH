@@ -62,7 +62,9 @@ internal fun crosshairDrawable(
 }
 
 // Per-source marker colors so geodata reads at a glance.
-internal const val DOT_FLOCK_RED = 0xFFD7263D.toInt()       // Flock / DeFlock ALPR cameras
+internal const val DOT_FLOCK_RED = 0xFFD7263D.toInt()       // ALPR — reads and records plates
+internal const val DOT_SPEED_AMBER = 0xFFFF9800.toInt()     // fixed speed / traffic enforcement
+internal const val DOT_CAMERA_GRAY = 0xFF9E9E9E.toInt()     // generic mapped surveillance camera
 internal const val DOT_WAZE_BLUE = 0xFF2196F3.toInt()       // Waze police reports
-internal const val DOT_CITIZEN_PURPLE = 0xFF9C27B0.toInt()  // Citizen incidents
+internal const val DOT_AIRCRAFT_VIOLET = 0xFF7C4DFF.toInt()  // police / surveillance aircraft
 internal const val MARK_USER_WHITE = 0xFFFFFFFF.toInt()     // the user's own position (⌖)
