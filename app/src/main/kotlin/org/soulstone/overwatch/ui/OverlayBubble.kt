@@ -63,7 +63,6 @@ fun OverlayBubble() {
 
     // The pulse lives in PulseVisuals' leaves now; reading it here would
     // recompose the map host every frame.
-    val camera = remember { MapCamera() }
 
     val userMark = remember(ctx) { crosshairDrawable(ctx.resources, 34, MARK_USER_WHITE) }
     val flockDot = remember(ctx) { dotDrawable(ctx.resources, 22, DOT_FLOCK_RED) }
@@ -90,6 +89,10 @@ fun OverlayBubble() {
                 labelColor = activeColor
             )
         } else {
+            // Scoped to this branch so it dies with the MapView — see the same
+            // note in MainScreen; an outer remember left a rebuilt map stuck at
+            // world zoom.
+            val camera = remember { MapCamera() }
             AndroidView(
                 modifier = Modifier.fillMaxSize(),
                 factory = { c ->

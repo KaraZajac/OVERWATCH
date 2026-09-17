@@ -273,7 +273,6 @@ private fun ThreatMapCircle(
     // Reading the infinite animation here recomposed the map host every frame,
     // which re-ran the AndroidView update block (clearing and reallocating
     // every marker, and queuing a zoom) ~60 times a second.
-    val camera = remember { MapCamera() }
 
     Box(
         modifier = Modifier
@@ -305,6 +304,14 @@ private fun ThreatMapCircle(
             val ctx = LocalContext.current
             // Build the marker drawables once per Composition rather than
             // every recomposition — bitmap allocation isn't free.
+            // Remembered *inside this branch* so its lifetime matches the
+            // MapView's. Hoisting it outside was a real bug: stopping a scan
+            // clears the location, which swaps this branch out and destroys the
+            // MapView, but an outer `remember` kept the last camera position.
+            // On the next start a brand-new MapView came up at osmdroid's
+            // default zoom — the whole world — and needsMove() compared the
+            // unchanged lat/lon/radius, returned false, and never zoomed it in.
+            val camera = remember { MapCamera() }
             val userMark = remember(ctx) { crosshairDrawable(ctx.resources, 46, MARK_USER_WHITE) }
             val flockDot = remember(ctx) { dotDrawable(ctx.resources, 26, DOT_FLOCK_RED) }
             val speedDot = remember(ctx) { dotDrawable(ctx.resources, 22, DOT_SPEED_AMBER) }
