@@ -11,6 +11,7 @@ import android.provider.Settings as AndroidSettings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -78,6 +79,15 @@ class MainActivity : ComponentActivity() {
         permissionsGranted.value = checkAllPermissions()
         permanentlyDenied.value = false  // reset on activity create
         val settings = Settings.get(this)
+
+        // Android 15 (API 35) draws apps edge-to-edge whether or not they ask,
+        // for anything targeting 35 — the old statusBarColor/navigationBarColor
+        // theme attributes became no-ops at the same time. Opting in explicitly
+        // makes the behaviour identical on older releases instead of the layout
+        // shifting underneath the user on an upgrade; every screen then pads
+        // itself with WindowInsets.safeDrawing, which covers the system bars
+        // *and* a camera cutout.
+        enableEdgeToEdge()
 
         setContent {
             val themeMode by settings.themeMode.collectAsState()

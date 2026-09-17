@@ -405,7 +405,66 @@ ordinary traffic passing overhead never raises an alert.
 
 ---
 
-## 5. Testing notes
+## 5. Platform constraints that shape the radio sources
+
+The two local-radio sources are limited by OS policy far more than by the
+hardware, and the limits are not obvious from the APIs.
+
+### 5.1 Unfiltered BLE scans are suspended when the screen goes off
+
+**Since Android 8.1, the Bluetooth stack stops delivering results for a scan
+started with no `ScanFilter` once the screen turns off, and a foreground
+service does not exempt it** — it is a stack rule, not a process-lifetime one.
+For an app whose entire promise is "keep watching while it's in your pocket",
+that is the worst possible silent failure: `startScan` returns success, the
+service stays alive, the notification keeps updating, and no BLE result ever
+arrives.
+
+The catch is that **a `ScanFilter` cannot express an OUI prefix.** It can match
+an exact address, an exact name, a service UUID, or manufacturer data — and
+OUI-prefix matching is OVERWATCH's primary BLE method (Axon `00:25:df`, the 24
+Flock prefixes, the 18 vendor prefixes). There is no filter that means "any MAC
+starting with these three octets", and no filter that means "any device".
+
+So the scanner switches strategy on `ACTION_SCREEN_ON` / `ACTION_SCREEN_OFF`:
+
+| Screen | Scan | Covers | Loses |
+|---|---|---|---|
+| on | unfiltered | everything — OUI, name, UUID, manufacturer | — |
+| off | filtered (≤16) | Raven service UUIDs, XUNTONG manufacturer id, mic-target company ids | OUI prefixes, name substrings |
+
+Filter slots are a hardware resource and chipsets differ; a common allocation is
+16. Overflow is meant to fall back to software filtering, but since a scan that
+silently returns nothing is this app's worst failure mode, the list is capped at
+16 with surveillance signatures ordered ahead of consumer ones. The BLE row in
+the drill-down states the reduced mode while the screen is off rather than
+hiding it, and Flock ALPR coverage is unaffected in that window because the map
+source does not depend on the radio.
+
+### 5.2 Other limits worth knowing
+
+- **BLE start-rate limit** — 5 `startScan` calls per 30 s per app. Exceed it and
+  the scan *appears* to start but delivers nothing. Screen transitions are rare
+  enough to stay clear of it.
+- **WiFi scan throttling** — since Android 9, foreground apps get 4 scans per
+  2 minutes (background: 1 per 30 min). OVERWATCH polls every 35 s ≈ 3.4 per
+  2 min, deliberately just under.
+- **`WifiManager.startScan()` is deprecated** and Google has stated the ability
+  for apps to trigger scans will be removed in a future release. The scanner
+  already treats it as best-effort: it registers for
+  `SCAN_RESULTS_AVAILABLE_ACTION` and reads whatever the system last scanned, so
+  when the trigger stops working the source degrades to system-paced results
+  rather than failing.
+- **Promiscuous-mode tricks are not portable.** flock-you's `addr1` and
+  wildcard-probe techniques need monitor mode; a userspace Android app sees only
+  what `WifiManager` surfaces, which is BSSID and SSID.
+- **Android 14+ foreground-service types** are mandatory:
+  `connectedDevice` for the radio scanners and `location` for the map/feed
+  sources. Both are declared and both are passed at `startForeground` time.
+
+---
+
+## 6. Testing notes
 
 Emulator GPS is the main obstacle to testing the position-driven sources, and it
 has a trap worth recording:
@@ -438,7 +497,7 @@ methods, which is easy to transpose.
 
 ---
 
-## 6. Provenance
+## 7. Provenance
 
 Reference projects studied while building (kept under a gitignored `REFERENCES/`):
 

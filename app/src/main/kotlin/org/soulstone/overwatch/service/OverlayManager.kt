@@ -1,5 +1,6 @@
 package org.soulstone.overwatch.service
 
+import android.os.Build
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
@@ -120,6 +121,15 @@ class OverlayManager(
                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
             PixelFormat.TRANSLUCENT
         ).apply {
+            // Keep the bubble out of a camera cutout. DEFAULT is already the
+            // platform behaviour in portrait, but it is stated here because the
+            // bubble is user-draggable and free-floating: on a punch-hole or
+            // notch display the alternative (ALWAYS) would happily park the
+            // threat circle underneath the camera.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                layoutInDisplayCutoutMode =
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT
+            }
             gravity = Gravity.TOP or Gravity.START
             x = (INITIAL_X_DP * density).toInt()
             y = (INITIAL_Y_DP * density).toInt()

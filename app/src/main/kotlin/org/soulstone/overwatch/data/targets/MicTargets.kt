@@ -138,6 +138,16 @@ object MicTargets {
         return null
     }
 
+    /**
+     * Every company id this object recognises. Exposed so BleScanner can turn
+     * them into ScanFilters for screen-off scanning, where an unfiltered scan
+     * is silently suspended by the Bluetooth stack.
+     */
+    val COMPANY_IDS: Set<Int> = setOf(
+        MFG_AMAZON, MFG_GOOGLE, MFG_YINGXIN,
+        MFG_META, MFG_META_TECH, MFG_LUXOTTICA, MFG_SNAP, MFG_VUZIX
+    )
+
     fun matchManufacturer(companyId: Int?): Family? = when (companyId) {
         MFG_AMAZON -> Family.ECHO
         MFG_GOOGLE -> Family.GOOGLE
