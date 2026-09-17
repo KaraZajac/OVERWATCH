@@ -14,39 +14,47 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * Fetches live Waze POLICE alerts through the OVERWATCH proxy at
- * `api.blackflagintel.com` (a Caddy vhost on the ASTROPHAGE box). The proxy
- * holds the real OpenWeb Ninja API key server-side and injects it; the app only
- * presents a scoped, revocable `X-App-Token`. So the valuable key never ships in
- * the APK — a leaked/decompiled build carries only the proxy token, which works
- * against this one endpoint and can be rotated on the server in seconds.
+ * Fetches live Waze POLICE alerts from OpenWeb Ninja's hosted Waze feed.
  *
- *   GET https://api.blackflagintel.com/waze/alerts-and-jams
- *       ?bottom_left=<minLat>,<minLon>&top_right=<maxLat>,<maxLon>&max_alerts=200
- *   Header: X-App-Token: <token from encrypted Settings, never baked into the APK>
+ *   GET https://api.openwebninja.com/waze/alerts-and-jams
+ *       ?bottom_left=<minLat>,<minLon>&top_right=<maxLat>,<maxLon>
+ *       &max_alerts=200&max_jams=0&alert_types=POLICE
+ *   Header: X-API-Key: <the user's own key, from encrypted Settings>
  *
- * The token is entered once in Settings and stored encrypted (see [SecureStore]);
- * an empty token means the source is unconfigured — [isConfigured] is false and
- * the scanner surfaces that instead of calling out.
+ * **Bring your own key.** Each install authenticates with its owner's own
+ * OpenWeb Ninja key, entered once in Settings and stored encrypted by
+ * [SecureStore] (Android Keystore AES/GCM). Nothing is baked into the APK, so a
+ * published build ships with no credential at all and nobody has to be handed
+ * someone else's. Get a key at https://www.openwebninja.com by subscribing to
+ * the Waze API: pay-as-you-go is ~$0.005/request (roughly $1-3/month at the
+ * ~4-minute poll this app uses), and the free tier's 100 requests/month is
+ * enough to try it but not to run it continuously.
  *
- * Two verified quirks of the upstream feed drive the request/parse shape:
- *  - It echoes but does NOT honor an `alert_types` filter, and defaults to
- *    `max_alerts=20`, so POLICE reports get crowded out by HAZARD/ROAD_CLOSED.
- *    We pull the full page (200 = server ceiling) and filter to POLICE here.
- *  - Response envelope is `{ "data": { "alerts": [...], "jams": [...] } }`;
- *    each alert carries `alert_id`, `type`, `subtype` (nullable), `latitude`,
- *    `longitude`, `alert_confidence` (0-5), `alert_reliability` (0-10), and an
- *    ISO-8601 `publish_datetime_utc`. The parser also accepts Waze-native names
- *    (`location.y`/`confidence`/`pubMillis`) so a minor upstream change to the
- *    shape doesn't silently zero out detections.
+ * An empty key means the source is unconfigured — [isConfigured] is false and
+ * the scanner reports that instead of calling out, so Waze stays dormant rather
+ * than erroring on every poll.
+ *
+ * Direct scraping is not an option: `waze.com/live-map/api/georss` is gated by
+ * reCAPTCHA Enterprise *reputation* scoring and 403s automated clients
+ * regardless of IP or headless-vs-headful browser, which is why this reads a
+ * hosted feed at all.
+ *
+ * Response shape (verified live 2026-09-16): `{ "data": { "alerts": [...],
+ * "jams": [...] } }`, each alert carrying `alert_id`, `type`, `subtype`
+ * (nullable), `latitude`, `longitude`, `alert_confidence` (0-5),
+ * `alert_reliability` (0-10) and an ISO-8601 `publish_datetime_utc`. Police
+ * reports frequently carry confidence/reliability 0, so scoreWaze's floor
+ * matters more than its crowd-trust bonuses. The parser also accepts
+ * Waze-native names (`location.y`/`confidence`/`pubMillis`) so a minor upstream
+ * rename doesn't silently zero out detections.
  */
 class WazeClient(
-    private val appToken: () -> String = { "" }
+    private val apiKey: () -> String = { "" }
 ) {
 
     companion object {
         private const val TAG = "WazeClient"
-        private const val BASE = "https://api.blackflagintel.com/waze/alerts-and-jams"
+        private const val BASE = "https://api.openwebninja.com/waze/alerts-and-jams"
         private const val TIMEOUT_MS = 10_000
 
         /** Never sweep a box tighter than this, so alerts the user is driving
@@ -55,8 +63,8 @@ class WazeClient(
         private const val BBOX_MIN_RADIUS_M = 800.0
     }
 
-    /** True when a proxy token is set. False → source is unconfigured. */
-    val isConfigured: Boolean get() = appToken().isNotBlank()
+    /** True when the user has entered an API key. False → source is unconfigured. */
+    val isConfigured: Boolean get() = apiKey().isNotBlank()
 
     data class Alert(
         val uuid: String,
@@ -79,7 +87,7 @@ class WazeClient(
         lon: Double,
         radiusMeters: Float
     ): FetchResult = withContext(Dispatchers.IO) {
-        if (!isConfigured) return@withContext FetchResult.Failed("Proxy token not set")
+        if (!isConfigured) return@withContext FetchResult.Failed("API key not set")
 
         val r = radiusMeters.toDouble().coerceAtLeast(BBOX_MIN_RADIUS_M)
         val latDelta = r / 111_000.0
@@ -88,18 +96,22 @@ class WazeClient(
         // the coordinates avoids any comma-decimal-separator surprise.
         val bottomLeft = "${lat - latDelta},${lon - lonDelta}"
         val topRight = "${lat + latDelta},${lon + lonDelta}"
-        // max_alerts=200 (the server ceiling), not an alert_types filter — see
-        // the class KDoc. The proximity-sized bbox keeps the real alert count
-        // well under 200, so POLICE entries are never truncated away.
+        // alert_types=POLICE is honored server-side (verified 2026-09-16) and
+        // max_jams=0 drops the jam payload outright — together they cut a typical
+        // response from ~18 KB to ~1.5 KB, which matters on cellular. max_alerts
+        // stays at the 200 ceiling and parsePolice still filters by type, so if
+        // the upstream ever reverts to ignoring alert_types (it did originally),
+        // POLICE entries still can't be crowded out or slip through.
         val url = URL(
-            "$BASE?bottom_left=${enc(bottomLeft)}&top_right=${enc(topRight)}&max_alerts=200"
+            "$BASE?bottom_left=${enc(bottomLeft)}&top_right=${enc(topRight)}" +
+                "&max_alerts=200&max_jams=0&alert_types=POLICE"
         )
 
         val conn = (url.openConnection() as HttpURLConnection).apply {
             connectTimeout = TIMEOUT_MS
             readTimeout = TIMEOUT_MS
             requestMethod = "GET"
-            setRequestProperty("X-App-Token", appToken())
+            setRequestProperty("X-API-Key", apiKey())
             setRequestProperty("Accept", "application/json")
         }
         try {
@@ -109,12 +121,12 @@ class WazeClient(
                     FetchResult.Success(parsePolice(body))
                 }
                 401, 403 -> {
-                    Log.w(TAG, "Waze proxy rejected token ($code)")
-                    FetchResult.Failed("Proxy rejected token (HTTP $code)")
+                    Log.w(TAG, "OpenWeb Ninja rejected the API key ($code)")
+                    FetchResult.Failed("Invalid or missing API key (HTTP $code)")
                 }
                 429 -> {
                     Log.w(TAG, "Waze feed rate-limited (429)")
-                    FetchResult.Failed("Rate limited (HTTP 429)")
+                    FetchResult.Failed("Rate limit or quota exceeded (HTTP 429)")
                 }
                 else -> {
                     Log.w(TAG, "Waze feed returned $code")

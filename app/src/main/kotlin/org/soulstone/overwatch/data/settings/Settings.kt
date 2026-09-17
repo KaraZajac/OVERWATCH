@@ -56,11 +56,11 @@ class Settings private constructor(
     )
     val wazeProximityM: StateFlow<Int> = _wazeProximityM.asStateFlow()
 
-    // Shared secret the app presents to the api.blackflagintel.com proxy, which
-    // holds the real OpenWeb Ninja key server-side. Stored encrypted (Keystore),
-    // never baked into the APK, so a published build carries no usable credential.
-    private val _wazeProxyToken = MutableStateFlow(SecureStore.get(appContext, KEY_WAZE_TOKEN) ?: "")
-    val wazeProxyToken: StateFlow<String> = _wazeProxyToken.asStateFlow()
+    // The user's own OpenWeb Ninja API key for the Waze feed. Stored encrypted
+    // (Keystore), never baked into the APK, so a published build carries no
+    // credential and every install authenticates as its own owner.
+    private val _wazeApiKey = MutableStateFlow(SecureStore.get(appContext, KEY_WAZE_API_KEY) ?: "")
+    val wazeApiKey: StateFlow<String> = _wazeApiKey.asStateFlow()
 
     private val _themeMode = MutableStateFlow(
         ThemeMode.valueOf(prefs.getString(KEY_THEME, ThemeMode.DARK.name) ?: ThemeMode.DARK.name)
@@ -98,10 +98,18 @@ class Settings private constructor(
         _wazeProximityM.value = clamped
     }
 
-    fun setWazeProxyToken(v: String) {
+    fun setWazeApiKey(v: String) {
         val t = v.trim()
-        SecureStore.put(appContext, KEY_WAZE_TOKEN, t)
-        _wazeProxyToken.value = t
+        SecureStore.put(appContext, KEY_WAZE_API_KEY, t)
+        _wazeApiKey.value = t
+    }
+
+    init {
+        // One-time cleanup: v0.5.5 and earlier stored a token for the retired
+        // api.blackflagintel.com proxy. It authenticates nothing now, so purge it
+        // rather than leave a dead secret sitting in the store. (Empty value =
+        // remove, per SecureStore.put.)
+        SecureStore.put(appContext, KEY_LEGACY_WAZE_PROXY_TOKEN, "")
     }
 
     fun setThemeMode(mode: ThemeMode) {
@@ -130,7 +138,8 @@ class Settings private constructor(
         private const val KEY_DEFLOCK_PROX = "deflock_proximity_m"
         private const val KEY_CITIZEN_PROX = "citizen_proximity_m"
         private const val KEY_WAZE_PROX = "waze_proximity_m"
-        private const val KEY_WAZE_TOKEN = "waze_proxy_token"
+        private const val KEY_WAZE_API_KEY = "waze_api_key"
+        private const val KEY_LEGACY_WAZE_PROXY_TOKEN = "waze_proxy_token"
         private const val KEY_THEME = "theme_mode"
         private const val KEY_VIBRATE = "vibrate_on_alert"
         private const val KEY_OVERLAY = "overlay_enabled"

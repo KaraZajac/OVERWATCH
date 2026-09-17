@@ -141,7 +141,7 @@ class DetectionService : LifecycleService() {
         )
         wazeScanner = WazeScanner(
             store, locationProvider,
-            client = WazeClient(appToken = { settings.wazeProxyToken.value }),
+            client = WazeClient(apiKey = { settings.wazeApiKey.value }),
             proximityMeters = { settings.wazeProximityM.value.toFloat() }
         )
         overlayManager = OverlayManager(

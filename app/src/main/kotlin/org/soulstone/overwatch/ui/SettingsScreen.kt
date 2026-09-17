@@ -65,7 +65,7 @@ fun SettingsScreen(
     val deflockProx by settings.deflockProximityM.collectAsState()
     val citizenProx by settings.citizenProximityM.collectAsState()
     val wazeProx by settings.wazeProximityM.collectAsState()
-    val wazeToken by settings.wazeProxyToken.collectAsState()
+    val wazeApiKey by settings.wazeApiKey.collectAsState()
     val theme by settings.themeMode.collectAsState()
     val vibrate by settings.vibrateOnAlert.collectAsState()
     val overlay by settings.overlayEnabled.collectAsState()
@@ -153,13 +153,15 @@ fun SettingsScreen(
         Spacer(Modifier.height(16.dp))
         SectionLabel("Waze police feed")
         Text(
-            "Needs a proxy token (api.blackflagintel.com). Stored encrypted on-device — never in the app package.",
+            "Bring your own key: sign up at openwebninja.com, subscribe to the " +
+                "Waze API, and paste the key here. Stored encrypted on-device — " +
+                "never in the app package. Pay-as-you-go runs about \$1-3/month.",
             fontSize = 11.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             fontFamily = FontFamily.Monospace,
             modifier = Modifier.padding(vertical = 4.dp)
         )
-        TokenField(currentToken = wazeToken, onSave = { settings.setWazeProxyToken(it) })
+        ApiKeyField(currentKey = wazeApiKey, onSave = { settings.setWazeApiKey(it) })
 
         Spacer(Modifier.height(16.dp))
         SectionLabel("Alerts")
@@ -286,27 +288,28 @@ private fun SliderRow(
 }
 
 /**
- * Masked entry for the Waze proxy token. Commits on Save (persisted encrypted
- * via Settings/SecureStore), with a show/hide toggle and a set/unset status line.
+ * Masked entry for the user's OpenWeb Ninja API key. Commits on Save (persisted
+ * encrypted via Settings/SecureStore), with a show/hide toggle and a set/unset
+ * status line.
  */
 @Composable
-private fun TokenField(currentToken: String, onSave: (String) -> Unit) {
-    var text by remember(currentToken) { mutableStateOf(currentToken) }
+private fun ApiKeyField(currentKey: String, onSave: (String) -> Unit) {
+    var text by remember(currentKey) { mutableStateOf(currentKey) }
     var visible by remember { mutableStateOf(false) }
-    val isSet = currentToken.isNotBlank()
+    val isSet = currentKey.isNotBlank()
     Column(modifier = Modifier.padding(vertical = 4.dp)) {
         OutlinedTextField(
             value = text,
             onValueChange = { text = it },
             singleLine = true,
-            label = { Text("Proxy token", fontFamily = FontFamily.Monospace, fontSize = 12.sp) },
+            label = { Text("OpenWeb Ninja API key", fontFamily = FontFamily.Monospace, fontSize = 12.sp) },
             visualTransformation =
                 if (visible) VisualTransformation.None else PasswordVisualTransformation(),
             trailingIcon = {
                 IconButton(onClick = { visible = !visible }) {
                     Icon(
                         if (visible) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
-                        contentDescription = if (visible) "Hide token" else "Show token"
+                        contentDescription = if (visible) "Hide API key" else "Show API key"
                     )
                 }
             },
@@ -322,7 +325,7 @@ private fun TokenField(currentToken: String, onSave: (String) -> Unit) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = if (isSet) "Token set — Waze feed enabled" else "No token — Waze feed off",
+                text = if (isSet) "API key set — Waze feed enabled" else "No API key — Waze feed off",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 11.sp,
                 fontFamily = FontFamily.Monospace,

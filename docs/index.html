@@ -54,7 +54,7 @@
   <div class="container hero-inner">
     <div class="hero-eyebrow">
       <span class="dot dot-pulse"></span>
-      v0.5.5 · Android · passive
+      v0.5.6 · Android · passive
     </div>
     <h1 class="hero-title">
       <span class="display-wordmark">OVERWATCH</span>
@@ -76,7 +76,7 @@
       <div class="stat-chip"><span class="num" data-target="6">0</span><span>fused sources</span></div>
       <div class="stat-chip stat-vfy"><span class="num" data-target="4">0</span><span>threat tiers</span></div>
       <div class="stat-chip"><span class="num" data-target="0">0</span><span>packets sent</span></div>
-      <div class="stat-chip"><span class="num" data-target="20">0</span><span>releases</span></div>
+      <div class="stat-chip"><span class="num" data-target="21">0</span><span>releases</span></div>
     </div>
 
     <div class="cta-row">
@@ -244,11 +244,12 @@
         <p>
           Live user-reported <code>POLICE</code> alerts (default 500 m,
           ~45 min freshness). Waze reCAPTCHA-gated its map endpoint, so
-          OVERWATCH reads a key-protected feed through a Caddy proxy at
-          <code>api.blackflagintel.com</code> that injects the key
-          server-side — the paid key <strong>never ships in the APK</strong>.
-          The app authenticates with a scoped, revocable <code>X-App-Token</code>
-          stored encrypted in the Android Keystore.
+          OVERWATCH reads <a href="https://www.openwebninja.com">OpenWeb
+          Ninja</a>'s hosted feed at <code>api.openwebninja.com</code> —
+          using <strong>your own API key</strong>, pasted into Settings and
+          stored encrypted in the Android Keystore. Nothing ships in the APK,
+          and each install bills to its own account (~$1–3/month
+          pay-as-you-go).
         </p>
       </article>
 
@@ -323,8 +324,8 @@
       </figure>
       <figure class="shot">
         <img class="phone" src="img/overwatch-settings.png" width="856" height="2000"
-          alt="Settings screen: per-source toggles, proximity distance sliders, and the encrypted Waze proxy token field." loading="lazy">
-        <figcaption><strong>Settings</strong>Toggle each source, tune proximity distances, and paste an encrypted Waze proxy token.</figcaption>
+          alt="Settings screen: per-source toggles, proximity distance sliders, and the encrypted Waze API key field." loading="lazy">
+        <figcaption><strong>Settings</strong>Toggle each source, tune proximity distances, and paste your own encrypted Waze API key.</figcaption>
       </figure>
     </div>
   </div>
@@ -362,11 +363,11 @@
 
       <article class="bento-card">
         <div class="bento-icon">🔐</div>
-        <h3>Keys stay off-device</h3>
+        <h3>Bring your own key</h3>
         <p>
-          The paid Waze feed key lives server-side behind the proxy; the app
-          holds only a scoped, revocable token, encrypted via the Android
-          Keystore. No secrets in the APK.
+          The Waze feed uses <em>your</em> OpenWeb Ninja key, encrypted via the
+          Android Keystore and sent only to that one host. No shared
+          credential, no secrets in the APK — and revoking it is your call.
         </p>
       </article>
 
@@ -422,7 +423,7 @@
     <div class="feature-split">
       <div class="phone-frame">
         <img class="phone" src="img/overwatch-settings.png" width="856" height="2000"
-          alt="Settings screen: per-source toggles (BLE, WiFi, DeFlock, Citizen, Waze, Commercial), proximity distance sliders, and the encrypted Waze proxy token field." loading="lazy">
+          alt="Settings screen: per-source toggles (BLE, WiFi, DeFlock, Citizen, Waze, Commercial), proximity distance sliders, and the encrypted Waze API key field." loading="lazy">
       </div>
       <div class="timeline dl-steps">
         <div class="tl-col tl-shipped">
@@ -430,7 +431,7 @@
           <ul>
             <li>Grab the latest debug-signed APK from
               <a href="https://github.com/KaraZajac/OVERWATCH/releases/latest">Releases</a>
-              (currently <strong>v0.5.5</strong>).</li>
+              (currently <strong>v0.5.6</strong>).</li>
           </ul>
         </div>
         <div class="tl-col tl-active">
@@ -443,7 +444,7 @@
           <div class="tl-tag">3 · grant + start</div>
           <ul>
             <li>Grant location + nearby-devices + notifications, toggle the sources you want, hit <strong>START</strong>.</li>
-            <li>Optional: paste a Waze proxy token in Settings for police-report coverage.</li>
+            <li>Optional: paste your own <a href="https://www.openwebninja.com">OpenWeb Ninja</a> API key in Settings for Waze police-report coverage.</li>
           </ul>
         </div>
       </div>
@@ -500,7 +501,7 @@
       transmit, probe, jam, or interfere with any device or network.
     </p>
     <p class="footer-meta">
-      v0.5.5 · <a href="https://github.com/KaraZajac/OVERWATCH">github.com/KaraZajac/OVERWATCH</a>
+      v0.5.6 · <a href="https://github.com/KaraZajac/OVERWATCH">github.com/KaraZajac/OVERWATCH</a>
     </p>
     <div class="onion-line">
       <span class="onion-label">Also on Tor</span>

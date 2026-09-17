@@ -12,7 +12,7 @@ on upward escalations — you don't have to be looking at the screen.
 > advertise/fuzz code from one of the reference projects is intentionally
 > excluded.
 
-Website: **[overwatch.netslum.io](https://overwatch.netslum.io)**  ·  Latest release: [v0.5.5](https://github.com/KaraZajac/OVERWATCH/releases) (debug-signed APK, sideload).
+Website: **[overwatch.netslum.io](https://overwatch.netslum.io)**  ·  Latest release: [v0.5.6](https://github.com/KaraZajac/OVERWATCH/releases) (debug-signed APK, sideload).
 
 ---
 
@@ -38,7 +38,7 @@ Website: **[overwatch.netslum.io](https://overwatch.netslum.io)**  ·  Latest re
 | **WiFi** | BSSID OUI prefixes for Flock infrastructure (31-prefix superset) + the same 18 vendor OUIs (WatchGuard 4RE in-car APs, Openpath/Alta readers, WiFi-capable cameras), `Flock-XXXX` and other generic SSID patterns | `WifiManager.getScanResults()` polled every 35 s (just under the Android 11+ 4-scans/2-min throttle) |
 | **DEFLOCK** | Crowdsourced ALPR locations within configurable proximity (default 200 m) | POST to Overpass API (`overpass.deflock.org` → fallback `overpass-api.de`) for `man_made=surveillance + surveillance:type=ALPR` in a 5 km bbox; 24 h on-disk cache by 0.05° grid cell. Refetches when the user moves > 1.5 km from the last fetch center. Backoffs after Overpass failures; treats `{"remark": "...timed out..."}` 200-responses as failure so timeouts don't poison the cache. |
 | **CITIZEN** | ⚠️ **Feed retired upstream (June 2026)** — see the note below. Previously: real-time public-safety incidents (police-relevant only) within proximity, < 30 min old | `citizen.com/api/incident/trending` (bbox) polled every 60 s, then per-incident detail via `/api/incident/{id}`. The endpoints now return empty stubs, so the source reports "feed retired upstream" and backs off to a 30-min heartbeat instead of polling a dead endpoint. |
-| **WAZE** | User-reported `POLICE` alerts still active in the feed within configurable proximity (default 500 m), up to ~45 min old | `api.blackflagintel.com/waze/alerts-and-jams` — the OVERWATCH proxy (Caddy) that injects the OpenWeb Ninja key server-side and forwards to their hosted Waze scrape, sidestepping the reCAPTCHA gating that 403s direct `live-map/api/georss` calls. The app authenticates with an `X-App-Token` entered in Settings (encrypted on-device); the paid key never ships in the APK. Polled every ~4 min. Upstream ignores type filtering and caps at 200 alerts, so the client pulls the full page and filters to `POLICE` itself. Alerts carry confidence (0–5) + reliability (0–10); high values nudge the score up. No token → source shows "not configured" in the drill-down. |
+| **WAZE** | User-reported `POLICE` alerts still active in the feed within configurable proximity (default 500 m), up to ~45 min old | `api.openwebninja.com/waze/alerts-and-jams` — [OpenWeb Ninja](https://www.openwebninja.com)'s hosted Waze feed, called directly with **your own API key** (`X-API-Key`) entered in Settings and stored encrypted on-device. Sidesteps the reCAPTCHA gating that 403s direct `live-map/api/georss` calls. Polled every ~4 min with `alert_types=POLICE&max_jams=0` (server-side filtering, ~1.5 KB/poll), and the client re-filters by type so a silent upstream change can't let other alert types through. Alerts carry confidence (0–5) + reliability (0–10); high values nudge the score up. No key → source shows "not configured" in the drill-down. |
 | **COMMERCIAL** | Nearby consumer smart-home / voice gear (Nest, Ring, Echo, hidden cams) and camera-bearing smart glasses (Meta, Snap, Vuzix) as a secondary situational signal | Rides the BLE + WiFi scans — OUI / device-name / service-UUID / SSID matches plus Bluetooth SIG company IDs from `MicTargets`. Score-capped at ORANGE so a cluster of doorbells (or a passing pair of Ray-Bans) never reads as ALPR-grade certainty. |
 
 > **Citizen went dark (v0.5.5).** Citizen ended the police-dispatch data
@@ -55,7 +55,7 @@ Website: **[overwatch.netslum.io](https://overwatch.netslum.io)**  ·  Latest re
 > endpoint. Police presence is still covered by Waze (denser for roadway stops
 > anyway) and DeFlock.
 
-> **Waze is back (v0.4.0+), via a key-protected proxy.** Waze reCAPTCHA-gated its `live-map/api/georss` endpoint in 2025/2026 — automated calls get HTTP 403 regardless of IP or headless-vs-headful browser (it scores browser *reputation*, verified by direct testing), which is why v0.1.5 removed the original integration and why no free scraper survives. OVERWATCH reads Waze POLICE alerts through [OpenWeb Ninja](https://www.openwebninja.com)'s hosted feed (pay-as-you-go ~$0.005/req, ≈ $1–3/mo at the 4-min poll). To keep the paid key off every device, the app doesn't hold it: a Caddy reverse proxy at `api.blackflagintel.com` injects the key server-side, and the app authenticates with a scoped, revocable `X-App-Token` entered in Settings (stored encrypted via the Android Keystore). The Waze for Cities partner feed was ruled out — it excludes POLICE and is agency-only. Waze complements Citizen: denser for roadway stops / speed traps.
+> **Waze needs your own API key (v0.5.6+).** Waze reCAPTCHA-gated its `live-map/api/georss` endpoint in 2025/2026 — automated calls get HTTP 403 regardless of IP or headless-vs-headful browser (it scores browser *reputation*, verified by direct testing), which is why v0.1.5 removed the original integration and why no free scraper survives. OVERWATCH reads Waze POLICE alerts through [OpenWeb Ninja](https://www.openwebninja.com)'s hosted feed. Earlier builds routed this through a private proxy that injected a shared key, which meant handing out a credential that wasn't the user's; **v0.5.6 calls OpenWeb Ninja directly with a key you supply yourself** — see [Waze setup](#waze-setup-bring-your-own-api-key) below. Nothing is baked into the APK, so a published build carries no credential and each install bills to its own account. The Waze for Cities partner feed was ruled out — it excludes POLICE and is agency-only.
 
 Every observation is scored 0–100 by `ConfidenceEngine`. The on-screen tier is
 the maximum live score across all sources:
@@ -106,7 +106,7 @@ is self-explanatory. The same map renders in a smaller floating overlay bubble
 ui/MainScreen.kt                   map circle + threat ring + START/STOP + drill-down sheet
 ui/OverlayBubble.kt                floating "chat-bubble" version of the map circle
 ui/MarkerIcons.kt                  map marker drawables — source dots + ⌖ user crosshair
-ui/SettingsScreen.kt               source toggles, distance sliders, Waze token, vibrate, theme
+ui/SettingsScreen.kt               source toggles, distance sliders, Waze API key, vibrate, theme
 ui/theme/Theme.kt                  Material 3 dark/light + threat colors
 service/DetectionService.kt        foreground service — owns scanners, notification, vibration
 service/OverlayManager.kt          WindowManager host for the floating overlay bubble
@@ -116,7 +116,7 @@ scan/DeflockClient.kt              Overpass POST (deflock.org → overpass-api.d
 scan/DeflockScanner.kt             location-driven proximity check + failure backoff
 scan/CitizenClient.kt              GET /api/incident/trending + /api/incident/{id}
 scan/CitizenScanner.kt             60 s poller, fire/medical filter, per-id cache
-scan/WazeClient.kt                 GET api.blackflagintel.com proxy (X-App-Token) → OpenWeb Ninja
+scan/WazeClient.kt                 GET api.openwebninja.com (X-API-Key, user's own key)
 scan/WazeScanner.kt                ~4 min poller, 200-alert page, client-side POLICE filter
 fusion/ConfidenceEngine.kt         scoring (BLE / WiFi / DeFlock / Citizen / Waze / Commercial)
 fusion/RssiTracker.kt              rise-peak-fall stationary-signal detector
@@ -125,7 +125,7 @@ fusion/SourceHealth.kt             per-source OK/FAILED registry for the drill-d
 fusion/ThreatLevel.kt              4-tier enum + DetectionSource enum
 data/location/LocationProvider.kt  FusedLocationProviderClient wrapper
 data/settings/Settings.kt          SharedPreferences-backed StateFlow settings
-data/settings/SecureStore.kt       Keystore AES/GCM store for the Waze proxy token
+data/settings/SecureStore.kt       Keystore AES/GCM store for the Waze API key
 data/targets/                      BleOuis, WifiOuis, VendorOuis, RavenUuids, Patterns, Manufacturers, MicTargets
 ```
 
@@ -135,13 +135,47 @@ into a stuck state.
 
 ---
 
+## Waze setup (bring your own API key)
+
+The Waze source is optional and off until you give it a key. It reads
+[OpenWeb Ninja](https://www.openwebninja.com)'s hosted Waze feed, and each
+install uses its **owner's own key** — no shared credential ships in the APK
+and nobody has to be handed someone else's.
+
+1. Sign up at **[openwebninja.com](https://www.openwebninja.com)**.
+2. Subscribe to the **Waze / Real-Time Traffic** API (the
+   `waze/alerts-and-jams` endpoint).
+3. Copy your API key — it looks like `ak_…`.
+4. In OVERWATCH: **gear icon → Waze police feed → paste the key → Save**. The
+   status line flips to `API key set — Waze feed enabled`.
+
+The key is stored encrypted on-device (Android Keystore AES/GCM, see
+`data/settings/SecureStore.kt`) and is sent only to `api.openwebninja.com` as
+an `X-API-Key` header. Clearing the field removes it and the source goes
+dormant again.
+
+**What it costs.** Pay-as-you-go is roughly **$0.005/request**. OVERWATCH polls
+about every 4 minutes *while scanning*, so ≈15 requests per active hour —
+call it **$1–3/month** for normal personal use. The free tier's 100
+requests/month is enough to confirm it works, not to run it continuously. The
+app requests `alert_types=POLICE&max_jams=0` so each poll is ~1.5 KB instead of
+~18 KB, which matters on cellular but doesn't change the per-request price.
+Watch your usage on the OpenWeb Ninja dashboard and set a spend cap there —
+the app has no way to enforce one.
+
+If a key is wrong or its quota is exhausted, the drill-down says so explicitly
+(`Invalid or missing API key (HTTP 401)` / `Rate limit or quota exceeded (HTTP
+429)`) rather than failing silently.
+
+---
+
 ## Build & install
 
 Requires:
 - **JDK 17+** (built and verified on 17; Gradle 9.x runs on 17 or 21)
 - **Android Studio** with SDK Platform 37 + Build-Tools 36.x + Platform-Tools
 
-Toolchain as of v0.5.5: AGP 9.3.2 / Gradle 9.7.1 / Kotlin 2.4.10, `compileSdk`
+Toolchain as of v0.5.6: AGP 9.3.2 / Gradle 9.7.1 / Kotlin 2.4.10, `compileSdk`
 37. `targetSdk` stays at **35** deliberately — API 36+ tightens foreground-service
 behavior, and screen-off scanning is the core feature, so the runtime opt-in is
 kept separate from the compile-time bump. Note AGP 9 folds in Kotlin support, so
@@ -151,7 +185,7 @@ there is no longer a standalone `kotlin.android` plugin in the build file.
 # 1) Copy the example local.properties and point sdk.dir at your install
 cp local.properties.example local.properties
 # edit local.properties → sdk.dir=/Users/<you>/Library/Android/sdk
-# (Waze needs no build config — paste the proxy token into Settings in-app)
+# (Waze needs no build config — paste your OpenWeb Ninja API key into Settings in-app)
 
 # 2) Make sure JAVA_HOME is JDK 21
 export JAVA_HOME=/usr/local/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home
@@ -181,7 +215,7 @@ without an uninstall.
 | `ACCESS_FINE_LOCATION` | Required for BLE pre-S, WiFi pre-T, and DeFlock/Citizen proximity |
 | `NEARBY_WIFI_DEVICES` (API 33+) | WiFi scan results without using location |
 | `ACCESS_WIFI_STATE`, `CHANGE_WIFI_STATE` | Trigger and read scan results |
-| `INTERNET`, `ACCESS_NETWORK_STATE` | DeFlock Overpass, Citizen API, Waze proxy |
+| `INTERNET`, `ACCESS_NETWORK_STATE` | DeFlock Overpass, Citizen API, OpenWeb Ninja Waze feed |
 | `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_CONNECTED_DEVICE`, `FOREGROUND_SERVICE_LOCATION` | Keep scanning with the screen off |
 | `POST_NOTIFICATIONS` (API 33+) | Foreground-service notification |
 | `VIBRATE` | Haptic alert on threat-tier escalation |
@@ -205,9 +239,9 @@ Tap the gear icon in the top-right.
   - DeFlock: 50 m – 1600 m (default 200 m)
   - Citizen: 100 m – 5000 m (default 500 m)
   - Waze: 100 m – 5000 m (default 500 m)
-- **Waze police feed**: paste the `api.blackflagintel.com` proxy token. It's
-  stored encrypted on-device (Android Keystore), never baked into the APK; the
-  paid OpenWeb Ninja key stays server-side on the proxy. Empty = Waze source off.
+- **Waze police feed**: paste your own OpenWeb Ninja API key — see
+  [Waze setup](#waze-setup-bring-your-own-api-key). Stored encrypted on-device
+  (Android Keystore), never baked into the APK. Empty = Waze source off.
 - **Alerts**:
   - Vibrate on threat escalation (default on)
 - **Display over other apps**: floating threat-circle overlay (needs the
@@ -224,14 +258,14 @@ These live under `REFERENCES/` (gitignored):
 - **flock-detection** — confidence-scoring algorithm (highest reusability), RSSI rise-peak-fall, OUIs + UUIDs + patterns
 - **flock-you** — 31-OUI WiFi superset (promiscuous-mode tricks not portable to Android)
 - **deflock** + **deflock-app** — Overpass query format + proximity-alert pattern (the Flutter app uses Overpass directly, not the CDN tiles, which the OVERWATCH client mirrors)
-- **wazepolice** — original live-map/api/georss recipe; that endpoint is now reCAPTCHA-gated, so v0.5.0 re-added Waze via the OpenWeb Ninja proxy (`api.blackflagintel.com`) instead of hitting Waze directly
+- **wazepolice** — original live-map/api/georss recipe; that endpoint is now reCAPTCHA-gated, so OVERWATCH reads OpenWeb Ninja's hosted feed instead of hitting Waze directly
 
 ---
 
 ## Status
 
 Phases 1–5 (skeleton, BLE, WiFi, DeFlock, Citizen, polish) complete and
-field-tested. Current release **v0.5.5**. Notable changes:
+field-tested. Current release **v0.5.6**. Notable changes:
 
 - v0.1.2 — Android 14+ foreground service type fix; NaN-coordinate filter on map data.
 - v0.1.3 — DeFlock CDN replaced by direct Overpass calls (Cloudflare-blocked).
@@ -248,6 +282,7 @@ field-tested. Current release **v0.5.5**. Notable changes:
 - v0.5.3 — Detect Meta / Snap / Vuzix smart glasses in the COMMERCIAL source (BLE company-id + name vectors); new radar app icon (launcher, themed, and notification).
 - v0.5.4 — 18 IEEE-verified surveillance-vendor OUIs across BLE + WiFi (ShotSpotter, WatchGuard/Motorola, Verkada, Avigilon Alta, Axis, FLIR, Hanwha, March Networks, GeoVision, Mobotix, Sunell); police-exclusive vendors (WatchGuard, ShotSpotter) score ORANGE on sight; vendor-named drill-down labels.
 - v0.5.5 — Citizen feed confirmed retired upstream; the source now reports the shutdown instead of leaking a JSON parse error, and backs off to a 30-min heartbeat. Toolchain modernized: AGP 9.3.2, Gradle 9.7.1, Kotlin 2.4.10, Compose BOM 2026.08.00, `compileSdk` 37 (`targetSdk` held at 35); CI actions bumped off deprecated Node-20 versions.
+- v0.5.6 — Waze now calls OpenWeb Ninja directly with **your own API key** instead of a shared proxy token; the `api.blackflagintel.com` proxy is no longer used and the stale token is purged from the secret store on upgrade. Requests add `alert_types=POLICE&max_jams=0` (~18 KB → ~1.5 KB per poll). See [Waze setup](#waze-setup-bring-your-own-api-key).
 
 ## License
 

@@ -79,7 +79,7 @@ class WazeScanner(
             SourceHealth.record(
                 DetectionSource.WAZE,
                 ok = false,
-                message = "Proxy token not set — add it in Settings"
+                message = "OpenWeb Ninja API key not set — add it in Settings"
             )
             return
         }
