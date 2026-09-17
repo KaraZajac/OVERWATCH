@@ -101,7 +101,8 @@ glance from "scanning, all clear."
 While scanning, the circle becomes a live OpenStreetMap centered on you, wrapped
 in a **threat-color ring** (the current tier at a glance) and marked with a ⌖
 crosshair for your position. Map geodata is color-coded by source — **Flock /
-DeFlock cameras red, Waze police blue** — so each dot
+DeFlock ALPR red, speed cameras amber, other cameras gray, Waze police blue,
+aircraft violet** — so each dot
 is self-explanatory. The same map renders in a smaller floating overlay bubble
 (Settings → Display over other apps) so it works over other apps.
 
@@ -110,7 +111,9 @@ is self-explanatory. The same map renders in a smaller floating overlay bubble
 ## How alerts work
 
 - **In-app**: the threat circle shows a live map with a threat-color ring and
-  source-color dots while scanning; tap it to open the bottom-sheet drill-down
+  source-color dots while scanning, with a legend beneath it — **ALPR red,
+  speed camera amber, generic camera gray, Waze police blue, aircraft violet**,
+  and a ⌖ crosshair for your own position; tap it to open the bottom-sheet drill-down
   with per-source rows. DeFlock and Waze events carry coordinates —
   each row has a tap-to-open Maps icon.
 - **Foreground notification**: rebuilt on every threat-tier change. Title
@@ -261,10 +264,12 @@ Tap the gear icon in the top-right.
 - **Detection sources**: toggle BLE / WiFi / DeFlock / Waze / Aircraft / Commercial independently.
   Changes take effect on the next Start. While scanning, a **Restart scan to
   apply** button appears that does `stop()` + `start()` in one tap.
-- **Detection radius** (one slider for both location sources; commits on
-  release, not per-pixel): 100 m – 5000 m, default 500 m. It sets what gets
-  reported and what the map circle draws — *not* how alarming a hit is, which
-  is purely a function of real distance (see below).
+- **Detection radius** lives on the **main screen**, under the map — it's the
+  one setting you reach for while moving, so it isn't buried in Settings.
+  100 m – 5000 m, default 500 m, committing on release rather than per-pixel so
+  dragging it doesn't restart the location scanners on every frame. It sets what
+  gets reported and what the circle draws — *not* how alarming a hit is, which
+  is purely a function of real distance.
 - **Waze police feed**: paste your own OpenWeb Ninja API key — see
   [Waze setup](#waze-setup-bring-your-own-api-key). Stored encrypted on-device
   (Android Keystore), never baked into the APK. Empty = Waze source off.
@@ -311,6 +316,7 @@ field-tested. Current release **v0.5.7**. Notable changes:
 - v0.5.6 — Waze now calls OpenWeb Ninja directly with **your own API key** instead of a shared proxy token; the `api.blackflagintel.com` proxy is no longer used and the stale token is purged from the secret store on upgrade. Requests add `alert_types=POLICE&max_jams=0` (~18 KB → ~1.5 KB per poll). See [Waze setup](#waze-setup-bring-your-own-api-key).
 - v0.5.7 — Citizen source **removed entirely** (client, scanner, scoring, settings, map dots and the drill-down row). Its endpoint now returns HTTP 410 Gone, so there was nothing left to degrade gracefully into. OVERWATCH is now a five-source app: BLE, WiFi, DeFlock, Waze, Commercial.
 - v0.5.8 — **AIRCRAFT source**: police / surveillance aircraft overhead via free community ADS-B feeds, matched against a bundled 1,971-entry registry of US law-enforcement airframes (regenerate with `scripts/gen-le-aircraft.py`), plus loiter/orbit detection so unlisted aircraft circling overhead still register. Overpass query widened to speed cameras and generic surveillance nodes, each scored on its own curve. DeFlock/Waze/aircraft all scored by continuous distance falloff. New [SOURCES.md](SOURCES.md) reference.
+- v0.5.9 — Detection-radius slider moved onto the main screen (under the map, where you reach for it while moving) and a source-color legend added beneath the circle: ALPR red, speed camera amber, other cameras gray, Waze police blue, aircraft violet.
 
 ## License
 

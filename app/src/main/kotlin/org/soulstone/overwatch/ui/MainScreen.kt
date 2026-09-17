@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -31,11 +32,13 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -55,6 +58,7 @@ import org.osmdroid.util.BoundingBox
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
+import org.soulstone.overwatch.data.settings.Settings
 import org.soulstone.overwatch.fusion.DetectionEvent
 import org.soulstone.overwatch.fusion.DetectionSource
 import org.soulstone.overwatch.fusion.SourceHealth
@@ -71,10 +75,10 @@ fun MainScreen(
     events: List<DetectionEvent>,
     mapPoints: List<DeflockClient.SurveillancePoint>,
     userLocation: Location?,
-    /** Visible radius of the map circle, in meters. Driven by the larger of
-     *  the DeFlock and Waze proximity sliders so the user sees the full
-     *  area where a detection could fire. */
-    mapRadiusMeters: Float,
+    /** Detection radius in metres — what the location sources report on, and
+     *  exactly what the map circle draws. */
+    detectionRadiusM: Int,
+    onRadiusChange: (Int) -> Unit,
     onStartStop: () -> Unit,
     onOpenSettings: () -> Unit,
     canStart: Boolean,
@@ -131,11 +135,14 @@ fun MainScreen(
                 userLocation = userLocation,
                 mapPoints = mapPoints,
                 events = events,
-                mapRadiusMeters = mapRadiusMeters,
+                mapRadiusMeters = detectionRadiusM.toFloat(),
                 onTap = { showSheet = true }
             )
 
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(10.dp))
+            SourceLegend()
+
+            Spacer(Modifier.height(4.dp))
             Text(
                 text = "tap circle for source details",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -143,7 +150,14 @@ fun MainScreen(
                 fontFamily = FontFamily.Monospace
             )
 
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(10.dp))
+            RadiusSlider(
+                radiusM = detectionRadiusM,
+                onCommit = onRadiusChange,
+                modifier = Modifier.padding(horizontal = 24.dp)
+            )
+
+            Spacer(Modifier.height(10.dp))
 
             StatusText(running = running, threat = threat, score = score, events = events)
         }
@@ -382,6 +396,87 @@ private fun ThreatMapCircle(
             modifier = Modifier
                 .fillMaxSize()
                 .clickable(onClick = onTap)
+        )
+    }
+}
+
+/**
+ * Detection radius, on the main screen because it is the one setting a user
+ * actually reaches for while moving — it decides both what counts as a
+ * detection and how much ground the circle shows. Commits on release rather
+ * than per-pixel so dragging it doesn't restart the location scanners on
+ * every frame.
+ */
+@Composable
+private fun RadiusSlider(
+    radiusM: Int,
+    onCommit: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var live by remember(radiusM) { mutableFloatStateOf(radiusM.toFloat()) }
+    Column(modifier = modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = "detection radius",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 11.sp,
+                fontFamily = FontFamily.Monospace
+            )
+            Text(
+                text = "${live.toInt()} m",
+                color = MaterialTheme.colorScheme.onBackground,
+                fontSize = 11.sp,
+                fontFamily = FontFamily.Monospace
+            )
+        }
+        Slider(
+            value = live,
+            onValueChange = { live = it },
+            onValueChangeFinished = { onCommit(live.toInt()) },
+            valueRange = Settings.RADIUS_MIN.toFloat()..Settings.RADIUS_MAX.toFloat(),
+            steps = 48
+        )
+    }
+}
+
+/** What the map's coloured dots mean. Five classes now share the circle, so
+ *  without this the colours are just decoration. */
+@Composable
+private fun SourceLegend() {
+    Row(
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)
+    ) {
+        LegendDot(Color(DOT_FLOCK_RED), "ALPR")
+        LegendDot(Color(DOT_SPEED_AMBER), "speed")
+        LegendDot(Color(DOT_CAMERA_GRAY), "cam")
+        LegendDot(Color(DOT_WAZE_BLUE), "police")
+        LegendDot(Color(DOT_AIRCRAFT_VIOLET), "air")
+    }
+}
+
+@Composable
+private fun LegendDot(color: Color, label: String) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.padding(horizontal = 5.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(8.dp)
+                .clip(CircleShape)
+                .background(color)
+        )
+        Spacer(Modifier.width(4.dp))
+        Text(
+            text = label,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontSize = 10.sp,
+            fontFamily = FontFamily.Monospace
         )
     }
 }

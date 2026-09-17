@@ -96,7 +96,6 @@ class MainActivity : ComponentActivity() {
                         // one setting, so the circle and the detection area can
                         // no longer disagree.
                         val detectionRadius by settings.detectionRadiusM.collectAsState()
-                        val mapRadiusM = detectionRadius.toFloat()
                         val granted by permissionsGranted
                         val denied by permanentlyDenied
 
@@ -113,7 +112,8 @@ class MainActivity : ComponentActivity() {
                             events = events,
                             mapPoints = mapPoints,
                             userLocation = userLocation,
-                            mapRadiusMeters = mapRadiusM,
+                            detectionRadiusM = detectionRadius,
+                            onRadiusChange = { settings.setDetectionRadiusM(it) },
                             canStart = true,
                             permissionMessage = message,
                             showOpenAppSettings = denied && !granted,

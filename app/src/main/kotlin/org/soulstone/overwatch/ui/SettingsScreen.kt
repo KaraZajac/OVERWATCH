@@ -62,7 +62,6 @@ fun SettingsScreen(
     val waze by settings.wazeEnabled.collectAsState()
     val aircraft by settings.aircraftEnabled.collectAsState()
     val mic by settings.micEnabled.collectAsState()
-    val detectionRadius by settings.detectionRadiusM.collectAsState()
     val wazeApiKey by settings.wazeApiKey.collectAsState()
     val theme by settings.themeMode.collectAsState()
     val vibrate by settings.vibrateOnAlert.collectAsState()
@@ -124,23 +123,6 @@ fun SettingsScreen(
             )
         }
         Spacer(Modifier.height(16.dp))
-
-        SectionLabel("Detection radius")
-        Text(
-            "How close a Flock/DeFlock camera or a Waze police report has to be " +
-                "to count. Also the area drawn on the map.",
-            fontSize = 11.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            fontFamily = FontFamily.Monospace,
-            modifier = Modifier.padding(vertical = 4.dp)
-        )
-        SliderRow(
-            label = "Detection radius",
-            persistedValue = detectionRadius,
-            range = Settings.RADIUS_MIN.toFloat()..Settings.RADIUS_MAX.toFloat(),
-            steps = 48,
-            onCommit = { settings.setDetectionRadiusM(it) }
-        )
 
         Spacer(Modifier.height(16.dp))
         SectionLabel("Waze police feed")
