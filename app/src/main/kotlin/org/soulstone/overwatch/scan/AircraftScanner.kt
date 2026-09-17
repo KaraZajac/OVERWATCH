@@ -154,7 +154,8 @@ class AircraftScanner(
                     matchedMethods = scored.methods,
                     rssi = null,
                     lat = c.lat,
-                    lon = c.lon
+                    lon = c.lon,
+                    distanceMeters = ground
                 )
             )
         }

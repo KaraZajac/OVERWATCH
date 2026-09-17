@@ -358,8 +358,14 @@ decides what gets *reported*, never how alarming it is.
 | 15000 m | — | — | — | — | 30 |
 
 **Every curve crosses below 40 (YELLOW) at roughly the distance the thing stops
-being able to act on you.** That is not cosmetic — it is what makes a single
-range slider safe. The on-screen tier is `max(score)` over everything reported,
+being able to act on you**, and **scoring is fully decoupled from the range
+control**: scanners evaluate everything inside their own fixed radii (DeFlock
+1200 m, Waze 2000 m, aircraft 15 km) and the tier is computed from that, so the
+`show within` slider cannot move it in either direction. Anything at YELLOW or
+above is displayed whatever the range says, since a view setting that can hide a
+live alert is a trap rather than a feature.
+
+Getting there took two passes, and the second one is the instructive half. The on-screen tier is `max(score)` over everything reported,
 and the slider decides what is reported, so loose curves let the setting leak
 into the alarm: measured against a real 195-node cache, standing still and
 dragging from 300 m to 500 m flipped the app GREEN → YELLOW with nothing

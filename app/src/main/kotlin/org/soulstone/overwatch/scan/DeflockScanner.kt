@@ -29,11 +29,18 @@ class DeflockScanner(
     private val store: DetectionStore,
     private val locationProvider: LocationProvider,
     private val client: DeflockClient,
-    private val proximityMeters: () -> Float = { 200f }
+    private val proximityMeters: () -> Float = { EVAL_RADIUS_M }
 ) {
 
     companion object {
         private const val TAG = "DeflockScanner"
+        /**
+         * Fixed evaluation radius — deliberately NOT the user's view slider.
+         * Everything inside this is scored and can drive the threat tier; the
+         * slider only decides how much of it is drawn. An ALPR scores below
+         * YELLOW past ~500 m, so this carries margin while keeping the store small.
+         */
+        const val EVAL_RADIUS_M = 1200f
         private const val REFETCH_THRESHOLD_M = 1500f
         /** Don't retry an Overpass POST within this window after a failure. */
         private const val FAILURE_BACKOFF_MS = 60_000L
@@ -104,22 +111,6 @@ class DeflockScanner(
         emitProximityEvents(fix)
     }
 
-    /**
-     * Re-evaluate the cached ALPRs against the current proximity threshold and
-     * the latest fix, *without* a network refetch. Used when the user moves the
-     * proximity slider — the slider changes [proximityMeters], but the scanner
-     * is otherwise idle (no new location ticks while stationary), so events
-     * outside the new radius would otherwise linger and detections inside the
-     * widened radius wouldn't appear until the next handleFix cycle.
-     *
-     * Clears the DEFLOCK source from the store first so events that fall
-     * outside a tightened radius disappear immediately.
-     */
-    fun refresh() {
-        val fix = locationProvider.location.value ?: return
-        store.clearSource(DetectionSource.DEFLOCK)
-        emitProximityEvents(fix)
-    }
 
     private fun emitProximityEvents(fix: Location) {
         val points = _cachedPoints.value
@@ -148,7 +139,8 @@ class DeflockScanner(
                     matchedMethods = scored.methods,
                     rssi = null,
                     lat = p.lat,
-                    lon = p.lon
+                    lon = p.lon,
+                    distanceMeters = dist
                 )
             )
         }

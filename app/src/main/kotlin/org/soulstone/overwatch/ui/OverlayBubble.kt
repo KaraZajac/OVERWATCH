@@ -119,6 +119,7 @@ fun OverlayBubble() {
                         )
                     }
                     for (e in events) {
+                        if (!e.visibleAt(radius)) continue
                         val lat = e.lat ?: continue
                         val lon = e.lon ?: continue
                         val dot = when (e.source) {

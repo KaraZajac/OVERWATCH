@@ -12,7 +12,7 @@ on upward escalations — you don't have to be looking at the screen.
 > advertise/fuzz code from one of the reference projects is intentionally
 > excluded.
 
-Website: **[overwatch.netslum.io](https://overwatch.netslum.io)**  ·  Latest release: [v0.5.11](https://github.com/KaraZajac/OVERWATCH/releases) (debug-signed APK, sideload).
+Website: **[overwatch.netslum.io](https://overwatch.netslum.io)**  ·  Latest release: [v0.5.12](https://github.com/KaraZajac/OVERWATCH/releases) (debug-signed APK, sideload).
 
 ---
 
@@ -95,12 +95,16 @@ is RED on top of it, ORANGE at 100 m, and GREEN by 500 m — still drawn on the
 map, just not an alarm. Waze keeps a wider band on purpose: a police car covers
 700 m in under a minute; a bollarded camera never moves.
 
-**This calibration is what makes a single range slider safe.** The tier is
-`max(score)` over everything reported, and the slider decides what gets
-reported — so with looser curves, standing still and dragging it from 300 m to
-500 m flipped the app GREEN → YELLOW with nothing physical changing. Now
-sweeping 200 m → 4900 m leaves the tier untouched, while standing 29 m from a
-camera still reads **89 RED**.
+**Scoring is fully decoupled from the range control.** The scanners evaluate
+everything inside their own fixed radii (DeFlock 1200 m, Waze 2000 m, aircraft
+15 km) and the tier is computed from that, so the slider cannot move it in
+either direction. It took two passes to get right: calibrating the curves stopped
+*widening* the range from dragging in distant noise, but narrowing it could still
+hide a genuine alert — a police report 312 m away scoring 52 vanished, and the
+circle went green, simply because the view was set to 300 m. Anything at YELLOW
+or above is now shown regardless of range. Measured: a camera 285 m away scoring
+48 holds the tier at YELLOW from a 200 m view range all the way to 4900 m, and
+standing 29 m from one still reads **89 RED**.
 
 The user-facing circle uses the full 4-tier mapping. Cross-source corroboration
 naturally pushes the global max upward (a BLE OUI hit *and* a DeFlock map
@@ -281,8 +285,10 @@ Tap the gear icon in the top-right.
   committing on release rather than per-pixel so dragging it doesn't restart the
   location scanners on every frame. It is a **view control, not a sensitivity
   control**: it sets what the circle draws and what the drill-down lists, and
-  nothing else. Scores come from real distance alone, so widening it adds dots
-  and rows but cannot change the threat tier.
+  nothing else. The scanners evaluate at their own fixed radii regardless of it,
+  so moving it in either direction cannot change the threat tier — and anything
+  at YELLOW or above is shown whatever the range says, because a view setting
+  that could hide a live alert would be a trap.
 - **Waze police feed**: paste your own OpenWeb Ninja API key — see
   [Waze setup](#waze-setup-bring-your-own-api-key). Stored encrypted on-device
   (Android Keystore), never baked into the APK. Empty = Waze source off.
@@ -309,7 +315,7 @@ These live under `REFERENCES/` (gitignored):
 ## Status
 
 Phases 1–5 (skeleton, BLE, WiFi, DeFlock, polish) complete and
-field-tested. Current release **v0.5.11**. Notable changes:
+field-tested. Current release **v0.5.12**. Notable changes:
 
 - v0.1.2 — Android 14+ foreground service type fix; NaN-coordinate filter on map data.
 - v0.1.3 — DeFlock CDN replaced by direct Overpass calls (Cloudflare-blocked).
@@ -332,6 +338,7 @@ field-tested. Current release **v0.5.11**. Notable changes:
 - v0.5.9 — Detection-radius slider moved onto the main screen (under the map, where you reach for it while moving) and a source-color legend added beneath the circle: ALPR red, speed camera amber, other cameras gray, Waze police blue, aircraft violet.
 - v0.5.10 — Recalibrated every distance curve so the range slider can no longer move the threat tier: each crosses below YELLOW at roughly the distance the thing stops being able to act on you (ALPR is RED on top of it, GREEN by 500 m). The main-screen slider is relabelled `show within` to say what it is — a view control, not a sensitivity control.
 - v0.5.11 — Android 15/16 and cutout-display compatibility. Opts into edge-to-edge explicitly and pads every screen with `WindowInsets.safeDrawing`; reproduced on Android 16 with a punch-hole, where v0.5.10 drew its title *inside* the status bar and buried the gear icon under the wifi/battery icons. The overlay bubble now states its cutout mode so it can't park under a camera hole. **BLE screen-off fix:** Android suspends unfiltered scans when the screen turns off and a foreground service does not exempt it, so the scanner switches to a filtered scan (Raven UUIDs, XUNTONG, mic company ids, capped at 16) while the screen is off — see [SOURCES.md §5](SOURCES.md).
+- v0.5.12 — The range slider can no longer change the threat tier in *either* direction. v0.5.10 stopped widening it from pulling in distant noise, but narrowing it still hid real alerts: a police report 312 m away scoring 52 disappeared and the circle went green because the view was set to 300 m. Scanners now evaluate at their own fixed radii (DeFlock 1200 m, Waze 2000 m) instead of the user's setting, events carry their distance, and anything at YELLOW or above is displayed regardless of range.
 
 ## License
 

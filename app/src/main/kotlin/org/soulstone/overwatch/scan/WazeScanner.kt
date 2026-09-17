@@ -35,11 +35,15 @@ class WazeScanner(
     private val store: DetectionStore,
     private val locationProvider: LocationProvider,
     private val client: WazeClient = WazeClient(),
-    private val proximityMeters: () -> Float = { 500f }
+    private val proximityMeters: () -> Float = { EVAL_RADIUS_M }
 ) {
 
     companion object {
         private const val TAG = "WazeScanner"
+        /** Fixed evaluation radius — see DeflockScanner.EVAL_RADIUS_M. Wider
+         *  than the camera one because police move and a report stays above
+         *  GREEN further out. */
+        const val EVAL_RADIUS_M = 2000f
         private const val POLL_INTERVAL_MS = 240_000L
         // The hosted feed only lists still-active alerts but lags live Waze, so
         // real police sightings routinely arrive already 20-30 min old. A 10-min
@@ -106,16 +110,6 @@ class WazeScanner(
         }
     }
 
-    /**
-     * Re-evaluate the last fetched alert set against the current proximity + age
-     * thresholds and latest fix, without a network refetch. Used when the user
-     * moves the Waze proximity slider.
-     */
-    fun refresh() {
-        val fix = locationProvider.location.value ?: return
-        store.clearSource(DetectionSource.WAZE)
-        emitProximityEvents(fix, lastAlerts)
-    }
 
     private fun emitProximityEvents(fix: Location, alerts: List<WazeClient.Alert>) {
         val now = System.currentTimeMillis()
@@ -148,7 +142,8 @@ class WazeScanner(
                     matchedMethods = scored.methods,
                     rssi = null,
                     lat = a.lat,
-                    lon = a.lon
+                    lon = a.lon,
+                    distanceMeters = dist
                 )
             )
         }

@@ -113,8 +113,6 @@ class DetectionService : LifecycleService() {
     private var observerJob: Job? = null
     private var mapPointsJob: Job? = null
     private var locationJob: Job? = null
-    private var deflockProxJob: Job? = null
-    private var wazeProxJob: Job? = null
     private var overlayJob: Job? = null
     private var bleStarted = false
     private var wifiStarted = false
@@ -130,14 +128,13 @@ class DetectionService : LifecycleService() {
         bleScanner = BleScanner(this, store, micEnabled = { settings.micEnabled.value })
         wifiScanner = WifiScanner(this, store, micEnabled = { settings.micEnabled.value })
         locationProvider = LocationProvider(this)
-        deflockScanner = DeflockScanner(
-            store, locationProvider, DeflockClient(this),
-            proximityMeters = { settings.detectionRadiusM.value.toFloat() }
-        )
+        // Scanners use their own fixed evaluation radii. The user's
+        // "show within" setting is a view control and must never decide what
+        // gets scored, or narrowing it would hide a real alert.
+        deflockScanner = DeflockScanner(store, locationProvider, DeflockClient(this))
         wazeScanner = WazeScanner(
             store, locationProvider,
-            client = WazeClient(apiKey = { settings.wazeApiKey.value }),
-            proximityMeters = { settings.detectionRadiusM.value.toFloat() }
+            client = WazeClient(apiKey = { settings.wazeApiKey.value })
         )
         aircraftScanner = AircraftScanner(this, store, locationProvider)
         overlayManager = OverlayManager(
@@ -256,16 +253,9 @@ class DetectionService : LifecycleService() {
         // Live re-eval when the user moves a proximity slider. drop(1) skips
         // the StateFlow's initial replay so we don't redundantly clear+re-emit
         // the events the scanner just produced from its first handleFix call.
-        // One radius now drives both location sources, so one collector
-        // re-evaluates whichever of them is running.
-        deflockProxJob?.cancel()
-        wazeProxJob?.cancel()
-        deflockProxJob = lifecycleScope.launch {
-            settings.detectionRadiusM.drop(1).collect {
-                if (deflockStarted) deflockScanner.refresh()
-                if (wazeStarted) wazeScanner.refresh()
-            }
-        }
+        // Nothing to do on a radius change any more: "show within" is a view
+        // control, the scanners evaluate at their own fixed radii, and the UI
+        // re-filters itself. Scoring is deliberately independent of it.
 
         // Floating threat-circle overlay — observe the toggle and show/hide
         // accordingly. The OverlayManager re-checks SYSTEM_ALERT_WINDOW each
@@ -295,8 +285,6 @@ class DetectionService : LifecycleService() {
         observerJob?.cancel(); observerJob = null
         mapPointsJob?.cancel(); mapPointsJob = null
         locationJob?.cancel(); locationJob = null
-        deflockProxJob?.cancel(); deflockProxJob = null
-        wazeProxJob?.cancel(); wazeProxJob = null
         overlayJob?.cancel(); overlayJob = null
         overlayManager.hide()
         _mapPoints.value = emptyList()

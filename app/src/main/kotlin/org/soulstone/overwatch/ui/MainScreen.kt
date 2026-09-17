@@ -241,7 +241,7 @@ fun MainScreen(
                     fontFamily = FontFamily.Monospace
                 )
                 Spacer(Modifier.height(8.dp))
-                SourcesPanel(events = events)
+                SourcesPanel(events = events.filter { it.visibleAt(detectionRadiusM.toFloat()) })
                 Spacer(Modifier.height(16.dp))
             }
         }
@@ -343,6 +343,7 @@ private fun ThreatMapCircle(
                         )
                     }
                     for (e in events) {
+                        if (!e.visibleAt(mapRadiusMeters)) continue
                         val lat = e.lat ?: continue
                         val lon = e.lon ?: continue
                         val dot = when (e.source) {
