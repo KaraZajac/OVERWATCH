@@ -21,8 +21,11 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      # Pinned to v3 deliberately: v4 downloads a newer cmdline-tools than the
+      # runner image ships and its license auto-accept then fails with
+      # "6 of 7 SDK package licenses not accepted" (broke 2026-09-17).
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v4
+        uses: android-actions/setup-android@v3
 
       - name: Build debug APK
         run: |
