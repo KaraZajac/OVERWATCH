@@ -80,17 +80,27 @@ freshness window, because police move and a surveyed camera does not.
 
 | Distance | DeFlock ALPR | Waze police (fresh) |
 |---|---|---|
-| 0 m | 92 RED | 80 ORANGE |
-| 50 m | 85 RED | 75 ORANGE |
-| 100 m | 77 ORANGE | 70 ORANGE |
-| 200 m | 60 YELLOW | 62 YELLOW |
-| 600 m | 45 YELLOW | 49 YELLOW |
-| 1200 m | 35 GREEN | 41 YELLOW |
-| 3000 m | 22 GREEN | 28 GREEN |
+| 0 m | 95 RED | 80 ORANGE |
+| 50 m | 85 RED | 78 ORANGE |
+| 100 m | 72 ORANGE | 70 ORANGE |
+| 200 m | 55 YELLOW | 62 YELLOW |
+| 350 m | 42 YELLOW | 52 YELLOW |
+| 500 m | 35 GREEN | 47 YELLOW |
+| 1000 m | 26 GREEN | 34 GREEN |
+| 3000 m | 18 GREEN | 23 GREEN |
 
-A fixed ALPR peaks higher and decays faster than a crowd-sourced police pin:
-its position is surveyed and exact, while a Waze report is a coarse pin on a
-car that may be moving toward you.
+Each curve crosses below the YELLOW line (40) at roughly the distance the thing
+stops being able to act on you. A Flock camera reads plates at ~30–50 m, so it
+is RED on top of it, ORANGE at 100 m, and GREEN by 500 m — still drawn on the
+map, just not an alarm. Waze keeps a wider band on purpose: a police car covers
+700 m in under a minute; a bollarded camera never moves.
+
+**This calibration is what makes a single range slider safe.** The tier is
+`max(score)` over everything reported, and the slider decides what gets
+reported — so with looser curves, standing still and dragging it from 300 m to
+500 m flipped the app GREEN → YELLOW with nothing physical changing. Now
+sweeping 200 m → 4900 m leaves the tier untouched, while standing 29 m from a
+camera still reads **89 RED**.
 
 The user-facing circle uses the full 4-tier mapping. Cross-source corroboration
 naturally pushes the global max upward (a BLE OUI hit *and* a DeFlock map
@@ -264,12 +274,13 @@ Tap the gear icon in the top-right.
 - **Detection sources**: toggle BLE / WiFi / DeFlock / Waze / Aircraft / Commercial independently.
   Changes take effect on the next Start. While scanning, a **Restart scan to
   apply** button appears that does `stop()` + `start()` in one tap.
-- **Detection radius** lives on the **main screen**, under the map — it's the
-  one setting you reach for while moving, so it isn't buried in Settings.
-  100 m – 5000 m, default 500 m, committing on release rather than per-pixel so
-  dragging it doesn't restart the location scanners on every frame. It sets what
-  gets reported and what the circle draws — *not* how alarming a hit is, which
-  is purely a function of real distance.
+- **Range** (`show within`) lives on the **main screen**, under the map — it's
+  the one control you reach for while moving. 100 m – 5000 m, default 500 m,
+  committing on release rather than per-pixel so dragging it doesn't restart the
+  location scanners on every frame. It is a **view control, not a sensitivity
+  control**: it sets what the circle draws and what the drill-down lists, and
+  nothing else. Scores come from real distance alone, so widening it adds dots
+  and rows but cannot change the threat tier.
 - **Waze police feed**: paste your own OpenWeb Ninja API key — see
   [Waze setup](#waze-setup-bring-your-own-api-key). Stored encrypted on-device
   (Android Keystore), never baked into the APK. Empty = Waze source off.
@@ -317,6 +328,7 @@ field-tested. Current release **v0.5.7**. Notable changes:
 - v0.5.7 — Citizen source **removed entirely** (client, scanner, scoring, settings, map dots and the drill-down row). Its endpoint now returns HTTP 410 Gone, so there was nothing left to degrade gracefully into. OVERWATCH is now a five-source app: BLE, WiFi, DeFlock, Waze, Commercial.
 - v0.5.8 — **AIRCRAFT source**: police / surveillance aircraft overhead via free community ADS-B feeds, matched against a bundled 1,971-entry registry of US law-enforcement airframes (regenerate with `scripts/gen-le-aircraft.py`), plus loiter/orbit detection so unlisted aircraft circling overhead still register. Overpass query widened to speed cameras and generic surveillance nodes, each scored on its own curve. DeFlock/Waze/aircraft all scored by continuous distance falloff. New [SOURCES.md](SOURCES.md) reference.
 - v0.5.9 — Detection-radius slider moved onto the main screen (under the map, where you reach for it while moving) and a source-color legend added beneath the circle: ALPR red, speed camera amber, other cameras gray, Waze police blue, aircraft violet.
+- v0.5.10 — Recalibrated every distance curve so the range slider can no longer move the threat tier: each crosses below YELLOW at roughly the distance the thing stops being able to act on you (ALPR is RED on top of it, GREEN by 500 m). The main-screen slider is relabelled `show within` to say what it is — a view control, not a sensitivity control.
 
 ## License
 

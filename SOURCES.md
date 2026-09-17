@@ -347,15 +347,30 @@ decides what gets *reported*, never how alarming it is.
 
 | Distance | ALPR | Speed camera | Generic camera | Waze police | Aircraft |
 |---|---|---|---|---|---|
-| 0 m | 92 | 75 | 55 | 80 | 88 |
-| 50 m | 85 | 70 | 48 | — | — |
-| 200 m | 60 | 52 | 38 | 62 | — |
-| 600 m | 45 | 40 | 30 | 49 | — |
-| 1000 m | — | — | — | — | 80 |
-| 1500 m | 30 | 28 | 22 | — | — |
-| 3000 m | 22 | 20 | 18 | 28 | 68 |
-| 6000 m | — | — | — | — | 55 |
+| 0 m | 95 | 78 | 55 | 80 | 88 |
+| 50 m | 85 | 70 | 46 | 78 | — |
+| 100 m | 72 | 63 | 42 | 70 | — |
+| 200 m | 55 | 50 | 34 | 62 | — |
+| 350 m | 42 | 38 | 28 | 52 | — |
+| 500 m | 35 | 32 | 26 | 47 | — |
+| 1000 m | 26 | 27 | 20 | 34 | 80 |
+| 3000 m | 18 | 16 | 14 | 23 | 68 |
 | 15000 m | — | — | — | — | 30 |
+
+**Every curve crosses below 40 (YELLOW) at roughly the distance the thing stops
+being able to act on you.** That is not cosmetic — it is what makes a single
+range slider safe. The on-screen tier is `max(score)` over everything reported,
+and the slider decides what is reported, so loose curves let the setting leak
+into the alarm: measured against a real 195-node cache, standing still and
+dragging from 300 m to 500 m flipped the app GREEN → YELLOW with nothing
+physical changing. After recalibration, sweeping 200 m → 4900 m leaves the tier
+untouched (reported items 0 → 133), while standing 29 m from a Flock camera
+still reads 89 RED.
+
+Aircraft are exempt from the range slider entirely — `AircraftScanner` uses its
+own 15 km reporting range (8 km for unregistered contacts), because an aircraft
+orbiting overhead is still watching you from a distance at which a camera
+cannot see you at all.
 
 A surveyed ALPR peaks highest and decays fastest — its position is exact and it
 cannot see you from a kilometre away. A Waze report is a coarse pin on a car

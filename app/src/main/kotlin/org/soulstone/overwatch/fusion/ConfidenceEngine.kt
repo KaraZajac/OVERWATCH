@@ -284,11 +284,23 @@ object ConfidenceEngine {
      * by [falloff].
      *
      * These are **absolute distances, deliberately not a fraction of the user's
-     * detection radius.** A camera 200 m away is exactly as close whether the
-     * radius slider reads 300 m or 5 km, so it has to score the same either
-     * way; keying off the radius would make the threat level move when the
-     * user touched a setting, which is the opposite of what the number means.
-     * The radius decides what gets *reported*, never how alarming it is.
+     * range setting.** A camera 200 m away is exactly as close whether the
+     * slider reads 300 m or 5 km, so it has to score the same either way.
+     *
+     * That alone was not enough, and the gap is worth recording. The on-screen
+     * tier is `max(score)` over everything *reported*, and the slider decides
+     * what gets reported — so with the original curves, standing still and
+     * dragging the slider from 300 m to 500 m flipped the app GREEN -> YELLOW
+     * with nothing physical changing (measured against a real 195-node cache).
+     * The scores were absolute but the tier still leaked the setting.
+     *
+     * The fix is calibration, not plumbing: each curve now crosses below the
+     * YELLOW line (40) at roughly the distance the thing stops being able to
+     * act on you. A Flock camera reads plates at ~30-50 m, so it is RED on top
+     * of it, ORANGE at 100 m, and GREEN by 500 m — visible on the map, not an
+     * alarm. Widening the view then adds dots and list rows but cannot change
+     * the tier. Waze keeps a wider alert band on purpose: a police car covers
+     * 700 m in under a minute, a bollarded camera never moves.
      *
      * A fixed ALPR's position is surveyed and exact, so it stays alarming
      * closer in and decays slowly. The 50 m and 200 m values are carried over
@@ -296,7 +308,8 @@ object ConfidenceEngine {
      * unchanged.
      */
     private val DEFLOCK_FALLOFF = arrayOf(
-        0f to 92f, 50f to 85f, 200f to 60f, 600f to 45f, 1500f to 30f, 3000f to 22f
+        0f to 95f, 25f to 90f, 50f to 85f, 100f to 72f, 200f to 55f,
+        350f to 42f, 600f to 30f, 1500f to 22f, 3000f to 18f
     )
 
     /**
@@ -304,7 +317,8 @@ object ConfidenceEngine {
      * you if you're speeding past it — relevant, not alarming.
      */
     private val SPEED_CAMERA_FALLOFF = arrayOf(
-        0f to 75f, 50f to 70f, 200f to 52f, 600f to 40f, 1500f to 28f, 3000f to 20f
+        0f to 78f, 50f to 70f, 150f to 55f, 300f to 42f, 500f to 32f,
+        1500f to 22f, 3000f to 16f
     )
 
     /**
@@ -313,7 +327,7 @@ object ConfidenceEngine {
      * distance and never drives the tier on its own.
      */
     private val CAMERA_FALLOFF = arrayOf(
-        0f to 55f, 50f to 48f, 200f to 38f, 600f to 30f, 1500f to 22f, 3000f to 18f
+        0f to 55f, 50f to 46f, 150f to 38f, 300f to 30f, 800f to 22f, 3000f to 14f
     )
 
     /**
@@ -322,7 +336,8 @@ object ConfidenceEngine {
      * the old flat baseline of 55.
      */
     private val WAZE_FALLOFF = arrayOf(
-        0f to 80f, 100f to 70f, 300f to 55f, 800f to 45f, 2000f to 32f, 4000f to 25f
+        0f to 80f, 100f to 70f, 300f to 55f, 600f to 44f, 900f to 36f,
+        2000f to 26f, 4000f to 20f
     )
 
     /**

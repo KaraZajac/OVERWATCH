@@ -401,11 +401,14 @@ private fun ThreatMapCircle(
 }
 
 /**
- * Detection radius, on the main screen because it is the one setting a user
- * actually reaches for while moving — it decides both what counts as a
- * detection and how much ground the circle shows. Commits on release rather
- * than per-pixel so dragging it doesn't restart the location scanners on
- * every frame.
+ * How far out to look — a view control, not a sensitivity control.
+ *
+ * It sets what the circle draws and what the drill-down lists, and nothing
+ * else: scores come from real distance alone (see ConfidenceEngine's falloff
+ * tables), so widening this adds dots and rows but cannot change the threat
+ * tier. It lives on the main screen because it is the one setting a user
+ * reaches for while actually moving. Commits on release rather than
+ * per-pixel, so dragging doesn't restart the location scanners every frame.
  */
 @Composable
 private fun RadiusSlider(
@@ -420,7 +423,7 @@ private fun RadiusSlider(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Text(
-                text = "detection radius",
+                text = "show within",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 11.sp,
                 fontFamily = FontFamily.Monospace
