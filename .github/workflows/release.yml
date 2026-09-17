@@ -21,11 +21,18 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      # Pinned to v3 deliberately: v4 downloads a newer cmdline-tools than the
-      # runner image ships and its license auto-accept then fails with
-      # "6 of 7 SDK package licenses not accepted" (broke 2026-09-17).
+      # packages: '' is load-bearing. The action's default is
+      # "tools platform-tools", but Google has removed the obsolete `tools`
+      # package from the SDK repository, so sdkmanager exits 1 with
+      # "Failed to find package 'tools'" (broke 2026-09-17). Nothing needs
+      # installing here anyway — AGP downloads the platform and build-tools
+      # it wants, and this step's job is just to provide sdkmanager and
+      # accept licenses. Pinned to v3: v4 also insists on downloading its own
+      # cmdline-tools and then fails license auto-accept.
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: ''
 
       - name: Build debug APK
         run: |
