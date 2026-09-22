@@ -23,6 +23,19 @@ class Settings private constructor(
 
     enum class ThemeMode { SYSTEM, DARK, LIGHT }
 
+    /**
+     * Which backend the WAZE source reads from.
+     *
+     * [OPENWEB_NINJA] is the default and stays the default: it costs money but
+     * tells Waze nothing about the user, because the request is made by OpenWeb
+     * Ninja's servers rather than the phone. [DIRECT] is free and live but speaks
+     * the Waze app's own protocol, which means registering an anonymous Waze
+     * account and sending a (jittered) position on every poll. That is a real
+     * disclosure to a Google service, so it is never selected on the user's
+     * behalf — they choose it in Settings after reading what it does.
+     */
+    enum class WazeBackend { OPENWEB_NINJA, DIRECT }
+
     private val _bleEnabled = MutableStateFlow(prefs.getBoolean(KEY_BLE, true))
     val bleEnabled: StateFlow<Boolean> = _bleEnabled.asStateFlow()
 
@@ -54,6 +67,12 @@ class Settings private constructor(
     // credential and every install authenticates as its own owner.
     private val _wazeApiKey = MutableStateFlow(SecureStore.get(appContext, KEY_WAZE_API_KEY) ?: "")
     val wazeApiKey: StateFlow<String> = _wazeApiKey.asStateFlow()
+
+    private val _wazeBackend = MutableStateFlow(
+        runCatching { WazeBackend.valueOf(prefs.getString(KEY_WAZE_BACKEND, null) ?: "") }
+            .getOrDefault(WazeBackend.OPENWEB_NINJA)
+    )
+    val wazeBackend: StateFlow<WazeBackend> = _wazeBackend.asStateFlow()
 
     private val _themeMode = MutableStateFlow(
         ThemeMode.valueOf(prefs.getString(KEY_THEME, ThemeMode.DARK.name) ?: ThemeMode.DARK.name)
@@ -93,6 +112,11 @@ class Settings private constructor(
         SecureStore.put(appContext, KEY_LEGACY_WAZE_PROXY_TOKEN, "")
     }
 
+    fun setWazeBackend(v: WazeBackend) {
+        prefs.edit { putString(KEY_WAZE_BACKEND, v.name) }
+        _wazeBackend.value = v
+    }
+
     fun setThemeMode(mode: ThemeMode) {
         prefs.edit { putString(KEY_THEME, mode.name) }
         _themeMode.value = mode
@@ -118,6 +142,7 @@ class Settings private constructor(
         private const val KEY_MIC = "src_mic"
         private const val KEY_DETECTION_RADIUS = "detection_radius_m"
         private const val KEY_WAZE_API_KEY = "waze_api_key"
+        private const val KEY_WAZE_BACKEND = "waze_backend"
         private const val KEY_LEGACY_WAZE_PROXY_TOKEN = "waze_proxy_token"
         private const val KEY_THEME = "theme_mode"
         private const val KEY_VIBRATE = "vibrate_on_alert"

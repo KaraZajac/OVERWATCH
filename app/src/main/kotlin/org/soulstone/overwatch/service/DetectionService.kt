@@ -41,6 +41,7 @@ import org.soulstone.overwatch.scan.DeflockScanner
 import org.soulstone.overwatch.scan.DeflockClient.SurveillancePoint
 import org.soulstone.overwatch.scan.WazeClient
 import org.soulstone.overwatch.scan.WazeScanner
+import org.soulstone.overwatch.scan.wazert.WazeRtClient
 import org.soulstone.overwatch.scan.WifiScanner
 
 /**
@@ -132,9 +133,15 @@ class DetectionService : LifecycleService() {
         // "show within" setting is a view control and must never decide what
         // gets scored, or narrowing it would hide a real alert.
         deflockScanner = DeflockScanner(store, locationProvider, DeflockClient(this))
+        // Backend is read once per service lifetime, like the source toggles:
+        // Start/Stop applies a change, a live switch does not.
         wazeScanner = WazeScanner(
             store, locationProvider,
-            client = WazeClient(apiKey = { settings.wazeApiKey.value })
+            source = when (settings.wazeBackend.value) {
+                Settings.WazeBackend.DIRECT -> WazeRtClient(this)
+                Settings.WazeBackend.OPENWEB_NINJA ->
+                    WazeClient(apiKey = { settings.wazeApiKey.value })
+            }
         )
         aircraftScanner = AircraftScanner(this, store, locationProvider)
         overlayManager = OverlayManager(

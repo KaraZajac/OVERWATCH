@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material.icons.Icons
@@ -46,11 +47,13 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.soulstone.overwatch.data.settings.Settings
+import org.soulstone.overwatch.scan.wazert.WazeRtClient
 
 @Composable
 fun SettingsScreen(
@@ -66,6 +69,7 @@ fun SettingsScreen(
     val aircraft by settings.aircraftEnabled.collectAsState()
     val mic by settings.micEnabled.collectAsState()
     val wazeApiKey by settings.wazeApiKey.collectAsState()
+    val wazeBackend by settings.wazeBackend.collectAsState()
     val theme by settings.themeMode.collectAsState()
     val vibrate by settings.vibrateOnAlert.collectAsState()
     val overlay by settings.overlayEnabled.collectAsState()
@@ -132,16 +136,39 @@ fun SettingsScreen(
 
         Spacer(Modifier.height(16.dp))
         SectionLabel("Waze police feed")
-        Text(
-            "Bring your own key: sign up at openwebninja.com, subscribe to the " +
-                "Waze API, and paste the key here. Stored encrypted on-device — " +
-                "never in the app package. Pay-as-you-go runs about \$1-3/month.",
-            fontSize = 11.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            fontFamily = FontFamily.Monospace,
-            modifier = Modifier.padding(vertical = 4.dp)
-        )
-        ApiKeyField(currentKey = wazeApiKey, onSave = { settings.setWazeApiKey(it) })
+        RadioRow(
+            "OpenWeb Ninja  •  your API key",
+            wazeBackend == Settings.WazeBackend.OPENWEB_NINJA
+        ) { settings.setWazeBackend(Settings.WazeBackend.OPENWEB_NINJA) }
+        RadioRow(
+            "Direct from Waze  •  no key",
+            wazeBackend == Settings.WazeBackend.DIRECT
+        ) { settings.setWazeBackend(Settings.WazeBackend.DIRECT) }
+
+        when (wazeBackend) {
+            Settings.WazeBackend.OPENWEB_NINJA -> {
+                HelpText(
+                    "Bring your own key: sign up at openwebninja.com, subscribe to " +
+                        "the Waze API, and paste the key here. Stored encrypted " +
+                        "on-device — never in the app package. Pay-as-you-go runs " +
+                        "about \$1-3/month. Waze never sees you: the request is made " +
+                        "by OpenWeb Ninja, not your phone."
+                )
+                ApiKeyField(currentKey = wazeApiKey, onSave = { settings.setWazeApiKey(it) })
+            }
+            Settings.WazeBackend.DIRECT -> {
+                HelpText(
+                    "Free, live, no key: OVERWATCH speaks the Waze app's own " +
+                        "protocol. It registers an anonymous Waze account (stored " +
+                        "encrypted on-device) and sends your position — blurred by up " +
+                        "to 500 m — with each poll, about once a minute.\n\n" +
+                        "Waze is a Google service. Choosing this tells Google roughly " +
+                        "where you are, the way running the Waze app would. Pick it " +
+                        "only if that trade is worth a live feed to you."
+                )
+                WazeAccountControls()
+            }
+        }
 
         Spacer(Modifier.height(16.dp))
         SectionLabel("Alerts")
@@ -175,13 +202,13 @@ fun SettingsScreen(
 
         Spacer(Modifier.height(16.dp))
         SectionLabel("Appearance")
-        ThemeRadio("System default", theme == Settings.ThemeMode.SYSTEM) {
+        RadioRow("System default", theme == Settings.ThemeMode.SYSTEM) {
             settings.setThemeMode(Settings.ThemeMode.SYSTEM)
         }
-        ThemeRadio("Dark", theme == Settings.ThemeMode.DARK) {
+        RadioRow("Dark", theme == Settings.ThemeMode.DARK) {
             settings.setThemeMode(Settings.ThemeMode.DARK)
         }
-        ThemeRadio("Light", theme == Settings.ThemeMode.LIGHT) {
+        RadioRow("Light", theme == Settings.ThemeMode.LIGHT) {
             settings.setThemeMode(Settings.ThemeMode.LIGHT)
         }
         Spacer(Modifier.height(24.dp))
@@ -325,15 +352,76 @@ private fun ApiKeyField(currentKey: String, onSave: (String) -> Unit) {
     }
 }
 
+/** Small explanatory paragraph under a setting. */
 @Composable
-private fun ThemeRadio(label: String, selected: Boolean, onClick: () -> Unit) {
+private fun HelpText(text: String) {
+    Text(
+        text = text,
+        fontSize = 11.sp,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        fontFamily = FontFamily.Monospace,
+        modifier = Modifier.padding(vertical = 4.dp)
+    )
+}
+
+/**
+ * State of the anonymous Waze account the direct backend mints, plus a way to
+ * throw it away. Waze caps how many anonymous accounts a device may register per
+ * day, so forgetting one is not free — the button says so rather than inviting
+ * the user to tap it repeatedly.
+ */
+@Composable
+private fun WazeAccountControls() {
+    val context = LocalContext.current
+    // Bumped after a forget, to re-read the store.
+    var revision by remember { mutableStateOf(0) }
+    val hasAccount = remember(revision) { WazeRtClient(context).hasAccount() }
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = if (hasAccount) "Anonymous Waze account stored"
+                   else "No account yet — one is created on the first poll",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontSize = 11.sp,
+            fontFamily = FontFamily.Monospace,
+            modifier = Modifier.weight(1f, fill = true)
+        )
+        if (hasAccount) {
+            Button(
+                onClick = {
+                    WazeRtClient(context).forgetAccount()
+                    revision++
+                },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    contentColor = MaterialTheme.colorScheme.onSurface
+                ),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text("Forget", fontSize = 13.sp, fontFamily = FontFamily.Monospace)
+            }
+        }
+    }
+}
+
+@Composable
+private fun RadioRow(label: String, selected: Boolean, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            // The whole row is the target, not just the radio circle: these rows
+            // choose a data backend and a theme, and hunting a 20 dp dot on a phone
+            // in a car is friction for no reason. `selectable` also gives the row
+            // the right accessibility semantics for a radio group.
+            .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
             .padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        RadioButton(selected = selected, onClick = onClick)
+        // Null: the row above owns the click, so the button must not double-handle it.
+        RadioButton(selected = selected, onClick = null)
         Text(
             text = label,
             color = MaterialTheme.colorScheme.onBackground,

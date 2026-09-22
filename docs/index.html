@@ -53,7 +53,7 @@
   <div class="container hero-inner">
     <div class="hero-eyebrow">
       <span class="dot dot-pulse"></span>
-      v0.5.14 · Android · passive
+      v0.5.15 · Android · passive
     </div>
     <h1 class="hero-title">
       <span class="display-wordmark">OVERWATCH</span>
@@ -244,13 +244,18 @@
         <h3>Waze — police alerts</h3>
         <p>
           Live user-reported <code>POLICE</code> alerts (default 500 m,
-          ~45 min freshness). Waze reCAPTCHA-gated its map endpoint, so
-          OVERWATCH reads <a href="https://www.openwebninja.com">OpenWeb
-          Ninja</a>'s hosted feed at <code>api.openwebninja.com</code> —
-          using <strong>your own API key</strong>, pasted into Settings and
-          stored encrypted in the Android Keystore. Nothing ships in the APK,
-          and each install bills to its own account (~$1–3/month
-          pay-as-you-go).
+          ~45 min freshness). Waze's public map endpoint now 403s automated
+          clients at Google's edge, so OVERWATCH offers <strong>two ways
+          in</strong> and lets you choose. <strong>OpenWeb Ninja</strong>
+          (default) reads their hosted feed at
+          <code>api.openwebninja.com</code> using <strong>your own API
+          key</strong>, pasted into Settings and stored encrypted in the
+          Android Keystore — Waze never sees you, and each install bills to
+          its own account (~$1–3/month). <strong>Direct</strong> speaks Waze's
+          own app protocol over an anonymous account: free, keyless and live,
+          but it sends a blurred position to a Google service on every poll,
+          so it stays off until you turn it on. Nothing ships in the APK
+          either way.
         </p>
       </article>
 
@@ -436,7 +441,7 @@
           <ul>
             <li>Grab the latest debug-signed APK from
               <a href="https://github.com/KaraZajac/OVERWATCH/releases/latest">Releases</a>
-              (currently <strong>v0.5.14</strong>).</li>
+              (currently <strong>v0.5.15</strong>).</li>
           </ul>
         </div>
         <div class="tl-col tl-active">
@@ -505,7 +510,7 @@
       transmit, probe, jam, or interfere with any device or network.
     </p>
     <p class="footer-meta">
-      v0.5.14 · <a href="https://github.com/KaraZajac/OVERWATCH">github.com/KaraZajac/OVERWATCH</a>
+      v0.5.15 · <a href="https://github.com/KaraZajac/OVERWATCH">github.com/KaraZajac/OVERWATCH</a>
     </p>
     <div class="onion-line">
       <span class="onion-label">Also on Tor</span>

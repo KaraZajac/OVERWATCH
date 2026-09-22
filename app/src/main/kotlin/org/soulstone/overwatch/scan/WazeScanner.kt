@@ -16,25 +16,22 @@ import org.soulstone.overwatch.fusion.DetectionStore
 import org.soulstone.overwatch.fusion.SourceHealth
 
 /**
- * Polls the OpenWeb Ninja Waze feed for live POLICE alerts around the current
+ * Polls a [WazeSource] backend for live POLICE alerts around the current
  * location, then submits any inside [proximityMeters] and younger than
  * [MAX_AGE_MS].
  *
- * Poll cadence is deliberately slow — the feed is a metered paid API and lags
- * live Waze by ~20 min anyway, so a 4-min poll loses nothing and keeps request
- * volume (and pay-as-you-go cost, ~$0.005/req) low at ~15 req/active-hour. Kept
- * just under the DetectionStore's 5-min retention so a persistent alert (a
- * standing checkpoint) is re-submitted before it can expire and flicker out. If
- * no API key is configured the loop records the source as unreachable (with a
- * clear reason) and skips the network call rather than hammering a 401.
+ * The backend supplies its own poll cadence, because the two differ by an order
+ * of magnitude for good reasons: the metered hosted feed polls every 4 min to
+ * keep cost down, the direct protocol every 60 s to keep its session alive. If
+ * the backend is not configured (no API key, say) the loop records the source as
+ * unreachable with that backend's own reason and skips the network call rather
+ * than hammering a 401.
  *
- * The last fetched alert set is cached so [refresh] can re-evaluate against a
- * moved proximity slider without a network refetch.
  */
 class WazeScanner(
     private val store: DetectionStore,
     private val locationProvider: LocationProvider,
-    private val client: WazeClient = WazeClient(),
+    private val source: WazeSource,
     private val proximityMeters: () -> Float = { EVAL_RADIUS_M }
 ) {
 
@@ -44,17 +41,14 @@ class WazeScanner(
          *  than the camera one because police move and a report stays above
          *  GREEN further out. */
         const val EVAL_RADIUS_M = 2000f
-        private const val POLL_INTERVAL_MS = 240_000L
-        // The hosted feed only lists still-active alerts but lags live Waze, so
-        // real police sightings routinely arrive already 20-30 min old. A 10-min
-        // cutoff (fine for the old direct-live feed) would drop nearly all of
-        // them; 45 min matches what the feed actually serves as "current."
+        // Hosted-feed alerts routinely arrive already 20-30 min old (it lags live
+        // Waze), so a 10-min cutoff would drop nearly all of them. 45 min matches
+        // what that feed serves as "current" and is harmless for the live backend.
         /** Shared with ConfidenceEngine, which decays the score across this window. */
         private const val MAX_AGE_MS = ConfidenceEngine.WAZE_MAX_AGE_MS
     }
 
     private var job: Job? = null
-    private var lastAlerts: List<WazeClient.Alert> = emptyList()
 
     fun start(scope: CoroutineScope): Boolean {
         if (job != null) return true
@@ -65,41 +59,39 @@ class WazeScanner(
             while (isActive) {
                 val fix = locationProvider.location.value
                 if (fix != null) pollOnce(fix)
-                delay(POLL_INTERVAL_MS)
+                delay(source.pollIntervalMs)
             }
         }
-        Log.i(TAG, "WazeScanner started (interval=${POLL_INTERVAL_MS}ms, configured=${client.isConfigured})")
+        Log.i(
+            TAG,
+            "WazeScanner started (backend=${source.backendName}, " +
+                "interval=${source.pollIntervalMs}ms, configured=${source.isConfigured})"
+        )
         return true
     }
 
     fun stop() {
         job?.cancel()
         job = null
-        lastAlerts = emptyList()
         Log.i(TAG, "WazeScanner stopped")
     }
 
     private suspend fun pollOnce(fix: Location) {
-        if (!client.isConfigured) {
-            SourceHealth.record(
-                DetectionSource.WAZE,
-                ok = false,
-                message = "OpenWeb Ninja API key not set — add it in Settings"
-            )
+        if (!source.isConfigured) {
+            SourceHealth.record(DetectionSource.WAZE, ok = false, message = source.unconfiguredReason)
             return
         }
 
-        when (val result = client.fetchPoliceNear(fix.latitude, fix.longitude, proximityMeters())) {
-            is WazeClient.FetchResult.Failed -> {
+        when (val result = source.fetchPoliceNear(fix.latitude, fix.longitude, proximityMeters())) {
+            is WazeSource.FetchResult.Failed -> {
                 SourceHealth.record(
                     DetectionSource.WAZE,
                     ok = false,
-                    message = "Waze feed unreachable: ${result.reason}"
+                    message = "${source.backendName} unreachable: ${result.reason}"
                 )
             }
-            is WazeClient.FetchResult.Success -> {
+            is WazeSource.FetchResult.Success -> {
                 SourceHealth.record(DetectionSource.WAZE, ok = true)
-                lastAlerts = result.alerts
                 // Deliberately no clearSource() here: re-submitting refreshes
                 // still-present alerts by key (dedup) and lets vanished ones age
                 // out via the store's 5-min TTL. Clearing every poll would briefly
@@ -111,7 +103,7 @@ class WazeScanner(
     }
 
 
-    private fun emitProximityEvents(fix: Location, alerts: List<WazeClient.Alert>) {
+    private fun emitProximityEvents(fix: Location, alerts: List<WazeSource.Alert>) {
         val now = System.currentTimeMillis()
         val limit = proximityMeters()
         val out = FloatArray(1)

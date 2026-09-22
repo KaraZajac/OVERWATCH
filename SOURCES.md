@@ -17,7 +17,7 @@ network-facing rots; re-verify before quoting it.
 | **BLE** | Bluetooth-LE advertisements from surveillance hardware | Local radio | free | 2026-09 |
 | **WIFI** | BSSIDs + SSIDs of surveillance infrastructure | Local radio | free | 2026-09 |
 | **DEFLOCK** | Mapped fixed surveillance: ALPR, speed cameras, CCTV | Overpass / OSM | free | 2026-09-17 |
-| **WAZE** | Live crowd-sourced police reports | OpenWeb Ninja | ~$1–3/mo | 2026-09-16 |
+| **WAZE** | Live crowd-sourced police reports | OpenWeb Ninja *or* Waze's own protocol | ~$1–3/mo *or* free | 2026-09-21 |
 | **AIRCRAFT** | Police / surveillance aircraft overhead | ADS-B community feeds | free | 2026-09-17 |
 | **COMMERCIAL** | Consumer cameras, voice assistants, smart glasses | Rides BLE + WiFi | free | 2026-09 |
 
@@ -68,7 +68,22 @@ which is why generic cameras are worth carrying.
 - **Dead:** `cdn.deflock.me/regions/*.json` — behind Cloudflare bot mitigation,
   unusable from a mobile HTTP client.
 
-### 2.2 OpenWeb Ninja — the WAZE source
+### 2.2 The WAZE source — two backends
+
+The WAZE source reads user-reported `POLICE` alerts. Two backends exist and the
+user picks one in Settings; `scan/WazeSource.kt` is the interface both implement,
+so neither leaks into scoring or UI. Default is OpenWeb Ninja.
+
+|  | OpenWeb Ninja | Direct (Waze RT) |
+|---|---|---|
+| Key | user's own, required | none |
+| Cost | ~$0.005/request | free |
+| Poll | 240 s | 60 s |
+| Latency | ~20 min behind live | live |
+| Position sent to Waze | none | every poll, jittered ±500 m |
+| Default | yes | no, opt-in |
+
+#### 2.2a OpenWeb Ninja (default)
 
 ```
 GET https://api.openwebninja.com/waze/alerts-and-jams
@@ -80,7 +95,7 @@ Header: X-API-Key: <the user's own key>
 **Bring your own key** — sign up at openwebninja.com, subscribe to the Waze API,
 paste the key into Settings. Stored encrypted (Android Keystore AES/GCM via
 `SecureStore`); nothing ships in the APK. Pay-as-you-go ≈ **$0.005/request**,
-≈ 15 requests/active hour at the ~4-minute poll, so **$1–3/month**. The free
+≈ 15 requests/active hour at the 4-minute poll, so **$1–3/month**. The free
 tier's 100 requests/month verifies the integration but will not run it.
 
 Verified behaviour (2026-09-16):
@@ -96,12 +111,68 @@ Verified behaviour (2026-09-16):
 - Police alerts very often carry `alert_confidence: 0` and `alert_reliability: 0`,
   so the distance floor matters more than the crowd-trust bonuses.
 
-**Why not scrape Waze directly:** `waze.com/live-map/api/georss` is gated by
-reCAPTCHA Enterprise *reputation* scoring. Tested 2026-07 from a residential IP —
-plain curl, headless Chromium, **headful** Chromium on a real display, and
-undetected-chromedriver all returned **HTTP 403**, including Waze's own page
-requests. It scores browser reputation, not automation flags, so no scraper
-survives. The Waze for Cities partner feed excludes POLICE and is agency-only.
+#### 2.2b Direct — the Waze app's own protocol (opt-in)
+
+```
+POST https://rt-xlb-am.waze.com/rtserver/distrib/static    # register
+POST https://rt-xlb-am.waze.com/rtserver/distrib/login     # authenticate
+POST https://rt-xlb-am.waze.com/rtserver/distrib/command   # query / stream
+Content-Type: binary/octet-stream      Response: application/x-protobuf
+```
+
+Regional hosts: `rt-xlb-am` (North America), `rt-xlb-il` (Israel),
+`rt-xlb-row` (rest of world).
+
+No key and no account of the user's: `/static` mints an anonymous
+username/password pair on request. The request body is line-oriented — protobuf
+messages framed as `"ProtoBase64," + base64(Batch{Element})`, plain-text command
+lines (`SeeMe`, `SetMood`, `Location`, `MapDisplayed`) — joined by newlines. The
+message set lives in `app/src/main/proto/waze.proto` (proto2, `LITE_RUNTIME`).
+
+Behaviour verified 2026-09-21, from a Linux host and from an Android 16
+emulator:
+
+- **The session is stateful.** `/command` returns each alert *once* per session
+  as an `AddAlertAction`, then a removal as an `old_command` line of the form
+  `RmAlert,<uuid>` — not a message type. A client that treats each response as a
+  snapshot goes empty after the first query, so responses are merged into a cache
+  with a 5-minute soft-delete.
+- **Login sets a `Waze-Session-Affinity` cookie** that every later `/command`
+  must carry, and the session idles out after ~100 s.
+- **A fresh account's first `/command` usually returns an in-band
+  `ServerError{code: 504, description: "Retry"}` inside an HTTP 200.** It
+  succeeds on the next attempt, so it is retried rather than treated as failure.
+- **Queries are a series of shrinking boxes** (5 steps, each half the last, each
+  shrunk to 0.75 before sending). The server thins results by viewport size, so a
+  single wide box drops near-driver detail.
+- **Longitude arrives as unsigned 32-bit micro-degrees** and must be mapped back
+  to signed, or the western hemisphere lands on the wrong side of the planet.
+- **Data volume:** ~195 KB for the first (handshake) response of a session, ~8 KB
+  per query after. Keeping the session alive is therefore *cheaper* than polling
+  slowly, which is why the poll is 60 s.
+- Anonymous-account registration is capped per device per day (10), so the
+  account is persisted encrypted and reused, and a rejected account backs off
+  30 s → 10 min instead of spinning the register loop.
+
+**What it costs the user, and why it is off by default:** the app becomes a Waze
+client. It holds a Waze account and sends a position on every poll — the codec
+jitters it by up to 500 m, but Waze is a Google service and this is a real
+disclosure. The Settings screen says so in those terms before the toggle.
+
+The protocol layer under `scan/wazert/` is **vendored** from
+highway-radar-sabre-plus (MIT, licence kept beside the code), unmodified apart
+from the package name, removal of the report-submission path, and swapping OkHttp
+for `HttpURLConnection`. OVERWATCH reads alerts and never reports one.
+
+**Why not `live-map/api/georss`:** the endpoint every scraper used is fronted by
+Google's edge, which returns **HTTP 403** to automated clients. Tested 2026-07
+and again 2026-09 from a residential IP — plain curl, headless Chromium,
+**headful** Chromium on a real display, and undetected-chromedriver all 403, as
+did Waze's own page requests. The response carries `via: 1.1 google`, i.e. the
+block is at the front end, before any application logic; no user-agent, cookie,
+TLS fingerprint or IP changes it. The RT hosts above are a different front end
+and answer normally. The Waze for Cities partner feed excludes POLICE and is
+agency-only.
 
 ### 2.3 ADS-B community networks — the AIRCRAFT source
 
@@ -560,3 +631,6 @@ Reference projects studied while building (kept under a gitignored `REFERENCES/`
 - **deflock / deflock-app** — the Overpass query shape and proximity-alert
   pattern.
 - **wazepolice** — the original `live-map/api/georss` recipe, now dead.
+- **highway-radar-sabre-plus** (MIT) — the Waze RT protocol layer. The only
+  reference that is *vendored* rather than studied: `scan/wazert/*.java` and
+  `proto/waze.proto` are that project's code, carried with its licence.

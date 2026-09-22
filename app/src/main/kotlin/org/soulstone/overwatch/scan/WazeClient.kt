@@ -12,6 +12,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+// The alert and result types are shared with the other WAZE backend. Importing the
+// nested names keeps this client's body reading the way it always has. (A typealias
+// would not: Kotlin will not resolve a nested class through one.)
+import org.soulstone.overwatch.scan.WazeSource.Alert
+import org.soulstone.overwatch.scan.WazeSource.FetchResult
 
 /**
  * Fetches live Waze POLICE alerts from OpenWeb Ninja's hosted Waze feed.
@@ -34,10 +39,12 @@ import org.json.JSONObject
  * the scanner reports that instead of calling out, so Waze stays dormant rather
  * than erroring on every poll.
  *
- * Direct scraping is not an option: `waze.com/live-map/api/georss` is gated by
- * reCAPTCHA Enterprise *reputation* scoring and 403s automated clients
- * regardless of IP or headless-vs-headful browser, which is why this reads a
- * hosted feed at all.
+ * Why a hosted feed at all: `waze.com/live-map/api/georss`, the endpoint every
+ * scraper used, is fronted by Google's edge and 403s automated clients outright
+ * — no IP, header or browser makes it answer. A direct path does exist (the Waze
+ * app's own protocol, see [org.soulstone.overwatch.scan.wazert.WazeRtClient]) but
+ * it means holding a Waze account and sending a position, so it is opt-in and
+ * this metered-but-anonymous backend stays the default.
  *
  * Response shape (verified live 2026-09-16): `{ "data": { "alerts": [...],
  * "jams": [...] } }`, each alert carrying `alert_id`, `type`, `subtype`
@@ -50,7 +57,7 @@ import org.json.JSONObject
  */
 class WazeClient(
     private val apiKey: () -> String = { "" }
-) {
+) : WazeSource {
 
     companion object {
         private const val TAG = "WazeClient"
@@ -63,26 +70,21 @@ class WazeClient(
         private const val BBOX_MIN_RADIUS_M = 800.0
     }
 
+    override val backendName: String = "OpenWeb Ninja"
+
     /** True when the user has entered an API key. False → source is unconfigured. */
-    val isConfigured: Boolean get() = apiKey().isNotBlank()
+    override val isConfigured: Boolean get() = apiKey().isNotBlank()
 
-    data class Alert(
-        val uuid: String,
-        val subtype: String?,
-        val lat: Double,
-        val lon: Double,
-        val pubMillis: Long,
-        val confidence: Int,   // 0-5
-        val reliability: Int   // 0-10
-    )
+    override val unconfiguredReason: String =
+        "OpenWeb Ninja API key not set — add it in Settings"
 
-    /** Outcome — distinguishes "no police alerts in area" from "couldn't reach the feed." */
-    sealed class FetchResult {
-        data class Success(val alerts: List<Alert>) : FetchResult()
-        data class Failed(val reason: String) : FetchResult()
-    }
+    /** Slow on purpose: the feed is metered (~$0.005/request) and lags live Waze
+     *  by ~20 min anyway, so a faster poll would buy nothing but cost money. Kept
+     *  just under the DetectionStore's 5-min retention so a standing checkpoint is
+     *  re-submitted before it can expire and flicker out. */
+    override val pollIntervalMs: Long = 240_000L
 
-    suspend fun fetchPoliceNear(
+    override suspend fun fetchPoliceNear(
         lat: Double,
         lon: Double,
         radiusMeters: Float

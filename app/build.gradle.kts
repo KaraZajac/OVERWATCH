@@ -4,6 +4,7 @@ plugins {
     // The Compose compiler plugin is still applied separately.
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.protobuf)
 }
 
 android {
@@ -14,8 +15,8 @@ android {
         applicationId = "org.soulstone.overwatch"
         minSdk = 26
         targetSdk = 35
-        versionCode = 30
-        versionName = "0.5.14"
+        versionCode = 31
+        versionName = "0.5.15"
     }
 
     // Fixed debug keystore committed to the repo (a debug key is non-secret — its
@@ -62,6 +63,22 @@ android {
     }
 }
 
+// Generates WazeProto from src/main/proto/waze.proto. `lite` keeps the runtime and
+// the generated code small enough for an app that only speaks one protocol.
+protobuf {
+    protoc { artifact = libs.protobuf.protoc.get().toString() }
+    generateProtoTasks {
+        all().forEach { task ->
+            // Android projects get no default `java` builtin from the plugin, so
+            // create it (maybeCreate keeps this correct either way) and ask for the
+            // lite generator to match the protobuf-javalite runtime.
+            task.builtins {
+                maybeCreate("java").option("lite")
+            }
+        }
+    }
+}
+
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
@@ -77,6 +94,7 @@ dependencies {
 
     implementation(libs.play.services.location)
     implementation(libs.osmdroid.android)
+    implementation(libs.protobuf.javalite)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
 }
