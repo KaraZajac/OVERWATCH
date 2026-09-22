@@ -295,24 +295,69 @@ first in the list.
 
 ### 3.7 COMMERCIAL / consumer gear
 
-`data/targets/MicTargets.kt`. Families: `ECHO`, `RING`, `GOOGLE`, `HIDDEN_CAM`,
-`GLASSES`.
+`data/targets/MicTargets.kt`. Families: `ECHO`, `RING`, `GOOGLE`, `SONOS`,
+`HIDDEN_CAM`, `GLASSES`.
 
-Bluetooth SIG company IDs:
+Bluetooth SIG company IDs — every one re-verified against the SIG
+assigned-numbers registry (4,035 entries) on 2026-09-21:
 
-| ID | Vendor |
-|---|---|
-| `0x00E0` | Google |
-| `0x0171` | Amazon |
-| `0x05A7` | Yingxin |
-| `0x01AB` | Meta Platforms |
-| `0x058E` | Meta Platforms Technologies (Reality Labs / Quest) |
-| `0x0D53` | Luxottica — Ray-Ban / Oakley Meta frames |
-| `0x03C2` | Snap Inc. — Spectacles |
-| `0x060C` | Vuzix |
+| ID | Vendor | Family |
+|---|---|---|
+| `0x00E0` | Google | GOOGLE |
+| `0x0171` | Amazon.com Services | ECHO |
+| `0x05A7` | **Sonos Inc** | SONOS |
+| `0x01AB` | Meta Platforms, Inc. | GLASSES |
+| `0x058E` | Meta Platforms Technologies (Reality Labs / Quest) | GLASSES |
+| `0x0D53` | Luxottica Group — Ray-Ban / Oakley Meta frames | GLASSES |
+| `0x03C2` | Snapchat Inc — Spectacles | GLASSES |
+| `0x060C` | Vuzix | GLASSES |
 
-`0x004C` (Apple) is **deliberately excluded** — every iPhone and AirPod in range
-would match, drowning the signal.
+`0x05A7` was previously labelled "Yingxin / cheap-spy-cam" and mapped to
+HIDDEN_CAM; the registry says Sonos. That would have tagged a Sonos speaker as
+a hidden camera. Sonos does belong in scope (the Era/One lines carry always-on
+microphones), but under an honest label.
+
+**Deliberately excluded:**
+
+- `0x004C` (Apple) — every iPhone and AirPod in range would match, drowning
+  the signal.
+- `0x0BC6` (TCL) — RayNeo glasses ride under it, but so does everything else
+  TCL makes.
+- `0x05D6` (Zhuhai Jieli) — Nearby Glasses lists it for the Rogbird VisionPro
+  and Rollme VistaView, and its own notes say why it is a problem: it is the id
+  of the *Jieli JL70xx Bluetooth chipset*, present in an enormous share of
+  cheap TWS earbuds, speakers and toys. Matching it would label every one of
+  those "Smart glasses". If distinctive name strings for those products
+  surface, they belong in the name hints instead.
+
+Advertised service UUIDs (checked in **both** the service list and the
+service-data keys — HeyCyan frames have been seen carrying it either way):
+
+| UUID | Meaning | Family |
+|---|---|---|
+| `0000FE03-…` (16-bit `FE03`) | Alexa Voice Service (Amazon Lab126) | ECHO |
+| `7905FFF0-B5CE-4E99-A40F-4B1E122D00D0` | HeyCyan smart-glasses SDK primary service — Nilox Smart AI Glasses (sold by ALDI/Hofer) and other HeyCyan-based frames. Fixed on the software side, so it survives the randomised MACs and unstable names that defeat most glasses detection. | GLASSES |
+
+Both service UUIDs are also added to the screen-off `ScanFilter` set (§5.1),
+ahead of the company ids, because they are exact signatures and are what
+should survive if the 16-slot list is trimmed.
+
+Name tokens: the case-sensitive hints (`Spectacles`, `Ray-Ban`, `RayNeo`,
+`Vuzix`, `XREAL`, `Rokid`, plus the Echo/Ring/Nest set) and, matched
+case-insensitively against the lowercased name, `rayban`, `ray-ban`,
+`ray ban`, `heycyan`.
+
+**Credit:** the GLASSES identifier set is drawn from
+[Nearby Glasses](https://github.com/yjeanrenaud/yj_nearbyglasses) by
+[Yves Jeanrenaud](https://yves.app) (AGPL-3.0, ~2.3k stars), whose
+`smart_glasses_identifiers.csv` and README document the company ids, the
+HeyCyan UUID (traced via the [HeyCyan SDK](https://github.com/ebowwa/HeyCyanSmartGlassesSDK))
+and the name tokens. OVERWATCH takes the published *identifiers* — facts about
+the radio protocol — not the project's code. Two small upstream notes worth
+passing back: the CSV's `Snap` row carries `0x0D53`, which is Luxottica (the
+project's own README and code have Snap correctly as `0x03C2`), and its
+scanner reads only the first manufacturer-data entry (`keyAt(0)`), whereas
+some devices advertise several.
 
 Hidden-camera OUIs: `fc:b4:67` (Yingxin/SmartLife), `00:e0:4c` (Realtek, in many
 cheap cams), `dc:4f:22` (Tuya-affiliated modules), `a4:c1:38` (Telink, common in

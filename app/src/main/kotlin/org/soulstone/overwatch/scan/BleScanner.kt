@@ -109,6 +109,12 @@ class BleScanner(
             out.add(ScanFilter.Builder().setServiceUuid(ParcelUuid(uuid)).build())
         }
         if (micEnabled()) {
+            // Precise service UUIDs first (HeyCyan glasses, Echo AVS): they are
+            // exact signatures, so they outrank the broad company ids that
+            // follow and are what should survive if the list is trimmed.
+            for (uuid in MicTargets.SERVICE_UUIDS) {
+                out.add(ScanFilter.Builder().setServiceUuid(ParcelUuid(uuid)).build())
+            }
             for (id in MicTargets.COMPANY_IDS) {
                 out.add(
                     ScanFilter.Builder()
@@ -298,7 +304,14 @@ class BleScanner(
         val name = try { device.name } catch (e: SecurityException) { null }
         val record = result.scanRecord
 
-        val advertisedUuids = record?.serviceUuids?.map { it.uuid }
+        // A service UUID can ride in the advertised service list OR as a
+        // service-data key — HeyCyan-SDK glasses (Nilox etc.) show up both
+        // ways (per Nearby Glasses' scanner), so merge the two before matching.
+        val advertisedUuids: List<java.util.UUID>? = run {
+            val fromList = record?.serviceUuids?.map { it.uuid }.orEmpty()
+            val fromData = record?.serviceData?.keys?.map { it.uuid }.orEmpty()
+            (fromList + fromData).distinct().ifEmpty { null }
+        }
         val mfgSpecific = record?.manufacturerSpecificData
         // Iterate ALL manufacturer-data entries; some devices advertise multiple
         // and XUNTONG might not be the first one. Prefer the XUNTONG match if

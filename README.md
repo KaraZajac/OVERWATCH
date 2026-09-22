@@ -12,7 +12,7 @@ on upward escalations — you don't have to be looking at the screen.
 > advertise/fuzz code from one of the reference projects is intentionally
 > excluded.
 
-Website: **[overwatch.netslum.io](https://overwatch.netslum.io)**  ·  Latest release: [v0.5.13](https://github.com/KaraZajac/OVERWATCH/releases) (debug-signed APK, sideload).
+Website: **[overwatch.netslum.io](https://overwatch.netslum.io)**  ·  Latest release: [v0.5.14](https://github.com/KaraZajac/OVERWATCH/releases) (debug-signed APK, sideload).
 
 ---
 
@@ -39,7 +39,7 @@ Website: **[overwatch.netslum.io](https://overwatch.netslum.io)**  ·  Latest re
 | **DEFLOCK** | Crowdsourced ALPR locations within the detection radius (default 500 m), scored by how close each one actually is | POST to Overpass API (`overpass.deflock.org` → fallback `overpass-api.de`) for `man_made=surveillance + surveillance:type=ALPR` in a 5 km bbox; 24 h on-disk cache by 0.05° grid cell. Refetches when the user moves > 1.5 km from the last fetch center. Backoffs after Overpass failures; treats `{"remark": "...timed out..."}` 200-responses as failure so timeouts don't poison the cache. |
 | **WAZE** | User-reported `POLICE` alerts still active in the feed within the detection radius (default 500 m), up to ~45 min old, scored by distance and age | `api.openwebninja.com/waze/alerts-and-jams` — [OpenWeb Ninja](https://www.openwebninja.com)'s hosted Waze feed, called directly with **your own API key** (`X-API-Key`) entered in Settings and stored encrypted on-device. Sidesteps the reCAPTCHA gating that 403s direct `live-map/api/georss` calls. Polled every ~4 min with `alert_types=POLICE&max_jams=0` (server-side filtering, ~1.5 KB/poll), and the client re-filters by type so a silent upstream change can't let other alert types through. Alerts carry confidence (0–5) + reliability (0–10); high values nudge the score up. No key → source shows "not configured" in the drill-down. |
 | **AIRCRAFT** | Police / surveillance aircraft overhead — identified from a bundled registry of 1,971 US law-enforcement airframes, plus loiter detection for unlisted ones | `opendata.adsb.fi` → fallback `api.adsb.lol`, polled every 60 s. **No API key.** Community ADS-B networks are used specifically because the commercial trackers filter law-enforcement flights at government request. Matched on the ICAO 24-bit address; scored by ground distance, altitude and orbit behaviour. |
-| **COMMERCIAL** | Nearby consumer smart-home / voice gear (Nest, Ring, Echo, hidden cams) and camera-bearing smart glasses (Meta, Snap, Vuzix) as a secondary situational signal | Rides the BLE + WiFi scans — OUI / device-name / service-UUID / SSID matches plus Bluetooth SIG company IDs from `MicTargets`. Score-capped at ORANGE so a cluster of doorbells (or a passing pair of Ray-Bans) never reads as ALPR-grade certainty. |
+| **COMMERCIAL** | Nearby consumer smart-home / voice gear (Nest, Ring, Echo, Sonos, hidden cams) and camera-bearing smart glasses (Meta Ray-Ban / Oakley, Snap Spectacles, Vuzix, and HeyCyan-SDK frames such as the Nilox Smart AI Glasses) as a secondary situational signal | Rides the BLE + WiFi scans — OUI / device-name / service-UUID / SSID matches plus Bluetooth SIG company IDs from `MicTargets`. Score-capped at ORANGE so a cluster of doorbells (or a passing pair of Ray-Bans) never reads as ALPR-grade certainty. |
 
 > **Citizen was removed (v0.5.7).** Citizen ended the police-dispatch data
 > partnership behind its public feed in June 2026. It first degraded to silent
@@ -309,13 +309,14 @@ These live under `REFERENCES/` (gitignored):
 - **flock-you** — 31-OUI WiFi superset (promiscuous-mode tricks not portable to Android)
 - **deflock** + **deflock-app** — Overpass query format + proximity-alert pattern (the Flutter app uses Overpass directly, not the CDN tiles, which the OVERWATCH client mirrors)
 - **wazepolice** — original live-map/api/georss recipe; that endpoint is now reCAPTCHA-gated, so OVERWATCH reads OpenWeb Ninja's hosted feed instead of hitting Waze directly
+- **[Nearby Glasses](https://github.com/yjeanrenaud/yj_nearbyglasses)** by [Yves Jeanrenaud](https://yves.app) (AGPL-3.0) — the curated smart-glasses identifier set behind the GLASSES family in the COMMERCIAL source: the Bluetooth SIG company ids for Meta / Luxottica / Snap, the HeyCyan-SDK primary service UUID that identifies the Nilox Smart AI Glasses, and the `rayban` / `heycyan` name tokens. OVERWATCH uses the project's published *identifiers* (facts about the radio protocol), not its code, and re-verified every company id against the SIG registry. One deliberate divergence: Nearby Glasses also matches `0x05D6` (Zhuhai Jieli); OVERWATCH does not, because that is the id of a Bluetooth chipset found in a huge share of cheap earbuds and speakers, and this app's COMMERCIAL source is tuned against false positives rather than for recall.
 
 ---
 
 ## Status
 
 Phases 1–5 (skeleton, BLE, WiFi, DeFlock, polish) complete and
-field-tested. Current release **v0.5.13**. Notable changes:
+field-tested. Current release **v0.5.14**. Notable changes:
 
 - v0.1.2 — Android 14+ foreground service type fix; NaN-coordinate filter on map data.
 - v0.1.3 — DeFlock CDN replaced by direct Overpass calls (Cloudflare-blocked).
@@ -340,6 +341,7 @@ field-tested. Current release **v0.5.13**. Notable changes:
 - v0.5.11 — Android 15/16 and cutout-display compatibility. Opts into edge-to-edge explicitly and pads every screen with `WindowInsets.safeDrawing`; reproduced on Android 16 with a punch-hole, where v0.5.10 drew its title *inside* the status bar and buried the gear icon under the wifi/battery icons. The overlay bubble now states its cutout mode so it can't park under a camera hole. **BLE screen-off fix:** Android suspends unfiltered scans when the screen turns off and a foreground service does not exempt it, so the scanner switches to a filtered scan (Raven UUIDs, XUNTONG, mic company ids, capped at 16) while the screen is off — see [SOURCES.md §5](SOURCES.md).
 - v0.5.12 — The range slider can no longer change the threat tier in *either* direction. v0.5.10 stopped widening it from pulling in distant noise, but narrowing it still hid real alerts: a police report 312 m away scoring 52 disappeared and the circle went green because the view was set to 300 m. Scanners now evaluate at their own fixed radii (DeFlock 1200 m, Waze 2000 m) instead of the user's setting, events carry their distance, and anything at YELLOW or above is displayed regardless of range.
 - v0.5.13 — Fixed the map coming back fully zoomed out (whole world) after the first stop/start. The camera-position guard added in v0.5.9 was remembered outside the branch that owns the `MapView`, so a rebuilt map compared against the *previous* map's position, saw no change, and never zoomed in. Scoped it to the map's own lifetime. Reproduced deterministically from the second start onward and verified over five cycles.
+- v0.5.14 — Smart-glasses coverage extended from the [Nearby Glasses](https://github.com/yjeanrenaud/yj_nearbyglasses) identifier set (credit: Yves Jeanrenaud): the HeyCyan-SDK service UUID that identifies Nilox Smart AI Glasses and other HeyCyan frames, case-insensitive `rayban` / `ray-ban` / `heycyan` name tokens, and service UUIDs are now also read from advertised *service-data* keys, where those glasses have been seen to carry them. The HeyCyan and Echo service UUIDs join the screen-off ScanFilter set, so glasses can be caught with the phone in a pocket. Also fixes a pre-existing mislabel found while re-verifying every company id against the Bluetooth SIG registry: `0x05A7` is Sonos, not a hidden-cam vendor — it now reads "Sonos speaker" instead of "Possible hidden mic / cam".
 
 ## License
 

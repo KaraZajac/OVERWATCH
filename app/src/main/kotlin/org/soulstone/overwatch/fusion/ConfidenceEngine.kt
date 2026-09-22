@@ -54,7 +54,7 @@ object ConfidenceEngine {
     const val W_MIC_OUI = 30
     const val W_MIC_NAME = 45
     const val W_MIC_MFG = 30
-    const val W_MIC_AVS_UUID = 50
+    const val W_MIC_SERVICE_UUID = 50   // AVS (Echo) or HeyCyan (glasses)
     const val W_MIC_SSID = 45
     const val B_MIC_MULTI = 10
     const val B_MIC_STATIONARY = 8
@@ -424,9 +424,10 @@ object ConfidenceEngine {
             methods.append("mic_mfg ")
             methodCount++
         }
-        if (org.soulstone.overwatch.data.targets.MicTargets.matchAvsService(obs.advertisedUuids)) {
-            score += W_MIC_AVS_UUID
-            methods.append("mic_avs ")
+        val svcFamily = org.soulstone.overwatch.data.targets.MicTargets.matchService(obs.advertisedUuids)
+        if (svcFamily != null) {
+            score += W_MIC_SERVICE_UUID
+            methods.append("mic_svc ")
             methodCount++
         }
         if (methodCount >= 2) {
@@ -442,7 +443,9 @@ object ConfidenceEngine {
             methods.append("stationary ")
         }
         score = score.coerceAtMost(MIC_SCORE_CAP)
-        val family = nameMatch?.family ?: ouiFamily ?: mfgFamily
+        // A service UUID is the most specific signal after a name, so it
+        // outranks the OUI and company id when deciding what to call this.
+        val family = nameMatch?.family ?: svcFamily ?: ouiFamily ?: mfgFamily
             ?: org.soulstone.overwatch.data.targets.MicTargets.Family.HIDDEN_CAM
         val familyLabel = org.soulstone.overwatch.data.targets.MicTargets.familyLabel(family)
         val nameSuffix = if (!obs.deviceName.isNullOrBlank()) " — ${obs.deviceName}" else ""
