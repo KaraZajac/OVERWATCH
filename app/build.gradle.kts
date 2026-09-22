@@ -80,6 +80,19 @@ protobuf {
 }
 
 dependencies {
+    // Play services drags in androidx.fragment 1.1.0, whose FragmentActivity
+    // predates the ActivityResult APIs: it failed to call
+    // super.onRequestPermissionsResult() and used invalid request codes. Lint
+    // fails the release build over it (InvalidFragmentVersionForActivityResult)
+    // because MainActivity registers the permission prompt that way. Nothing in
+    // this app uses Fragments, so this is a constraint rather than a dependency —
+    // it raises a version already on the classpath instead of adding an edge.
+    constraints {
+        implementation(libs.androidx.fragment) {
+            because("play-services pulls fragment 1.1.0, which is unsafe with registerForActivityResult")
+        }
+    }
+
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.service)

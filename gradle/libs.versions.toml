@@ -8,6 +8,7 @@ composeBom = "2026.08.00"
 material3 = "1.3.1"
 playServicesLocation = "21.4.0"
 osmdroid = "6.1.20"
+androidxFragment = "1.9.0"
 # Protobuf 0.10.0 is the first protobuf-gradle-plugin release compatible with AGP 9
 # (AGP 9 removed the applicationVariants API the older ones bound to).
 protobufPlugin = "0.10.0"
@@ -27,6 +28,7 @@ androidx-compose-material3 = { group = "androidx.compose.material3", name = "mat
 androidx-compose-material-icons-extended = { group = "androidx.compose.material", name = "material-icons-extended" }
 play-services-location = { group = "com.google.android.gms", name = "play-services-location", version.ref = "playServicesLocation" }
 osmdroid-android = { group = "org.osmdroid", name = "osmdroid-android", version.ref = "osmdroid" }
+androidx-fragment = { group = "androidx.fragment", name = "fragment", version.ref = "androidxFragment" }
 protobuf-javalite = { group = "com.google.protobuf", name = "protobuf-javalite", version.ref = "protobuf" }
 protobuf-protoc = { group = "com.google.protobuf", name = "protoc", version.ref = "protobuf" }
 
