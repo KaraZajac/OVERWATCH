@@ -63,7 +63,12 @@ Measured node counts in a 5 km bbox (2026-09-17):
 Widening past ALPR roughly doubles the worst case rather than exploding it,
 which is why generic cameras are worth carrying.
 
-- Response cached on disk 24 h, keyed by 0.05° grid cell (`deflock2_<lat>_<lon>`).
+- Response cached on disk per 0.05° grid cell (`deflock2_<lat>_<lon>`), for the
+  current scan only. The directory doubles as a list of every ~5.5 km area
+  scanned, so `LocationTraces` deletes it every time scanning stops and again at
+  the next start, and a request still in flight at the stop does not write.
+  Before v0.5.17 the files were never deleted; a 24 h TTL only made old ones
+  ignored.
 - Refetch when the user moves > 1.5 km from the last fetch centre.
 - A `200 OK` body containing `{"remark": "...timed out..."}` is treated as a
   failure, so an Overpass timeout cannot poison the cache.
@@ -393,18 +398,25 @@ same rationale as the Axon OUI: these prefixes appear on nothing consumer.
 `data/targets/RavenUuids.kt`. 16-bit UUIDs expanded to the Bluetooth base
 `0000xxxx-0000-1000-8000-00805f9b34fb`:
 
-| UUID | Meaning | Firmware |
-|---|---|---|
-| `180a` | Device Information | all |
-| `3100` | GPS Location | 1.2.x+ |
-| `3200` | Power Management | 1.2.x+ |
-| `3300` | Network Status | 1.2.x+ |
-| `3400` | Upload Statistics | 1.3.x |
-| `3500` | Error Diagnostics | 1.3.x |
-| `1809` | Health Thermometer | 1.1.x |
-| `1819` | Location & Navigation | 1.1.x |
+| UUID | Meaning | Firmware | Counts as evidence |
+|---|---|---|---|
+| `3100` | GPS Location | 1.2.x+ | alone |
+| `3200` | Power Management | 1.2.x+ | alone |
+| `3300` | Network Status | 1.2.x+ | alone |
+| `3400` | Upload Statistics | 1.3.x | alone |
+| `3500` | Error Diagnostics | 1.3.x | alone |
+| `180a` | Device Information | all | only with `1809` + `1819` |
+| `1809` | Health Thermometer | 1.1.x | only with `180a` + `1819` |
+| `1819` | Location & Navigation | 1.1.x | only with `180a` + `1809` |
 
-Three or more matching UUIDs scores 90; one or two scores 70.
+Three or more counted UUIDs scores 90; one or two scores 70. The last three are
+standard Bluetooth SIG services that ordinary devices advertise on their own; a
+Bluetooth thermometer sends `1809`. Before v0.5.17 any single one of the eight
+scored 70, ORANGE, labelled "Raven gunshot detector". Since then they count only
+as the full set of three, which is FW 1.1.x's signature. Every documented
+firmware still scores 90: FW 1.1.x counts its three generics, FW 1.2.x its three
+own UUIDs, and FW 1.3.x its five. The screen-off scan filters still list all
+eight, because a filter only decides which advertisements get delivered.
 
 ### 3.5 Manufacturer-specific data
 
@@ -649,6 +661,23 @@ source does not depend on the radio.
   sources. Both are declared and both are passed at `startForeground` time.
 
 ---
+
+### 5.3 What stays on the phone
+
+Detections live in memory and clear when scanning stops. Two disk caches could
+otherwise show roughly where the app has been used (`data/cache/LocationTraces.kt`):
+
+| Cache | What it reveals | When it is deleted |
+|---|---|---|
+| `cache/deflock/` | one file per ~5.5 km area scanned | every stop, and again at the next start |
+| `cache/osmdroid-tiles/cache.db` | OpenStreetMap tiles wherever the map was shown | same schedule, only if **Settings → Privacy → Delete map tiles when scanning stops** is on (default off) |
+
+Tiles stay by default because OpenStreetMap's tile usage policy asks apps to
+cache tiles rather than re-download them. They live in one SQLite database that
+every MapView shares through osmdroid's static connection, and a MapView can
+still be attached when scanning stops. So the file is never deleted out from
+under it. Tiles are purged through that same connection, then `VACUUM` rewrites
+the file, so deleted rows don't linger in free pages.
 
 ## 6. Testing notes
 

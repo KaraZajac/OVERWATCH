@@ -73,6 +73,7 @@ fun SettingsScreen(
     val theme by settings.themeMode.collectAsState()
     val vibrate by settings.vibrateOnAlert.collectAsState()
     val overlay by settings.overlayEnabled.collectAsState()
+    val clearTiles by settings.clearTilesOnStop.collectAsState()
     val context = LocalContext.current
 
     Column(
@@ -170,6 +171,18 @@ fun SettingsScreen(
                 )
                 WazeAccountControls()
             }
+        }
+
+        Spacer(Modifier.height(16.dp))
+        SectionLabel("Privacy")
+        HelpText(
+            "The camera map cache records each ~5.5 km area you scan, so it is " +
+                "deleted every time scanning stops. Map tiles are kept by default " +
+                "so the map doesn't re-download them, as OpenStreetMap asks of apps. " +
+                "They show where the map was open; turn this on to delete them too."
+        )
+        SourceToggle("Delete map tiles when scanning stops", clearTiles) {
+            settings.setClearTilesOnStop(it)
         }
 
         Spacer(Modifier.height(16.dp))

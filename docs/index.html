@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>OVERWATCH — passive surveillance detection for Android</title>
-<meta name="description" content="A native Android app that passively flags nearby Flock Safety ALPRs, Axon body cameras, and police presence. Fuses BLE/WiFi radio scans, the DeFlock ALPR map, and live Waze police reports into a green→red threat tier. Never connects to, pairs with, or jams anything it detects.">
-<meta property="og:title" content="OVERWATCH — passive surveillance detection">
+<title>OVERWATCH — surveillance detection for Android</title>
+<meta name="description" content="A native Android app that flags nearby Flock Safety ALPRs, Axon body cameras, and police presence. Fuses BLE/WiFi radio scans, the DeFlock ALPR map, and live Waze police reports into a green→red threat tier. Never connects to, pairs with, or jams anything it detects.">
+<meta property="og:title" content="OVERWATCH — surveillance detection">
 <meta property="og:description" content="Android app that flags nearby Flock ALPRs, Axon body cams, and police by fusing BLE/WiFi + the DeFlock map + Waze police reports. It never connects to, pairs with, or jams anything it detects.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://overwatch.netslum.io/">
@@ -53,13 +53,13 @@
   <div class="container hero-inner">
     <div class="hero-eyebrow">
       <span class="dot dot-pulse"></span>
-      v0.5.16 · Android · passive
+      v0.5.17 · Android · defensive
     </div>
     <h1 class="hero-title">
       <span class="display-wordmark">OVERWATCH</span>
     </h1>
     <p class="hero-tag">
-      A native Android app that <strong>passively detects surveillance around you</strong>.
+      A native Android app that <strong>detects surveillance around you</strong>.
       Open it, hit <strong>START</strong>, and a ring turns green → yellow →
       orange → red as the engine gets more sure there's a Flock Safety ALPR,
       an Axon body camera, or active police nearby.
@@ -75,7 +75,7 @@
       <div class="stat-chip"><span class="num" data-target="6">0</span><span>fused sources</span></div>
       <div class="stat-chip stat-vfy"><span class="num" data-target="4">0</span><span>threat tiers</span></div>
       <div class="stat-chip"><span class="num" data-target="0">0</span><span>packets sent</span></div>
-      <div class="stat-chip"><span class="num" data-target="30">0</span><span>releases</span></div>
+      <div class="stat-chip"><span class="num" data-target="31">0</span><span>releases</span></div>
     </div>
 
     <div class="cta-row">
@@ -89,7 +89,7 @@
       </a>
     </div>
 
-    <p class="hero-warn">Passive defense only. Debug-signed APK — sideload; no Play Store. <a href="https://github.com/KaraZajac/OVERWATCH">Read the README.</a></p>
+    <p class="hero-warn">Defensive only. Debug-signed APK — sideload; no Play Store. <a href="https://github.com/KaraZajac/OVERWATCH">Read the README.</a></p>
   </div>
 </header>
 
@@ -232,10 +232,11 @@
         <div class="bento-icon">🎥</div>
         <h3>DeFlock — ALPR map</h3>
         <p>
-          Crowdsourced ALPR camera locations within range (200 m default) via
-          the Overpass API (<code>overpass.deflock.org</code> → fallback
-          <code>overpass-api.de</code>), with a 24 h on-disk cache and failure
-          backoff. Refetches when you move &gt; 1.5 km.
+          Crowdsourced ALPR camera locations near you (shown within 500 m by
+          default) via the Overpass API (<code>overpass.deflock.org</code> →
+          fallback <code>overpass-api.de</code>), cached for the current scan
+          only and deleted when you stop, with failure backoff. Refetches when
+          you move &gt; 1.5 km.
         </p>
       </article>
 
@@ -443,7 +444,7 @@
           <ul>
             <li>Grab the latest debug-signed APK from
               <a href="https://github.com/KaraZajac/OVERWATCH/releases/latest">Releases</a>
-              (currently <strong>v0.5.16</strong>).</li>
+              (currently <strong>v0.5.17</strong>).</li>
           </ul>
         </div>
         <div class="tl-col tl-active">
@@ -478,8 +479,8 @@
         OVERWATCH
       </div>
       <p class="footer-tag">
-        Passive Android surveillance-detection. Listens only — never
-        transmits.
+        Android surveillance detection. Never connects to, pairs with, or
+        jams what it detects.
       </p>
     </div>
     <div class="footer-col">
@@ -512,7 +513,7 @@
       with, jams, or interferes with any device or network it detects.
     </p>
     <p class="footer-meta">
-      v0.5.16 · <a href="https://github.com/KaraZajac/OVERWATCH">github.com/KaraZajac/OVERWATCH</a> · <a href="https://github.com/KaraZajac/OVERWATCH/blob/main/LICENSE">BSD-3-Clause</a>
+      v0.5.17 · <a href="https://github.com/KaraZajac/OVERWATCH">github.com/KaraZajac/OVERWATCH</a> · <a href="https://github.com/KaraZajac/OVERWATCH/blob/main/LICENSE">BSD-3-Clause</a>
     </p>
     <div class="onion-line">
       <span class="onion-label">Also on Tor</span>

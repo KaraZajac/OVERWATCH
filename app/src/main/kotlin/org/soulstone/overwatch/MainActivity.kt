@@ -20,7 +20,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import org.osmdroid.config.Configuration
+import org.soulstone.overwatch.data.cache.LocationTraces
 import org.soulstone.overwatch.data.settings.Settings
 import org.soulstone.overwatch.service.DetectionService
 import org.soulstone.overwatch.ui.MainScreen
@@ -70,12 +70,9 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         // osmdroid requires a User-Agent and a writable cache before any
         // MapView is constructed, otherwise OSM may rate-limit/IP-ban us.
-        // Set it here once per process — Configuration is a singleton.
-        Configuration.getInstance().apply {
-            userAgentValue = packageName
-            osmdroidBasePath = cacheDir
-            osmdroidTileCache = java.io.File(cacheDir, "osmdroid-tiles").apply { mkdirs() }
-        }
+        // Set it here once per process — Configuration is a singleton. Shared
+        // with LocationTraces so a tile purge always targets this same cache.
+        LocationTraces.configureOsmdroid(this)
         permissionsGranted.value = checkAllPermissions()
         permanentlyDenied.value = false  // reset on activity create
         val settings = Settings.get(this)

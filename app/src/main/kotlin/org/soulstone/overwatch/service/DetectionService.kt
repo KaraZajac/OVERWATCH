@@ -28,6 +28,7 @@ import kotlinx.coroutines.launch
 import org.soulstone.overwatch.MainActivity
 import org.soulstone.overwatch.R
 import org.soulstone.overwatch.data.location.LocationProvider
+import org.soulstone.overwatch.data.cache.LocationTraces
 import org.soulstone.overwatch.data.settings.Settings
 import org.soulstone.overwatch.fusion.DetectionEvent
 import org.soulstone.overwatch.fusion.DetectionSource
@@ -168,6 +169,9 @@ class DetectionService : LifecycleService() {
 
     private fun beginScanning() {
         if (_running.value) return
+        // Remove anything a previous scan left behind if it was killed before
+        // its stop could clean up.
+        LocationTraces.clearAsync(this, includeTiles = settings.clearTilesOnStop.value)
         SourceHealth.reset()
         lastNotifiedTier = ThreatLevel.GREEN
         // Bring up the foreground notification BEFORE any scanner so we don't
@@ -286,6 +290,9 @@ class DetectionService : LifecycleService() {
         if (wazeStarted) { wazeScanner.stop(); wazeStarted = false }
         if (aircraftStarted) { aircraftScanner.stop(); aircraftStarted = false }
         locationProvider.stop()
+        // The camera cache is a list of every ~5.5 km area this scan covered;
+        // map tiles too, if the user asked. Delete them now the scan is over.
+        LocationTraces.clearAsync(this, includeTiles = settings.clearTilesOnStop.value)
         store.clear()
         SourceHealth.reset()
         pruneJob?.cancel(); pruneJob = null

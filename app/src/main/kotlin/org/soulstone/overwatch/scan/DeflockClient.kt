@@ -8,8 +8,10 @@ import java.net.URL
 import java.net.URLEncoder
 import kotlin.math.floor
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import org.soulstone.overwatch.data.cache.LocationTraces
 
 /**
  * Fetches DeFlock ALPR data from the Overpass API (matching the live deflock-app
@@ -72,7 +74,10 @@ class DeflockClient(context: Context) {
         data class Failed(val reason: String) : FetchResult()
     }
 
-    private val cacheDir: File = File(context.cacheDir, "deflock").apply { mkdirs() }
+    // Cleared every time scanning stops (LocationTraces), so this is a cache for
+    // the current scan, not a record of every area ever scanned.
+    private val cacheDir: File =
+        File(context.cacheDir, LocationTraces.CAMERA_CACHE_DIR).apply { mkdirs() }
 
     suspend fun fetchAround(lat: Double, lon: Double): FetchResult = withContext(Dispatchers.IO) {
         val key = cacheKeyFor(lat, lon)
@@ -90,6 +95,9 @@ class DeflockClient(context: Context) {
         if (body == null) {
             return@withContext FetchResult.Failed(lastError ?: "Network error")
         }
+        // Scanning may have stopped while this request was in flight, and the stop
+        // has already cleared the cache: don't leave a fresh trace behind it.
+        ensureActive()
         try {
             File(cacheDir, "$key.json").writeText(body)
         } catch (e: Exception) {

@@ -84,6 +84,11 @@ class Settings private constructor(
     private val _vibrateOnAlert = MutableStateFlow(prefs.getBoolean(KEY_VIBRATE, true))
     val vibrateOnAlert: StateFlow<Boolean> = _vibrateOnAlert.asStateFlow()
 
+    // Off by default: OpenStreetMap's tile policy asks apps to cache tiles. The
+    // camera cache is cleared on every stop regardless (LocationTraces).
+    private val _clearTilesOnStop = MutableStateFlow(prefs.getBoolean(KEY_CLEAR_TILES, false))
+    val clearTilesOnStop: StateFlow<Boolean> = _clearTilesOnStop.asStateFlow()
+
     private val _overlayEnabled = MutableStateFlow(prefs.getBoolean(KEY_OVERLAY, false))
     val overlayEnabled: StateFlow<Boolean> = _overlayEnabled.asStateFlow()
 
@@ -129,6 +134,11 @@ class Settings private constructor(
         _vibrateOnAlert.value = v
     }
 
+    fun setClearTilesOnStop(v: Boolean) {
+        prefs.edit { putBoolean(KEY_CLEAR_TILES, v) }
+        _clearTilesOnStop.value = v
+    }
+
     fun setOverlayEnabled(v: Boolean) {
         prefs.edit { putBoolean(KEY_OVERLAY, v) }
         _overlayEnabled.value = v
@@ -149,6 +159,7 @@ class Settings private constructor(
         private const val KEY_THEME = "theme_mode"
         private const val KEY_VIBRATE = "vibrate_on_alert"
         private const val KEY_OVERLAY = "overlay_enabled"
+        private const val KEY_CLEAR_TILES = "clear_tiles_on_stop"
 
         const val DEFAULT_DETECTION_RADIUS = 500
         const val RADIUS_MIN = 100
