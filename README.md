@@ -12,7 +12,7 @@ on upward escalations — you don't have to be looking at the screen.
 > advertise/fuzz code from one of the reference projects is intentionally
 > excluded.
 
-Website: **[overwatch.netslum.io](https://overwatch.netslum.io)**  ·  Latest release: [v0.5.15](https://github.com/KaraZajac/OVERWATCH/releases) (debug-signed APK, sideload).
+Website: **[overwatch.netslum.io](https://overwatch.netslum.io)**  ·  Latest release: [v0.5.16](https://github.com/KaraZajac/OVERWATCH/releases) (debug-signed APK, sideload).
 
 ---
 
@@ -37,7 +37,7 @@ Website: **[overwatch.netslum.io](https://overwatch.netslum.io)**  ·  Latest re
 | **BLE** | Bluetooth-LE advertisements: vendor MAC OUIs (Axon, Flock Penguin / Raven, XUNTONG mfg id `0x09C8`, "TN" serial pattern), Raven service UUIDs, device-name patterns — plus 18 IEEE-verified surveillance-vendor OUIs (ShotSpotter, WatchGuard/Motorola, Verkada, Avigilon Alta, Axis body cams, FLIR, Hanwha, March Networks, GeoVision, Mobotix, Sunell) with vendor-named labels | Local radio scan (BLE callback API). Iterates every manufacturer-specific data entry to find XUNTONG, not just the first. **Screen off:** Android suspends unfiltered scans, so the scanner switches to a filtered scan (Raven UUIDs, XUNTONG, mic company ids); OUI-prefix and name matching resume when the screen is on — see [SOURCES.md §5.1](SOURCES.md). Police-exclusive OUIs (WatchGuard, ShotSpotter) score ORANGE on sight, same rationale as Axon. |
 | **WiFi** | BSSID OUI prefixes for Flock infrastructure (31-prefix superset) + the same 18 vendor OUIs (WatchGuard 4RE in-car APs, Openpath/Alta readers, WiFi-capable cameras), `Flock-XXXX` and other generic SSID patterns | `WifiManager.getScanResults()` polled every 35 s (just under the Android 11+ 4-scans/2-min throttle) |
 | **DEFLOCK** | Crowdsourced ALPR locations within the detection radius (default 500 m), scored by how close each one actually is | POST to Overpass API (`overpass.deflock.org` → fallback `overpass-api.de`) for `man_made=surveillance + surveillance:type=ALPR` in a 5 km bbox; 24 h on-disk cache by 0.05° grid cell. Refetches when the user moves > 1.5 km from the last fetch center. Backoffs after Overpass failures; treats `{"remark": "...timed out..."}` 200-responses as failure so timeouts don't poison the cache. |
-| **WAZE** | User-reported `POLICE` alerts still active in the feed within the detection radius (default 500 m), up to ~45 min old, scored by distance and age | **Two selectable backends.** *OpenWeb Ninja* (default): `api.openwebninja.com/waze/alerts-and-jams` called with **your own API key** (`X-API-Key`, entered in Settings, stored encrypted on-device), polled every ~4 min with `alert_types=POLICE&max_jams=0` (~1.5 KB/poll). Metered, lags live Waze by ~20 min, and Waze never sees you — the request is made by OpenWeb Ninja's servers. *Direct* (opt-in, off by default): speaks the Waze app's own protocol over an anonymous account OVERWATCH registers, polled every 60 s. Free, keyless and live, but it sends a position (blurred ±500 m) to a Google service. Both re-filter to POLICE client-side so an upstream change can't let other types through. Alerts carry crowd-trust signals that nudge the score up. |
+| **WAZE** | User-reported `POLICE` alerts still active in the feed within the detection radius (default 500 m), up to ~45 min old, scored by distance and age | **Two selectable backends.** *OpenWeb Ninja* (default): `api.openwebninja.com/waze/alerts-and-jams` called with **your own API key** (`X-API-Key`, entered in Settings, stored encrypted on-device), polled every ~4 min with `alert_types=POLICE&max_jams=0` (~1.5 KB/poll). Metered, lags live Waze by ~20 min, and Waze never sees you — the request is made by OpenWeb Ninja's servers. *Direct* (opt-in, off by default): speaks the Waze app's own protocol over an anonymous account OVERWATCH registers, polled every 60 s. Free, keyless and live, but it reports which 1 km grid square you are in to a Google service on every poll. The exact fix never leaves the phone. Both re-filter to POLICE client-side so an upstream change can't let other types through. Alerts carry crowd-trust signals that nudge the score up. |
 | **AIRCRAFT** | Police / surveillance aircraft overhead — identified from a bundled registry of 1,971 US law-enforcement airframes, plus loiter detection for unlisted ones | `opendata.adsb.fi` → fallback `api.adsb.lol`, polled every 60 s. **No API key.** Community ADS-B networks are used specifically because the commercial trackers filter law-enforcement flights at government request. Matched on the ICAO 24-bit address; scored by ground distance, altitude and orbit behaviour. |
 | **COMMERCIAL** | Nearby consumer smart-home / voice gear (Nest, Ring, Echo, Sonos, hidden cams) and camera-bearing smart glasses (Meta Ray-Ban / Oakley, Snap Spectacles, Vuzix, and HeyCyan-SDK frames such as the Nilox Smart AI Glasses) as a secondary situational signal | Rides the BLE + WiFi scans — OUI / device-name / service-UUID / SSID matches plus Bluetooth SIG company IDs from `MicTargets`. Score-capped at ORANGE so a cluster of doorbells (or a passing pair of Ray-Bans) never reads as ALPR-grade certainty. |
 
@@ -53,7 +53,7 @@ Website: **[overwatch.netslum.io](https://overwatch.netslum.io)**  ·  Latest re
 > as a permanently-failing row. Police presence is still covered by Waze
 > (denser for roadway stops anyway) and DeFlock.
 
-> **Waze: pick a backend (v0.5.15+).** The public `live-map/api/georss` endpoint every scraper used is dead: it sits behind Google's edge, which returns **HTTP 403** to automated clients regardless of IP, headers, TLS fingerprint, or headless-vs-headful browser — Waze's own page requests included. That is why v0.1.5 removed the original integration. OVERWATCH now offers two ways in, and the choice is a genuine trade rather than one being better. **OpenWeb Ninja** (the default) reads a hosted Waze feed with a key you supply yourself; it costs a few dollars a month and lags ~20 min, but the request comes from their servers, so Waze learns nothing about you. **Direct** speaks the Waze app's own protocol — free, keyless, live — but OVERWATCH then holds an anonymous Waze account and sends a position on every poll, which is a real disclosure to a Google service. It is off unless you turn it on. See [Waze setup](#waze-setup-choosing-a-backend). Nothing is baked into the APK either way. The Waze for Cities partner feed was ruled out — it excludes POLICE and is agency-only.
+> **Waze: pick a backend (v0.5.15+).** The public `live-map/api/georss` endpoint every scraper used is dead: it sits behind Google's edge, which returns **HTTP 403** to automated clients regardless of IP, headers, TLS fingerprint, or headless-vs-headful browser — Waze's own page requests included. That is why v0.1.5 removed the original integration. OVERWATCH now offers two ways in, and the choice is a genuine trade rather than one being better. **OpenWeb Ninja** (the default) reads a hosted Waze feed with a key you supply yourself; it costs a few dollars a month and lags ~20 min, but the request comes from their servers, so Waze learns nothing about you. **Direct** speaks the Waze app's own protocol — free, keyless, live — but OVERWATCH then holds an anonymous Waze account and tells Waze which 1 km grid square you are in on every poll. That is never the exact fix, but one account reporting squares is still a coarse track a Google service can follow. It is off unless you turn it on. See [Waze setup](#waze-setup-choosing-a-backend). Nothing is baked into the APK either way. The Waze for Cities partner feed was ruled out — it excludes POLICE and is agency-only.
 
 > **Full reference:** [SOURCES.md](SOURCES.md) documents every endpoint, every
 > BLE/WiFi identifier, the scoring tables, and the sources that were tried and
@@ -163,7 +163,8 @@ scan/AircraftScanner.kt            60 s poller, registry match + loiter/orbit de
 data/targets/LeAircraft.kt         bundled ICAO-hex table of law-enforcement aircraft
 scan/WazeScanner.kt                polls whichever backend is selected, client-side POLICE filter
 scan/wazert/WazeRtClient.kt        backend 2 — Waze's own app protocol, anonymous account
-scan/wazert/WazeRtFetcher.kt       session + account + rate limits for backend 2
+scan/wazert/WazeRtFetcher.java     session + account + rate limits for backend 2
+scan/wazert/PositionCloak.java     the 1 km grid square that is all Waze ever learns of your position
 scan/wazert/*.java, proto/         vendored protocol layer + waze.proto (MIT, see credits)
 fusion/ConfidenceEngine.kt         scoring (BLE / WiFi / DeFlock / Waze / Commercial)
 fusion/RssiTracker.kt              rise-peak-fall stationary-signal detector
@@ -193,7 +194,7 @@ pick under **gear icon → Waze police feed**.
 | Cost | ~$1–3/month, your own key | free |
 | Freshness | lags live Waze ~20 min | live |
 | Poll | every ~4 min | every 60 s |
-| What Waze learns about you | nothing — their servers make the request | an anonymous account and a position, every poll |
+| What Waze learns about you | nothing — their servers make the request | an anonymous account and your 1 km grid square, every poll |
 | Setup | sign up, paste a key | none |
 
 ### Backend 1 — OpenWeb Ninja (default)
@@ -234,11 +235,20 @@ Waze account (Waze mints the username and password) and stores it encrypted
 on-device, then reuses it.
 
 **Read this before turning it on.** OVERWATCH becomes a Waze client. It holds a
-Waze account and sends a position with every poll — the protocol layer blurs it
-by up to 500 m, but it is still roughly where you are, going to a Google
-service, about once a minute while scanning. The whole point of this app is
-knowing who is watching you, so it would be dishonest to bury that. If the trade
-isn't worth it to you, stay on OpenWeb Ninja, which tells Waze nothing.
+Waze account and, about once a minute while scanning, tells Waze which 1 km grid
+square you are in. Your exact position never leaves the phone: every message
+that carries a location is built from the centre of that square, and parking on
+a square's edge won't make it flicker between two squares (which would itself
+pinpoint you). But the account is the same on every poll, so a Google service
+can follow a drive square by square. The whole point of this app is knowing who
+is watching you, so it would be dishonest to bury that. If the trade isn't worth
+it to you, stay on OpenWeb Ninja, which tells Waze nothing.
+
+> **v0.5.15 overstated this.** Its Settings screen said the position was
+> "blurred by up to 500 m". Only the login message was. Every query carried the
+> exact GPS fix, several times a minute. v0.5.16 changed the code to send only
+> the grid square, and changed the wording to say exactly that. The wire-level
+> evidence is in [SOURCES.md §2.2b](SOURCES.md).
 
 Practical notes:
 
@@ -342,8 +352,9 @@ Tap the gear icon in the top-right.
   [Waze setup](#waze-setup-choosing-a-backend). *OpenWeb Ninja* (default) needs
   your own API key, stored encrypted on-device (Android Keystore) and never baked
   into the APK; empty key = Waze source off. *Direct from Waze* needs no key but
-  registers an anonymous Waze account and sends a blurred position each poll, so
-  it is off until you pick it; **Forget** wipes the stored account.
+  registers an anonymous Waze account and reports your 1 km grid square each
+  poll (never the exact fix), so it is off until you pick it; **Forget** wipes
+  the stored account.
 - **Alerts**:
   - Vibrate on threat escalation (default on)
 - **Display over other apps**: floating threat-circle overlay (needs the
@@ -370,7 +381,7 @@ These live under `REFERENCES/` (gitignored):
 ## Status
 
 Phases 1–5 (skeleton, BLE, WiFi, DeFlock, polish) complete and
-field-tested. Current release **v0.5.15**. Notable changes:
+field-tested. Current release **v0.5.16**. Notable changes:
 
 - v0.1.2 — Android 14+ foreground service type fix; NaN-coordinate filter on map data.
 - v0.1.3 — DeFlock CDN replaced by direct Overpass calls (Cloudflare-blocked).
@@ -396,12 +407,28 @@ field-tested. Current release **v0.5.15**. Notable changes:
 - v0.5.12 — The range slider can no longer change the threat tier in *either* direction. v0.5.10 stopped widening it from pulling in distant noise, but narrowing it still hid real alerts: a police report 312 m away scoring 52 disappeared and the circle went green because the view was set to 300 m. Scanners now evaluate at their own fixed radii (DeFlock 1200 m, Waze 2000 m) instead of the user's setting, events carry their distance, and anything at YELLOW or above is displayed regardless of range.
 - v0.5.13 — Fixed the map coming back fully zoomed out (whole world) after the first stop/start. The camera-position guard added in v0.5.9 was remembered outside the branch that owns the `MapView`, so a rebuilt map compared against the *previous* map's position, saw no change, and never zoomed in. Scoped it to the map's own lifetime. Reproduced deterministically from the second start onward and verified over five cycles.
 - v0.5.14 — Smart-glasses coverage extended from the [Nearby Glasses](https://github.com/yjeanrenaud/yj_nearbyglasses) identifier set (credit: Yves Jeanrenaud): the HeyCyan-SDK service UUID that identifies Nilox Smart AI Glasses and other HeyCyan frames, case-insensitive `rayban` / `ray-ban` / `heycyan` name tokens, and service UUIDs are now also read from advertised *service-data* keys, where those glasses have been seen to carry them. The HeyCyan and Echo service UUIDs join the screen-off ScanFilter set, so glasses can be caught with the phone in a pocket. Also fixes a pre-existing mislabel found while re-verifying every company id against the Bluetooth SIG registry: `0x05A7` is Sonos, not a hidden-cam vendor — it now reads "Sonos speaker" instead of "Possible hidden mic / cam".
-- v0.5.15 — **A second Waze backend: straight from Waze, no API key.** The public `live-map/api/georss` endpoint 403s automated clients at Google's edge, so until now the only way in was OpenWeb Ninja's metered feed. OVERWATCH can now instead speak the Waze app's own protocol over an anonymous account it registers itself: free, keyless, live, and polled every 60 s instead of every 4 min. It is **off by default and opt-in**, because it makes the app a Waze client — it holds a Waze account and sends a position (blurred by up to 500 m) to a Google service on every poll, and in a surveillance-detection app that has to be your call, not a default. OpenWeb Ninja remains the default and is unchanged; pick either under **gear → Waze police feed**. See [Waze setup](#waze-setup-choosing-a-backend) and [SOURCES.md §2.2](SOURCES.md). The protocol layer is vendored from **highway-radar-sabre-plus** (MIT, credited below), with the report-submission path removed — OVERWATCH reads alerts and never reports one. Also: radio rows in Settings are now tappable across their whole width instead of only on the 20 dp circle.
+- v0.5.15 — **A second Waze backend: straight from Waze, no API key.** The public `live-map/api/georss` endpoint 403s automated clients at Google's edge, so until now the only way in was OpenWeb Ninja's metered feed. OVERWATCH can now instead speak the Waze app's own protocol over an anonymous account it registers itself: free, keyless, live, and polled every 60 s instead of every 4 min. It is **off by default and opt-in**, because it makes the app a Waze client — it holds a Waze account and sends a position to a Google service on every poll, and in a surveillance-detection app that has to be your call, not a default. *(Correction: this entry originally said that position was blurred by up to 500 m. It wasn't — v0.5.15 sent the exact fix. See v0.5.16.)* OpenWeb Ninja remains the default and is unchanged; pick either under **gear → Waze police feed**. See [Waze setup](#waze-setup-choosing-a-backend) and [SOURCES.md §2.2](SOURCES.md). The protocol layer is vendored from **highway-radar-sabre-plus** (MIT, credited below), with the report-submission path removed — OVERWATCH reads alerts and never reports one. Also: radio rows in Settings are now tappable across their whole width instead of only on the 20 dp circle.
+- v0.5.16 — **Privacy fix: the direct Waze backend no longer sends your exact position.** v0.5.15's Settings screen said the position sent to Waze was blurred by up to 500 m. Only the login message was. The handshake's `Location` line and the centre of every map query carried the exact GPS fix, several times a minute. Every message that carries a location is now built from the centre of the 1 km grid square you are in, with 150 m of hysteresis so parking on a square's edge can't make it flicker between squares and pinpoint you. Detection is unchanged: distances are still measured on the phone from the real fix, and the area Waze is asked about grows to cover the difference. Verified on the wire: two real positions 745 m apart in one square produce byte-identical requests ([SOURCES.md §2.2b](SOURCES.md)). Settings, this README, SOURCES.md and the website now say exactly that. Also: OVERWATCH is now **BSD 3-Clause** licensed — it had no license file, so it wasn't actually open source — and release builds pass lint again (androidx.fragment constrained to 1.9.0).
 
 ## License
 
-Personal use. Reference repos retain their own licenses; do not redistribute
-their code as part of this project.
+OVERWATCH is released under the [BSD 3-Clause License](LICENSE).
+
+Some files in this repository are third-party material under their own terms:
+
+- **Waze protocol layer.** `app/src/main/proto/waze.proto` and everything in
+  `app/src/main/java/org/soulstone/overwatch/scan/wazert/` except
+  `PositionCloak.java` derive from highway-radar-sabre-plus and stay under its
+  MIT License, whose text is kept in that directory.
+- **Aircraft registry.** `app/src/main/res/raw/le_aircraft.csv` is derived from
+  ADSBexchange's `basic-ac-db`, which is built from the public FAA aircraft
+  registry. Regenerate it with `scripts/gen-le-aircraft.py`.
+- **Web fonts.** The fonts in `docs/fonts/` are under the SIL Open Font License
+  1.1; see [`docs/fonts/OFL.txt`](docs/fonts/OFL.txt).
+
+The [reference repos](#reference-repos-studied-while-building) informed
+algorithms and supplied published identifiers such as OUIs and service UUIDs.
+Their code is not redistributed here.
 
 ## Disclaimer
 

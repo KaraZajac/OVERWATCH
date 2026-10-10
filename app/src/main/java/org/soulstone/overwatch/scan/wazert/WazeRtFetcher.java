@@ -16,17 +16,25 @@ import java.util.List;
  * account, the session lifecycle, the alert cache and the rate limits, and hands
  * back just the POLICE alerts near a point.
  *
- * <p>This class is OVERWATCH's own (the classes it drives are vendored from
- * highway-radar-sabre-plus — see LICENSE in this directory). It is a slimmed
- * equivalent of that project's WazeProtocolSource: no Highway Radar plumbing, no
- * reporting, no tile decoding, no keepalive thread.
+ * <p>Written for OVERWATCH as a slimmed equivalent of highway-radar-sabre-plus's
+ * WazeProtocolSource — no Highway Radar plumbing, no reporting, no tile decoding,
+ * no keepalive thread — and carried under that project's MIT License like the
+ * rest of this directory (see LICENSE here). The position cloaking it applies
+ * lives in {@link PositionCloak}, which is OVERWATCH's own.
  *
  * <p><b>What talking to Waze costs the user.</b> The RT protocol is the one the
  * Waze app itself speaks. Using it means registering an anonymous account with
- * Waze (username/password minted by Waze, stored encrypted on-device) and sending
- * a position with each query — jittered by up to 500 m by the vendored codec, but
- * still a rough location. That is a real disclosure, so the backend is opt-in and
- * the Settings screen says so plainly before the user turns it on.
+ * Waze (username/password minted by Waze, stored encrypted on-device) and telling
+ * Waze where to look on every poll. The device's real coordinates never go out:
+ * every position-bearing message is built from {@link PositionCloak}'s ~1 km grid
+ * square instead. Waze still learns that square, and the persistent account lets
+ * it link squares into a coarse track while you drive, so the backend is opt-in
+ * and the Settings screen says exactly that before the user turns it on.
+ *
+ * <p>v0.5.15 got this wrong: it passed the raw fix straight through, and the
+ * vendored codec only jitters ClientInfo, so the {@code Location} line and every
+ * {@code MapDisplayed} centre carried the exact position. Do not hand anything
+ * below {@link #fetchPoliceNear} a coordinate that has not been through the cloak.
  *
  * <p><b>Rate limits.</b> Waze caps anonymous registrations per device per day, so
  * a minted account is persisted and reused, registrations are counted against
@@ -82,6 +90,8 @@ public final class WazeRtFetcher {
     private final Context ctx;
     private final String region;
     private final WazeAlertCache cache = new WazeAlertCache();
+    /** The only source of coordinates that reach Waze. */
+    private final PositionCloak cloak = new PositionCloak();
 
     private WazeSession session;
     private int consecutiveRejections = 0;
@@ -105,7 +115,13 @@ public final class WazeRtFetcher {
                     "backing off " + ((backoffUntilMs - now) / 1000) + "s after a rejected session");
         }
         try {
-            queryArea(lat, lon, Math.max(radiusMeters, MIN_QUERY_RADIUS_M));
+            // Waze gets the cell centre, never the fix. The area is grown by the
+            // most the two can differ, so everything within radiusMeters of the
+            // real position is still inside what Waze is asked about. Distances
+            // are measured later, on the device, from the real fix.
+            double[] pub = cloak.publicPosition(lat, lon);
+            double queryRadius = Math.max(radiusMeters + PositionCloak.MAX_OFFSET_M, MIN_QUERY_RADIUS_M);
+            queryArea(pub[0], pub[1], queryRadius);
             consecutiveRejections = 0;
             backoffUntilMs = 0L;
             return police(cache.snapshot());

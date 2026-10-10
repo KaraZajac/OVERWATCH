@@ -43,8 +43,8 @@ import org.soulstone.overwatch.scan.WazeSource.FetchResult
  * scraper used, is fronted by Google's edge and 403s automated clients outright
  * — no IP, header or browser makes it answer. A direct path does exist (the Waze
  * app's own protocol, see [org.soulstone.overwatch.scan.wazert.WazeRtClient]) but
- * it means holding a Waze account and sending a position, so it is opt-in and
- * this metered-but-anonymous backend stays the default.
+ * it means holding a Waze account and reporting a coarse position, so it is
+ * opt-in and this metered-but-anonymous backend stays the default.
  *
  * Response shape (verified live 2026-09-16): `{ "data": { "alerts": [...],
  * "jams": [...] } }`, each alert carrying `alert_id`, `type`, `subtype`

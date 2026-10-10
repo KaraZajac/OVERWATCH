@@ -15,9 +15,11 @@ import org.soulstone.overwatch.scan.WazeSource
  * scraper used is dead — it is fronted by Google's edge, which 403s automated
  * clients outright. The app protocol is a different host and a different path,
  * and it answers. The cost is that OVERWATCH is now a Waze client: it holds a
- * Waze account and sends a position (jittered up to 500 m by the protocol layer)
- * on every poll. That is why this backend is opt-in and the Settings copy says
- * so before the user turns it on.
+ * Waze account and, on every poll, tells Waze which 1 km grid square it is in.
+ * The exact fix never leaves the device ([PositionCloak] builds every
+ * position-bearing message from the square's centre), but one account reporting
+ * squares over time is a coarse track. That is why this backend is opt-in and
+ * the Settings copy says so before the user turns it on.
  *
  * Poll cadence is 60 s, deliberately under the protocol's ~100 s session idle
  * timeout: a live session receives only deltas (~8 KB) while a re-login re-sends

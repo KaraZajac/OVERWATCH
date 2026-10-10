@@ -160,11 +160,12 @@ fun SettingsScreen(
                 HelpText(
                     "Free, live, no key: OVERWATCH speaks the Waze app's own " +
                         "protocol. It registers an anonymous Waze account (stored " +
-                        "encrypted on-device) and sends your position — blurred by up " +
-                        "to 500 m — with each poll, about once a minute.\n\n" +
-                        "Waze is a Google service. Choosing this tells Google roughly " +
-                        "where you are, the way running the Waze app would. Pick it " +
-                        "only if that trade is worth a live feed to you."
+                        "encrypted on-device) and polls Waze about once a minute.\n\n" +
+                        "Your exact position never leaves the phone. Waze is told " +
+                        "only which 1 km grid square you are in, but it is the same " +
+                        "account on every poll, so Google can follow you square by " +
+                        "square while you drive. Pick this only if that trade is " +
+                        "worth a live feed to you."
                 )
                 WazeAccountControls()
             }

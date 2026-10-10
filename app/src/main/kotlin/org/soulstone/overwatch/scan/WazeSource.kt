@@ -11,8 +11,9 @@ package org.soulstone.overwatch.scan
  *   nothing about the user — the request comes from OpenWeb Ninja's servers.
  * - [org.soulstone.overwatch.scan.wazert.WazeRtClient] speaks the Waze app's own
  *   protocol directly. Free, live, no key — but it registers an anonymous Waze
- *   account and sends a (jittered) position with every poll, which is a real
- *   disclosure to a Google service. Off by default; the user opts in.
+ *   account and reports the device's 1 km grid square with every poll (never the
+ *   exact fix), which still lets a Google service follow a drive square by
+ *   square. Off by default; the user opts in.
  *
  * [WazeScanner] is written against this interface so neither backend leaks into
  * the scoring or UI layers, and so a backend can set its own poll cadence: the

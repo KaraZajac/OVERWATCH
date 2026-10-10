@@ -80,7 +80,7 @@ so neither leaks into scoring or UI. Default is OpenWeb Ninja.
 | Cost | ~$0.005/request | free |
 | Poll | 240 s | 60 s |
 | Latency | ~20 min behind live | live |
-| Position sent to Waze | none | every poll, jittered ±500 m |
+| Position sent to Waze | none | 1 km grid square, every poll |
 | Default | yes | no, opt-in |
 
 #### 2.2a OpenWeb Ninja (default)
@@ -155,9 +155,63 @@ emulator:
   30 s → 10 min instead of spinning the register loop.
 
 **What it costs the user, and why it is off by default:** the app becomes a Waze
-client. It holds a Waze account and sends a position on every poll — the codec
-jitters it by up to 500 m, but Waze is a Google service and this is a real
-disclosure. The Settings screen says so in those terms before the toggle.
+client. It holds a Waze account and, on every poll, tells Waze which 1 km grid
+square it is in. The exact fix never leaves the phone, but one persistent
+account reporting squares is a coarse track a Google service can follow. The
+Settings screen says so in those terms before the toggle.
+
+**Where the position actually goes.** Three things in the protocol carry a
+location, and they are not treated alike:
+
+| Carrier | When | What the vendored codec does with the position |
+|---|---|---|
+| `ClientInfo.last_position` | register, login | jitters it, up to ±500 m per axis |
+| `Location,<lon>,<lat>` | each session's handshake | sends it **verbatim**, full double precision |
+| `MapDisplayed` viewport | handshake + 5 per poll | sends it **verbatim**: the box is centred on it and the centre is an explicit field |
+
+v0.5.15 passed the raw GPS fix into all three, so only the login messages were
+blurred and the exact position went out several times a minute — while the
+Settings screen said it was "blurred by up to 500 m". A wire tap built from the
+shipping classes showed it on 2026-10-10, for a true position of
+`38.832417, -77.106238`:
+
+```
+static  ClientInfo           38.831311, -77.109785    331 m from the fix
+login   ClientInfo           38.828469, -77.105609    442 m
+command Location             Location,-77.106238,38.832417      0.0 m
+command MapDisplayed centre  38.832417, -77.106238      0.0 m   (×7 in one fetch)
+```
+
+**v0.5.16 fix — `scan/wazert/PositionCloak.java`.** Every position-bearing
+message is now built from the centre of a 1 km grid square, never from the fix:
+
+- **A fixed grid, not random noise.** Fresh noise on every poll averages out
+  over a minute-by-minute stream. Every point in a square maps to one centre,
+  so there is nothing to average.
+- **Metres, not degrees.** The longitude step is computed per latitude row, so
+  cells are 1000 × 1000 m from the equator to 64°N in both hemispheres
+  (checked at six cities). Adjacent rows are offset like bricks as a result.
+- **150 m hysteresis.** Parked on an edge, GPS wander would flip between two
+  squares and the flipping would itself pinpoint you. A square is kept until the
+  device is 150 m past it; ±30 m wander across an edge never flips it.
+- **Detection unaffected.** The cell centre is at most `√2 × (500 + 150) ≈ 919 m`
+  from the real position, and the query area is widened by exactly that, so the
+  2 km evaluation circle around the real fix stays inside the second query box
+  (3000 m half-width). Distances are still measured on the device from the real
+  fix.
+
+Verified on the wire the same day: two real positions **745 m apart in one
+square produced byte-identical command lines**; every `Location` and
+`MapDisplayed` centre equalled the square's centre (within the 1e-6° rounding of
+`MapDisplayed`); `ClientInfo` landed 145–545 m from it. The cloaked query missed
+none of the police reports the exact query found within 5 km.
+
+**Visibility to other drivers.** The handshake's `SeeMe,1,2,…` sets the
+visibility group to **1 = `VisGrp_Invisible`**, per `RealtimeDefs.h` in the
+original open-source Waze client (mirrored at `github.com/mkoloberdin/waze`), so
+OVERWATCH asks not to appear on other drivers' maps. Every response nonetheless
+carries `x-waze-stealth-mode-activated: false`. What that header tracks is
+**unverified** — treat "invisible to other drivers" as requested, not proven.
 
 The protocol layer under `scan/wazert/` is **vendored** from
 highway-radar-sabre-plus (MIT, licence kept beside the code), unmodified apart
@@ -631,6 +685,9 @@ Reference projects studied while building (kept under a gitignored `REFERENCES/`
 - **deflock / deflock-app** — the Overpass query shape and proximity-alert
   pattern.
 - **wazepolice** — the original `live-map/api/georss` recipe, now dead.
+- **Waze 2.x client source** (`github.com/mkoloberdin/waze`, the mirror the Waze
+  wiki points to) — consulted, not used, for what the `SeeMe` visibility values
+  mean. Nothing from it is in OVERWATCH.
 - **highway-radar-sabre-plus** (MIT) — the Waze RT protocol layer. The only
   reference that is *vendored* rather than studied: `scan/wazert/*.java` and
   `proto/waze.proto` are that project's code, carried with its licence.

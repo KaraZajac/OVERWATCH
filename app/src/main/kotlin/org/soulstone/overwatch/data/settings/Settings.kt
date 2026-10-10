@@ -30,9 +30,11 @@ class Settings private constructor(
      * tells Waze nothing about the user, because the request is made by OpenWeb
      * Ninja's servers rather than the phone. [DIRECT] is free and live but speaks
      * the Waze app's own protocol, which means registering an anonymous Waze
-     * account and sending a (jittered) position on every poll. That is a real
-     * disclosure to a Google service, so it is never selected on the user's
-     * behalf — they choose it in Settings after reading what it does.
+     * account and reporting the device's 1 km grid square on every poll. The
+     * exact fix never leaves the phone, but a persistent account reporting
+     * squares is still a track a Google service can follow, so it is never
+     * selected on the user's behalf — they choose it in Settings after reading
+     * what it does.
      */
     enum class WazeBackend { OPENWEB_NINJA, DIRECT }
 
