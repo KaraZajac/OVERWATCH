@@ -150,8 +150,9 @@ fun SettingsScreen(
                 HelpText(
                     "Bring your own key: sign up at openwebninja.com, subscribe to " +
                         "the Waze API, and paste the key here. Stored encrypted " +
-                        "on-device — never in the app package. Pay-as-you-go runs " +
-                        "about \$1-3/month. Waze never sees you: the request is made " +
+                        "on-device — never in the app package. Pay-as-you-go costs " +
+                        "about 7.5¢ per hour of scanning. Waze never sees you: the " +
+                        "request is made " +
                         "by OpenWeb Ninja, not your phone."
                 )
                 ApiKeyField(currentKey = wazeApiKey, onSave = { settings.setWazeApiKey(it) })

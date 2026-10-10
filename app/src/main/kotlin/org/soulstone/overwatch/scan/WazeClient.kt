@@ -31,8 +31,9 @@ import org.soulstone.overwatch.scan.WazeSource.FetchResult
  * [SecureStore] (Android Keystore AES/GCM). Nothing is baked into the APK, so a
  * published build ships with no credential at all and nobody has to be handed
  * someone else's. Get a key at https://www.openwebninja.com by subscribing to
- * the Waze API: pay-as-you-go is ~$0.005/request (roughly $1-3/month at the
- * ~4-minute poll this app uses), and the free tier's 100 requests/month is
+ * the Waze API: pay-as-you-go is ~$0.005/request, so ~7.5¢ per hour of scanning
+ * at the 4-minute poll this app uses (15 requests an hour), and the free tier's
+ * 100 requests/month is
  * enough to try it but not to run it continuously.
  *
  * An empty key means the source is unconfigured — [isConfigured] is false and

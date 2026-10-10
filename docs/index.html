@@ -4,9 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>OVERWATCH — passive surveillance detection for Android</title>
-<meta name="description" content="A native Android app that passively flags nearby Flock Safety ALPRs, Axon body cameras, and police presence. Fuses BLE/WiFi radio scans, the DeFlock ALPR map, and live Waze police reports into a green→red threat tier. Listens only — never transmits.">
+<meta name="description" content="A native Android app that passively flags nearby Flock Safety ALPRs, Axon body cameras, and police presence. Fuses BLE/WiFi radio scans, the DeFlock ALPR map, and live Waze police reports into a green→red threat tier. Never connects to, pairs with, or jams anything it detects.">
 <meta property="og:title" content="OVERWATCH — passive surveillance detection">
-<meta property="og:description" content="Android app that flags nearby Flock ALPRs, Axon body cams, and police by fusing BLE/WiFi + the DeFlock map + Waze police reports. Passive only — it never transmits.">
+<meta property="og:description" content="Android app that flags nearby Flock ALPRs, Axon body cams, and police by fusing BLE/WiFi + the DeFlock map + Waze police reports. It never connects to, pairs with, or jams anything it detects.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://overwatch.netslum.io/">
 <meta property="og:image" content="https://overwatch.netslum.io/og.png">
@@ -63,7 +63,7 @@
       Open it, hit <strong>START</strong>, and a ring turns green → yellow →
       orange → red as the engine gets more sure there's a Flock Safety ALPR,
       an Axon body camera, or active police nearby.
-      <span class="hero-tag-pop">It only listens. It never transmits, probes, or jams.</span>
+      <span class="hero-tag-pop">It never connects to, pairs with, or jams anything it detects.</span>
     </p>
 
     <div class="phone-hero">
@@ -182,9 +182,8 @@
       <h2>Six sensors, one score.</h2>
       <p class="lead">Every observation is scored 0–100 by the confidence
       engine; the on-screen tier is the <strong>max live score across all
-      sources</strong>. Cross-source corroboration — a BLE hit <em>and</em> a
-      DeFlock map match in the same spot — naturally pushes the tier higher
-      than either alone.</p>
+      sources</strong>. Sources are not added together: a BLE hit and a
+      DeFlock map match in the same spot read as the stronger of the two.</p>
     </div>
 
     <div class="bento">
@@ -210,7 +209,8 @@
           <a href="https://adsb.fi">ADS-B</a> networks — used specifically
           because the commercial trackers filter law-enforcement flights at
           government request. Contacts are matched by ICAO address against a
-          bundled registry of <strong>1,971 US law-enforcement airframes</strong>,
+          bundled registry of <strong>1,971 law-enforcement airframes</strong>, all but 36
+          of them American,
           and scored by distance, altitude and <em>orbit behaviour</em> — because
           surveillance aircraft circle, and airliners don't. An unlisted aircraft
           loitering low and slow overhead still registers.
@@ -251,7 +251,7 @@
           <code>api.openwebninja.com</code> using <strong>your own API
           key</strong>, pasted into Settings and stored encrypted in the
           Android Keystore — Waze never sees you, and each install bills to
-          its own account (~$1–3/month). <strong>Direct</strong> speaks Waze's
+          its own account (about 7.5¢ per hour of scanning). <strong>Direct</strong> speaks Waze's
           own app protocol over an anonymous account: free, keyless and live,
           but on every poll it tells a Google service which 1 km grid square
           you are in. Never the exact fix, but enough to follow a drive square
@@ -353,12 +353,13 @@
     <div class="bento">
       <article class="bento-card bento-lg">
         <div class="bento-icon">🔇</div>
-        <h3>Passive by design</h3>
+        <h3>Hands-off by design</h3>
         <p>
-          OVERWATCH only listens — it never transmits, probes, jams, or
-          interferes with any device or network. The Axon advertise/fuzz code
-          from one of the reference projects is <strong>intentionally
-          excluded</strong>. It reads the airwaves and public feeds; that's it.
+          OVERWATCH never connects to, pairs with, or jams anything it detects.
+          Its radio scans are the ordinary ones every Android phone makes, and
+          its online sources send a box around your position to the services
+          they query. The Axon advertise/fuzz code from one of the reference
+          projects is <strong>intentionally excluded</strong>.
         </p>
       </article>
 
@@ -413,7 +414,7 @@
       <div>
         <h3>Situational awareness, not interference</h3>
         <p>
-          OVERWATCH is a defensive, receive-only tool for knowing what's
+          OVERWATCH is a defensive tool for knowing what's
           watching <em>you</em> — Flock ALPRs, Axon body cameras, and police
           presence — in the space you're already in. It does not touch, spoof,
           or disrupt anything. Know your local laws; use it responsibly.
@@ -507,8 +508,8 @@
   </div>
   <div class="container footer-bottom">
     <p>
-      OVERWATCH is a receive-only situational-awareness tool. It does not
-      transmit, probe, jam, or interfere with any device or network.
+      OVERWATCH is a situational-awareness tool. It never connects to, pairs
+      with, jams, or interferes with any device or network it detects.
     </p>
     <p class="footer-meta">
       v0.5.16 · <a href="https://github.com/KaraZajac/OVERWATCH">github.com/KaraZajac/OVERWATCH</a> · <a href="https://github.com/KaraZajac/OVERWATCH/blob/main/LICENSE">BSD-3-Clause</a>

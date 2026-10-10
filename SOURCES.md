@@ -17,13 +17,15 @@ network-facing rots; re-verify before quoting it.
 | **BLE** | Bluetooth-LE advertisements from surveillance hardware | Local radio | free | 2026-09 |
 | **WIFI** | BSSIDs + SSIDs of surveillance infrastructure | Local radio | free | 2026-09 |
 | **DEFLOCK** | Mapped fixed surveillance: ALPR, speed cameras, CCTV | Overpass / OSM | free | 2026-09-17 |
-| **WAZE** | Live crowd-sourced police reports | OpenWeb Ninja *or* Waze's own protocol | ~$1–3/mo *or* free | 2026-09-21 |
+| **WAZE** | Live crowd-sourced police reports | OpenWeb Ninja *or* Waze's own protocol | ~7.5¢ per scanning hour *or* free | 2026-09-21 |
 | **AIRCRAFT** | Police / surveillance aircraft overhead | ADS-B community feeds | free | 2026-09-17 |
 | **COMMERCIAL** | Consumer cameras, voice assistants, smart glasses | Rides BLE + WiFi | free | 2026-09 |
 
-Two radio sources (passive, local) and three network sources (position-driven).
-The app **never transmits** to any detected device — it only listens, and only
-queries third-party APIs about coordinates.
+Two radio sources (local) and three network sources (position-driven). The app
+**never connects to, pairs with, or jams** anything it detects. It is not
+radio-silent, though: Android's scans transmit — Wi-Fi scanning sends probe
+requests and Bluetooth scanning sends scan requests to advertisers — and the
+network sources send a box around the user's position to the services in §2.
 
 ---
 
@@ -95,7 +97,8 @@ Header: X-API-Key: <the user's own key>
 **Bring your own key** — sign up at openwebninja.com, subscribe to the Waze API,
 paste the key into Settings. Stored encrypted (Android Keystore AES/GCM via
 `SecureStore`); nothing ships in the APK. Pay-as-you-go ≈ **$0.005/request**,
-≈ 15 requests/active hour at the 4-minute poll, so **$1–3/month**. The free
+≈ 15 requests per hour of scanning at the 4-minute poll, so **≈ 7.5¢ an hour** —
+about $2.25 a month at an hour a day. The free
 tier's 100 requests/month verifies the integration but will not run it.
 
 Verified behaviour (2026-09-16):
@@ -264,8 +267,15 @@ FAA registry and **already keyed by ICAO hex** — which is what ADS-B broadcast
 so no N-number→hex conversion is needed. Fields: `icao`, `reg`, `ownop`
 (owner/operator), `icaotype`, `model`, `faa_pia`, `faa_ladd`, `mil`.
 
-Filtering `ownop` for law-enforcement patterns yields **1,971 US aircraft**
+Filtering `ownop` for law-enforcement patterns yields **1,971 aircraft**
 (213 LADD-flagged), bundled as `app/src/main/res/raw/le_aircraft.csv` (~83 KB).
+**1,935 are US agencies; 36 are foreign police** the same patterns catch: the
+Korean National Police (8), New South Wales Police (8), Western Australia Police
+(8), Royal Oman Police (3), and one each from the Australian Federal Police,
+Victoria Police, the Dutch police and Canadian services in Ontario,
+Saskatchewan, Peel and York. They are kept because they matter to users outside
+the US. 18 of the US entries sit outside the civil US address block
+`A00001–ADF7C7`; all are CBP or DHS.
 Regenerate with `scripts/gen-le-aircraft.py`. It runs at development time and
 commits its output; the app never downloads it.
 
@@ -678,7 +688,8 @@ methods, which is easy to transpose.
 Reference projects studied while building (kept under a gitignored `REFERENCES/`):
 
 - **AxonCadabra** — BLE scanner skeleton. Scan side only; its advertise/fuzz
-  code is deliberately excluded, since OVERWATCH never transmits.
+  code is deliberately excluded, since OVERWATCH never advertises to or
+  connects with what it detects.
 - **flock-detection** — the confidence-scoring algorithm, RSSI rise-peak-fall
   stationary detection, OUIs, UUIDs and name patterns.
 - **flock-you** — the 31-OUI WiFi superset.

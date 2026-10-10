@@ -7,8 +7,9 @@ import org.soulstone.overwatch.scan.DeflockClient
  * Confidence scoring — port of flock-detection's algorithm with weights from the OVERWATCH plan.
  *
  * One [BleObservation] (a single ScanResult) → one score. Multi-method bonus and RSSI bonuses
- * apply within a single observation. Cross-source corroboration is handled at the [DetectionStore]
- * level (multiple sources hitting the same area push the global max upward).
+ * apply within a single observation. Nothing combines scores across observations or sources:
+ * [DetectionStore] reports the single highest live score, so two sources hitting the same area
+ * read as the stronger one alone.
  */
 object ConfidenceEngine {
 
@@ -261,8 +262,8 @@ object ConfidenceEngine {
 
     fun scoreWaze(obs: WazeObservation): Scored {
         // Distance first, then the two crowd-trust nudges, then age. Kept well
-        // under the multi-method bonus so a corroborating BLE/WiFi/DeFlock hit
-        // still dominates the global tier.
+        // under a strong BLE/WiFi/DeFlock hit, so one of those still sets the
+        // global tier (the store takes the single highest score).
         var score = falloff(obs.distanceMeters, WAZE_FALLOFF)
         if (obs.reliability >= 7) score += 5f
         if (obs.confidence >= 4) score += 5f

@@ -7,10 +7,12 @@ camera, or active police presence near you. With the screen locked, the
 foreground notification updates with the current tier and the phone vibrates
 on upward escalations — you don't have to be looking at the screen.
 
-> **Passive defense only.** OVERWATCH only listens — it does not transmit,
-> probe, jam, or interfere with any device or network. The Axon
-> advertise/fuzz code from one of the reference projects is intentionally
-> excluded.
+> **Defensive only.** OVERWATCH never connects to, pairs with, or jams anything
+> it detects. Its radio scans are the ordinary ones every Android phone makes —
+> Wi-Fi scanning sends probe requests, Bluetooth scanning sends scan requests —
+> and the online sources send a box around your position to the services they
+> query (see [SOURCES.md](SOURCES.md)). The Axon advertise/fuzz code from one of
+> the reference projects is intentionally excluded.
 
 Website: **[overwatch.netslum.io](https://overwatch.netslum.io)**  ·  Latest release: [v0.5.16](https://github.com/KaraZajac/OVERWATCH/releases) (debug-signed APK, sideload).
 
@@ -38,7 +40,7 @@ Website: **[overwatch.netslum.io](https://overwatch.netslum.io)**  ·  Latest re
 | **WiFi** | BSSID OUI prefixes for Flock infrastructure (31-prefix superset) + the same 18 vendor OUIs (WatchGuard 4RE in-car APs, Openpath/Alta readers, WiFi-capable cameras), `Flock-XXXX` and other generic SSID patterns | `WifiManager.getScanResults()` polled every 35 s (just under the Android 11+ 4-scans/2-min throttle) |
 | **DEFLOCK** | Crowdsourced ALPR locations within the detection radius (default 500 m), scored by how close each one actually is | POST to Overpass API (`overpass.deflock.org` → fallback `overpass-api.de`) for `man_made=surveillance + surveillance:type=ALPR` in a 5 km bbox; 24 h on-disk cache by 0.05° grid cell. Refetches when the user moves > 1.5 km from the last fetch center. Backoffs after Overpass failures; treats `{"remark": "...timed out..."}` 200-responses as failure so timeouts don't poison the cache. |
 | **WAZE** | User-reported `POLICE` alerts still active in the feed within the detection radius (default 500 m), up to ~45 min old, scored by distance and age | **Two selectable backends.** *OpenWeb Ninja* (default): `api.openwebninja.com/waze/alerts-and-jams` called with **your own API key** (`X-API-Key`, entered in Settings, stored encrypted on-device), polled every ~4 min with `alert_types=POLICE&max_jams=0` (~1.5 KB/poll). Metered, lags live Waze by ~20 min, and Waze never sees you — the request is made by OpenWeb Ninja's servers. *Direct* (opt-in, off by default): speaks the Waze app's own protocol over an anonymous account OVERWATCH registers, polled every 60 s. Free, keyless and live, but it reports which 1 km grid square you are in to a Google service on every poll. The exact fix never leaves the phone. Both re-filter to POLICE client-side so an upstream change can't let other types through. Alerts carry crowd-trust signals that nudge the score up. |
-| **AIRCRAFT** | Police / surveillance aircraft overhead — identified from a bundled registry of 1,971 US law-enforcement airframes, plus loiter detection for unlisted ones | `opendata.adsb.fi` → fallback `api.adsb.lol`, polled every 60 s. **No API key.** Community ADS-B networks are used specifically because the commercial trackers filter law-enforcement flights at government request. Matched on the ICAO 24-bit address; scored by ground distance, altitude and orbit behaviour. |
+| **AIRCRAFT** | Police / surveillance aircraft overhead — identified from a bundled registry of 1,971 law-enforcement airframes, all but 36 of them American, plus loiter detection for unlisted ones | `opendata.adsb.fi` → fallback `api.adsb.lol`, polled every 60 s. **No API key.** Community ADS-B networks are used specifically because the commercial trackers filter law-enforcement flights at government request. Matched on the ICAO 24-bit address; scored by ground distance, altitude and orbit behaviour. |
 | **COMMERCIAL** | Nearby consumer smart-home / voice gear (Nest, Ring, Echo, Sonos, hidden cams) and camera-bearing smart glasses (Meta Ray-Ban / Oakley, Snap Spectacles, Vuzix, and HeyCyan-SDK frames such as the Nilox Smart AI Glasses) as a secondary situational signal | Rides the BLE + WiFi scans — OUI / device-name / service-UUID / SSID matches plus Bluetooth SIG company IDs from `MicTargets`. Score-capped at ORANGE so a cluster of doorbells (or a passing pair of Ray-Bans) never reads as ALPR-grade certainty. |
 
 > **Citizen was removed (v0.5.7).** Citizen ended the police-dispatch data
@@ -106,9 +108,11 @@ or above is now shown regardless of range. Measured: a camera 285 m away scoring
 48 holds the tier at YELLOW from a 200 m view range all the way to 4900 m, and
 standing 29 m from one still reads **89 RED**.
 
-The user-facing circle uses the full 4-tier mapping. Cross-source corroboration
-naturally pushes the global max upward (a BLE OUI hit *and* a DeFlock map
-match in the same area produce a higher tier than either alone). When idle,
+The user-facing circle uses the full 4-tier mapping, and its tier is the single
+highest score among live detections. Sources are not combined: a BLE OUI hit and
+a DeFlock map match in the same area read the same tier as the stronger of the
+two alone. Several methods matching the same Bluetooth or Wi-Fi device do earn a
+bonus, within that one observation. When idle,
 the circle shows muted gray with `IDLE` text so it's distinguishable at a
 glance from "scanning, all clear."
 
@@ -177,9 +181,13 @@ data/settings/SecureStore.kt       Keystore AES/GCM store for the Waze key + ano
 data/targets/                      BleOuis, WifiOuis, VendorOuis, RavenUuids, Patterns, Manufacturers, MicTargets
 ```
 
-No detection-history database. All state is in-memory and clears on stop, by
-design. Service uses `START_NOT_STICKY` — system kill doesn't auto-restart
-into a stuck state.
+No detection-history database: detections live in memory and clear on stop,
+by design. Two caches do persist on disk, and together they show roughly where
+the app has been used. `cache/deflock/` keeps one Overpass response per ~5.5 km
+area scanned; after 24 hours a file is ignored, but it is not deleted. The map
+keeps OpenStreetMap tiles of wherever it was shown. **Android Settings → Apps →
+OVERWATCH → Storage → Clear cache** removes both. The service uses
+`START_NOT_STICKY` — system kill doesn't auto-restart into a stuck state.
 
 ---
 
@@ -191,7 +199,7 @@ pick under **gear icon → Waze police feed**.
 
 | | OpenWeb Ninja *(default)* | Direct from Waze *(opt-in)* |
 |---|---|---|
-| Cost | ~$1–3/month, your own key | free |
+| Cost | ~7.5¢ per hour of scanning, your own key | free |
 | Freshness | lags live Waze ~20 min | live |
 | Poll | every ~4 min | every 60 s |
 | What Waze learns about you | nothing — their servers make the request | an anonymous account and your 1 km grid square, every poll |
@@ -215,8 +223,9 @@ an `X-API-Key` header. Clearing the field removes it and the source goes
 dormant again.
 
 **What it costs.** Pay-as-you-go is roughly **$0.005/request**. OVERWATCH polls
-about every 4 minutes *while scanning*, so ≈15 requests per active hour —
-call it **$1–3/month** for normal personal use. The free tier's 100
+about every 4 minutes *while scanning*, so ≈15 requests per hour of scanning,
+which comes to **about 7.5¢ an hour**; an hour a day is about $2.25 a month.
+The free tier's 100
 requests/month is enough to confirm it works, not to run it continuously. The
 app requests `alert_types=POLICE&max_jams=0` so each poll is ~1.5 KB instead of
 ~18 KB, which matters on cellular but doesn't change the per-request price.
@@ -400,7 +409,7 @@ field-tested. Current release **v0.5.16**. Notable changes:
 - v0.5.5 — Citizen feed confirmed retired upstream; the source now reports the shutdown instead of leaking a JSON parse error, and backs off to a 30-min heartbeat. Toolchain modernized: AGP 9.3.2, Gradle 9.7.1, Kotlin 2.4.10, Compose BOM 2026.08.00, `compileSdk` 37 (`targetSdk` held at 35); CI actions bumped off deprecated Node-20 versions.
 - v0.5.6 — Waze now calls OpenWeb Ninja directly with **your own API key** instead of a shared proxy token; the `api.blackflagintel.com` proxy is no longer used and the stale token is purged from the secret store on upgrade. Requests add `alert_types=POLICE&max_jams=0` (~18 KB → ~1.5 KB per poll). See [Waze setup](#waze-setup-choosing-a-backend).
 - v0.5.7 — Citizen source **removed entirely** (client, scanner, scoring, settings, map dots and the drill-down row). Its endpoint now returns HTTP 410 Gone, so there was nothing left to degrade gracefully into. OVERWATCH is now a five-source app: BLE, WiFi, DeFlock, Waze, Commercial.
-- v0.5.8 — **AIRCRAFT source**: police / surveillance aircraft overhead via free community ADS-B feeds, matched against a bundled 1,971-entry registry of US law-enforcement airframes (regenerate with `scripts/gen-le-aircraft.py`), plus loiter/orbit detection so unlisted aircraft circling overhead still register. Overpass query widened to speed cameras and generic surveillance nodes, each scored on its own curve. DeFlock/Waze/aircraft all scored by continuous distance falloff. New [SOURCES.md](SOURCES.md) reference.
+- v0.5.8 — **AIRCRAFT source**: police / surveillance aircraft overhead via free community ADS-B feeds, matched against a bundled 1,971-entry registry of law-enforcement airframes, nearly all American (regenerate with `scripts/gen-le-aircraft.py`), plus loiter/orbit detection so unlisted aircraft circling overhead still register. Overpass query widened to speed cameras and generic surveillance nodes, each scored on its own curve. DeFlock/Waze/aircraft all scored by continuous distance falloff. New [SOURCES.md](SOURCES.md) reference.
 - v0.5.9 — Detection-radius slider moved onto the main screen (under the map, where you reach for it while moving) and a source-color legend added beneath the circle: ALPR red, speed camera amber, other cameras gray, Waze police blue, aircraft violet.
 - v0.5.10 — Recalibrated every distance curve so the range slider can no longer move the threat tier: each crosses below YELLOW at roughly the distance the thing stops being able to act on you (ALPR is RED on top of it, GREEN by 500 m). The main-screen slider is relabelled `show within` to say what it is — a view control, not a sensitivity control.
 - v0.5.11 — Android 15/16 and cutout-display compatibility. Opts into edge-to-edge explicitly and pads every screen with `WindowInsets.safeDrawing`; reproduced on Android 16 with a punch-hole, where v0.5.10 drew its title *inside* the status bar and buried the gear icon under the wifi/battery icons. The overlay bubble now states its cutout mode so it can't park under a camera hole. **BLE screen-off fix:** Android suspends unfiltered scans when the screen turns off and a foreground service does not exempt it, so the scanner switches to a filtered scan (Raven UUIDs, XUNTONG, mic company ids, capped at 16) while the screen is off — see [SOURCES.md §5](SOURCES.md).
