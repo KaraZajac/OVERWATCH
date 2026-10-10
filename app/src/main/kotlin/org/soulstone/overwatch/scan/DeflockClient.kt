@@ -28,17 +28,29 @@ import org.soulstone.overwatch.data.cache.LocationTraces
  *
  * Strategy:
  *  - POST one Overpass-QL union for `man_made=surveillance` (ALPR is a subtype)
- *    and `highway=speed_camera` inside a small bbox around the user.
+ *    and `highway=speed_camera` inside a box ±0.05° around the centre of the
+ *    user's 0.05° grid cell. The box is never centred on the fix, so Overpass
+ *    learns only which ~5 km cell you are in. (Until v0.5.18 it was centred
+ *    exactly on the fix, so its centre was your position.)
  *  - Try `overpass.deflock.org` first (less rate-limited for this use case),
  *    fall back to public `overpass-api.de`.
- *  - Cache the JSON response on disk by 0.05° grid cell (24h TTL). Revisits to
- *    the same cell don't re-hit the API.
+ *  - Cache the JSON response on disk by that cell, for the current scan only:
+ *    LocationTraces deletes the files whenever scanning stops or starts, and the
+ *    24 h TTL only bounds a very long scan. Every position in a cell shares the
+ *    one cell-centred box, so the cached response reaches at least half a cell
+ *    (0.025°, ~2.8 km north-south and ~2.2 km east-west at 38°) beyond any fix in
+ *    it: more than the 1.2 km DeflockScanner evaluates, below about 64° latitude.
+ *    A box centred on whichever fix first filled the cell could leave part of
+ *    that circle uncovered.
  */
 class DeflockClient(context: Context) {
 
     companion object {
         private const val TAG = "DeflockClient"
-        private const val FETCH_RADIUS_DEG = 0.05  // ~5.5 km half-width bbox
+        /** Cache cell, and all Overpass ever learns of where you are. */
+        private const val CELL_DEG = 0.05
+        /** Query half-width around the cell centre (~5.5 km north-south). */
+        private const val FETCH_RADIUS_DEG = CELL_DEG
         private const val CACHE_TTL_MS = 24L * 60L * 60L * 1000L
         private const val USER_AGENT = "OVERWATCH/0.1 (+github.com/KaraZajac/OVERWATCH)"
         private const val TIMEOUT_MS = 30_000
@@ -80,16 +92,21 @@ class DeflockClient(context: Context) {
         File(context.cacheDir, LocationTraces.CAMERA_CACHE_DIR).apply { mkdirs() }
 
     suspend fun fetchAround(lat: Double, lon: Double): FetchResult = withContext(Dispatchers.IO) {
-        val key = cacheKeyFor(lat, lon)
+        val latCell = floor(lat / CELL_DEG).toInt()
+        val lonCell = floor(lon / CELL_DEG).toInt()
+        val key = cacheKeyFor(latCell, lonCell)
         val cached = cachedJson(key)
         if (cached != null) {
-            Log.d(TAG, "Cache hit for $key")
+            // No key in the log: it names the cell, and logcat outlives the scan.
+            Log.d(TAG, "Camera cache hit")
             return@withContext FetchResult.Success(parseSafely(cached))
         }
-        val south = lat - FETCH_RADIUS_DEG
-        val north = lat + FETCH_RADIUS_DEG
-        val west = lon - FETCH_RADIUS_DEG
-        val east = lon + FETCH_RADIUS_DEG
+        val centreLat = (latCell + 0.5) * CELL_DEG
+        val centreLon = (lonCell + 0.5) * CELL_DEG
+        val south = centreLat - FETCH_RADIUS_DEG
+        val north = centreLat + FETCH_RADIUS_DEG
+        val west = centreLon - FETCH_RADIUS_DEG
+        val east = centreLon + FETCH_RADIUS_DEG
         val query = buildQuery(south, west, north, east)
         val (body, lastError) = downloadFromAny(query)
         if (body == null) {
@@ -101,19 +118,16 @@ class DeflockClient(context: Context) {
         try {
             File(cacheDir, "$key.json").writeText(body)
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to write cache for $key: ${e.message}")
+            Log.w(TAG, "Camera cache not written: ${e.javaClass.simpleName}")
         }
         FetchResult.Success(parseSafely(body))
     }
 
-    private fun cacheKeyFor(lat: Double, lon: Double): String {
-        // 0.05° grid cell. Two consecutive points within the same cell get the
-        // same cache key, so micro-movements don't refetch.
-        val latStep = floor(lat / FETCH_RADIUS_DEG).toInt()
-        val lonStep = floor(lon / FETCH_RADIUS_DEG).toInt()
-        // v2 prefix: v1 cached ALPR-only responses, which would otherwise be
-        // served for up to 24 h after this build widened the query.
-        return "deflock2_${latStep}_${lonStep}"
+    private fun cacheKeyFor(latCell: Int, lonCell: Int): String {
+        // One key per 0.05° grid cell, so moving around inside a cell doesn't
+        // refetch. v3: v2 entries hold boxes centred on a fix rather than on the
+        // cell, so a file left by an older build killed mid-scan must not be read.
+        return "deflock3_${latCell}_${lonCell}"
     }
 
     private fun cachedJson(key: String): String? {

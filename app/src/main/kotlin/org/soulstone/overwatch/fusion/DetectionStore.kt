@@ -44,9 +44,9 @@ class DetectionStore(
         _maxScore.value = 0
     }
 
-    /** Drop every event from a single source — used when a proximity threshold
-     *  changes and the owning scanner needs to re-emit a fresh slate (events
-     *  outside the new radius would otherwise linger until their 5-min TTL). */
+    /** Drop every event from a single source, for a scanner that needs to re-emit
+     *  a fresh slate. Nothing calls it at present: range changes used to, but since
+     *  v0.5.12 the range only filters the view and the scanners use fixed radii. */
     @Synchronized
     fun clearSource(source: DetectionSource) {
         val remaining = _events.value.filter { it.source != source }

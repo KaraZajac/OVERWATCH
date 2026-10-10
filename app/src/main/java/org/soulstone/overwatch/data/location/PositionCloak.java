@@ -1,21 +1,23 @@
-package org.soulstone.overwatch.scan.wazert;
+package org.soulstone.overwatch.data.location;
 
-// OVERWATCH's own code, not vendored. Applied in WazeRtFetcher.
+// OVERWATCH's own code, under the app's BSD 3-Clause license.
 
 /**
- * The only position OVERWATCH ever tells Waze: the centre of the ~1 km grid
+ * The position OVERWATCH tells an online service: the centre of the ~1 km grid
  * square the device is in, never the device's own coordinates.
  *
- * <p><b>Why this exists.</b> The Waze app protocol carries a position in three
- * places: the ClientInfo sent at register and login, a {@code Location,<lon>,<lat>}
- * line in each session's handshake, and the centre of every {@code MapDisplayed}
- * viewport query. The vendored codec jitters only the first, by up to ±500 m per
- * axis. The other two carry whatever they are given verbatim, and v0.5.15 gave them
- * the raw GPS fix — so it sent the exact position to Waze several times a minute
- * while its Settings screen said the position was blurred. Every one of those
- * messages now gets this cell centre instead, so the disclosure is what the copy
- * says: Waze learns which square you are in, and nothing finer, however long you
- * stay in it.
+ * <p><b>Who gets it.</b> Every online source that has to say where to look: the
+ * ADS-B feeds ({@code AircraftClient}), OpenWeb Ninja ({@code WazeClient}) and the
+ * direct Waze backend ({@code WazeRtFetcher}). The camera map asks Overpass about
+ * its own coarser 0.05° cache cell instead ({@code DeflockClient}). Each client
+ * keeps its own instance.
+ *
+ * <p><b>Why this exists.</b> v0.5.15 sent the raw GPS fix to Waze several times a
+ * minute while its Settings screen said the position was blurred. v0.5.16 routed
+ * every Waze message through this class. Until v0.5.18 the other sources still
+ * sent the fix itself: the aircraft feeds got it to about 11 m every minute, and
+ * OpenWeb Ninja got a box centred exactly on it. Now none of them learns anything
+ * finer than the square you are in, however long you stay in it.
  *
  * <p><b>Why a fixed grid, not random noise.</b> Fresh noise on every poll averages
  * out: a minute-by-minute stream of independently jittered points converges on the
@@ -29,37 +31,42 @@ package org.soulstone.overwatch.scan.wazert;
  *
  * <p>Cells are {@link #CELL_M} square in metres, not in degrees: the longitude step
  * is computed per latitude row, so a cell is about as wide as it is tall at any
- * latitude rather than shrinking toward the poles.
+ * latitude rather than shrinking toward the poles. The degree constants match the
+ * Waze protocol layer's, so the cells are exactly the ones v0.5.16 was wire-tested
+ * with.
  *
- * <p><b>Detection is unaffected.</b> Alert distances are always measured from the
- * real fix, on the device. This only moves the centre of the area Waze is asked
- * about, and {@link WazeRtFetcher} widens that area by {@link #MAX_OFFSET_M} so the
- * evaluation radius around the real position always stays inside it.
- *
- * <p>Not thread-safe; {@link WazeRtFetcher} calls it from synchronized methods.
+ * <p><b>Detection is unaffected.</b> Distances are always measured from the real
+ * fix, on the device. Callers only move the centre of the area they ask about, and
+ * widen it by {@link #MAX_OFFSET_M} so the evaluation radius around the real
+ * position always stays inside it.
  */
-final class PositionCloak {
+public final class PositionCloak {
 
     /** Edge of a grid cell, in metres. */
-    static final double CELL_M = 1000.0;
+    public static final double CELL_M = 1000.0;
 
     /** How far past the current cell's edge the device must go before the cell changes. */
-    static final double HYSTERESIS_M = 150.0;
+    public static final double HYSTERESIS_M = 150.0;
 
     /**
      * Upper bound on the distance between the real position and the centre reported
      * for it: the corner of the current cell grown by the hysteresis margin.
      */
-    static final double MAX_OFFSET_M = Math.sqrt(2.0) * (CELL_M / 2.0 + HYSTERESIS_M);
+    public static final double MAX_OFFSET_M = Math.sqrt(2.0) * (CELL_M / 2.0 + HYSTERESIS_M);
 
-    private static final double LAT_STEP = CELL_M / WazeConstants.M_PER_DEG_LAT;
+    private static final double M_PER_DEG_LAT = 110574.0;
+    private static final double M_PER_DEG_LON_EQUATOR = 111320.0;
+    private static final double LAT_STEP = CELL_M / M_PER_DEG_LAT;
 
     private boolean hasCell = false;
     private long row;
     private long col;
 
-    /** {@code {lat, lon}} of the centre of the cell to report for this real position. */
-    double[] publicPosition(double lat, double lon) {
+    /**
+     * {@code {lat, lon}} of the centre of the cell to report for this real position.
+     * Synchronized because a client may poll from different IO threads.
+     */
+    public synchronized double[] publicPosition(double lat, double lon) {
         long r = rowOf(lat);
         long c = colOf(r, lon);
         if (hasCell && (r != row || c != col) && insideWithMargin(lat, lon, row, col)) {
@@ -81,8 +88,9 @@ final class PositionCloak {
 
     /** Degrees of longitude spanning {@link #CELL_M} metres in row {@code r}. */
     private static double lonStep(long r) {
+        double mPerDegLon = Math.cos(Math.toRadians(rowCentreLat(r))) * M_PER_DEG_LON_EQUATOR;
         // Clamp so a fix near a pole cannot divide by ~0.
-        return CELL_M / Math.max(WazeConstants.mPerDegLon(rowCentreLat(r)), 1.0);
+        return CELL_M / Math.max(mPerDegLon, 1.0);
     }
 
     private static long colOf(long r, double lon) {

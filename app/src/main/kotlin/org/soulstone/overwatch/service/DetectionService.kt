@@ -161,7 +161,13 @@ class DetectionService : LifecycleService() {
             ACTION_START -> beginScanning()
             ACTION_STOP -> {
                 endScanning()
-                stopSelf()
+                // stopSelf(startId), not stopSelf(): Settings' "Restart scan to
+                // apply" sends STOP and START back to back. The no-arg form stops
+                // the service regardless of that START, so its onDestroy() could
+                // run endScanning() just after the restart and leave scanning off.
+                // With the id, Android only stops the service when no newer start
+                // has arrived.
+                stopSelf(startId)
             }
         }
         return START_NOT_STICKY

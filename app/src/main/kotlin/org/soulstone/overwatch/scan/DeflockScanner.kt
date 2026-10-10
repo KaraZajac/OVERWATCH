@@ -90,11 +90,10 @@ class DeflockScanner(
                     _cachedPoints.value = result.points
                     lastAttemptOk = true
                     SourceHealth.record(DetectionSource.DEFLOCK, ok = true)
-                    Log.i(
-                        TAG,
-                        "Loaded ${result.points.size} surveillance nodes around " +
-                            "(${fix.latitude}, ${fix.longitude})"
-                    )
+                    // Never a coordinate here: logcat outlives the scan and turns
+                    // up in bug reports, so a position would be a location trail
+                    // the app can't clear (v0.5.17 logged the exact fix).
+                    Log.i(TAG, "Loaded ${result.points.size} surveillance nodes")
                 }
                 is DeflockClient.FetchResult.Failed -> {
                     lastAttemptOk = false

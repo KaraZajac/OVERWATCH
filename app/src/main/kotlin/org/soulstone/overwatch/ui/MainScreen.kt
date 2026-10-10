@@ -78,8 +78,9 @@ fun MainScreen(
     events: List<DetectionEvent>,
     mapPoints: List<DeflockClient.SurveillancePoint>,
     userLocation: Location?,
-    /** Detection radius in metres — what the location sources report on, and
-     *  exactly what the map circle draws. */
+    /** "Show within", in metres: what the map circle draws and the drill-down
+     *  lists. The scanners evaluate at their own fixed radii, so it never changes
+     *  a score or the tier. */
     detectionRadiusM: Int,
     onRadiusChange: (Int) -> Unit,
     onStartStop: () -> Unit,
@@ -165,7 +166,15 @@ fun MainScreen(
 
             Spacer(Modifier.height(10.dp))
 
-            StatusText(running = running, threat = threat, score = score, events = events)
+            // Count only what the sheet will list, so "N weak signals" matches what
+            // a tap shows. Anything YELLOW or above is always visible, so the
+            // headline event is never filtered out.
+            StatusText(
+                running = running,
+                threat = threat,
+                score = score,
+                events = events.filter { it.visibleAt(detectionRadiusM.toFloat()) }
+            )
         }
 
         // Push the primary action button to the bottom of the screen.
@@ -422,7 +431,8 @@ private fun ThreatMapCircle(
  * tables), so widening this adds dots and rows but cannot change the threat
  * tier. It lives on the main screen because it is the one setting a user
  * reaches for while actually moving. Commits on release rather than
- * per-pixel, so dragging doesn't restart the location scanners every frame.
+ * per-pixel, so the map isn't re-zoomed and the setting isn't re-saved on every
+ * frame of a drag.
  */
 @Composable
 private fun RadiusSlider(

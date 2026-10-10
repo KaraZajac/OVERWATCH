@@ -30,7 +30,7 @@ import org.soulstone.overwatch.fusion.SourceHealth
 /**
  * WiFi scanner — BSSID OUI + SSID-pattern matching via [WifiManager.getScanResults].
  *
- * Android 11+ throttles foreground apps to 4 scans per 2 minutes. We poll every 35s
+ * Android 9+ throttles foreground apps to 4 scans per 2 minutes. We poll every 35s
  * (≈3.4 scans / 2 min) and rely on the system to deliver SCAN_RESULTS_AVAILABLE_ACTION.
  * If [WifiManager.startScan] returns false (throttled or radio busy) we still consume
  * whatever cached results the next broadcast carries.

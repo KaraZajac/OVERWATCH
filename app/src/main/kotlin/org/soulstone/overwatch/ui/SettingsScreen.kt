@@ -31,7 +31,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Slider
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
@@ -39,7 +38,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -105,8 +103,8 @@ fun SettingsScreen(
         SectionLabel("Detection sources")
         SourceToggle("BLE  •  Bluetooth Low Energy", ble) { settings.setBleEnabled(it) }
         SourceToggle("WIFI  •  WiFi BSSID + SSID", wifi) { settings.setWifiEnabled(it) }
-        SourceToggle("DEFLOCK  •  ALPR map (Overpass)", deflock) { settings.setDeflockEnabled(it) }
-        SourceToggle("WAZE  •  Live police reports", waze) { settings.setWazeEnabled(it) }
+        SourceToggle("DEFLOCK  •  Camera map (Overpass)", deflock) { settings.setDeflockEnabled(it) }
+        SourceToggle("WAZE  •  Police reports", waze) { settings.setWazeEnabled(it) }
         SourceToggle("AIRCRAFT  •  Police / surveillance planes", aircraft) { settings.setAircraftEnabled(it) }
         SourceToggle("COMMERCIAL  •  Nest, Ring, Echo, glasses", mic) { settings.setMicEnabled(it) }
         Spacer(Modifier.height(8.dp))
@@ -128,7 +126,7 @@ fun SettingsScreen(
             }
         } else {
             Text(
-                "Source toggles take effect on next Start.",
+                "Source toggles take effect on the next Start; COMMERCIAL applies right away.",
                 fontSize = 11.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -152,9 +150,11 @@ fun SettingsScreen(
                     "Bring your own key: sign up at openwebninja.com, subscribe to " +
                         "the Waze API, and paste the key here. Stored encrypted " +
                         "on-device — never in the app package. Pay-as-you-go costs " +
-                        "about 7.5¢ per hour of scanning. Waze never sees you: the " +
-                        "request is made " +
-                        "by OpenWeb Ninja, not your phone."
+                        "about 7.5¢ per hour of scanning, and the reports run about " +
+                        "20 minutes behind live Waze.\n\n" +
+                        "Waze never sees you: the request is made by OpenWeb Ninja, " +
+                        "not your phone. OpenWeb Ninja is told which 1 km grid square " +
+                        "you are in, every 4 minutes, under your key."
                 )
                 ApiKeyField(currentKey = wazeApiKey, onSave = { settings.setWazeApiKey(it) })
             }
@@ -163,8 +163,8 @@ fun SettingsScreen(
                     "Free, live, no key: OVERWATCH speaks the Waze app's own " +
                         "protocol. It registers an anonymous Waze account (stored " +
                         "encrypted on-device) and polls Waze about once a minute.\n\n" +
-                        "Your exact position never leaves the phone. Waze is told " +
-                        "only which 1 km grid square you are in, but it is the same " +
+                        "Waze never gets your exact position, only which 1 km grid " +
+                        "square you are in, but it is the same " +
                         "account on every poll, so Google can follow you square by " +
                         "square while you drive. Pick this only if that trade is " +
                         "worth a live feed to you."
@@ -176,7 +176,10 @@ fun SettingsScreen(
         Spacer(Modifier.height(16.dp))
         SectionLabel("Privacy")
         HelpText(
-            "The camera map cache records each ~5.5 km area you scan, so it is " +
+            "Online sources are told only which 1 km grid square you are in (the " +
+                "camera map, which ~5.5 km cell). The map's tiles come from " +
+                "OpenStreetMap, which sees the ones you load.\n\n" +
+                "The camera map cache records each ~5.5 km area you scan, so it is " +
                 "deleted every time scanning stops. Map tiles are kept by default " +
                 "so the map doesn't re-download them, as OpenStreetMap asks of apps. " +
                 "They show where the map was open; turn this on to delete them too."
@@ -268,48 +271,6 @@ private fun SourceToggle(label: String, value: Boolean, onChange: (Boolean) -> U
 }
 
 /**
- * Slider that commits the value to Settings only on drag-release. The label
- * tracks the live drag position locally to avoid spamming SharedPreferences
- * writes (and downstream StateFlow re-emissions) on every pixel of movement.
- */
-@Composable
-private fun SliderRow(
-    label: String,
-    persistedValue: Int,
-    range: ClosedFloatingPointRange<Float>,
-    steps: Int,
-    onCommit: (Int) -> Unit
-) {
-    var live by remember(persistedValue) { mutableFloatStateOf(persistedValue.toFloat()) }
-    Column(modifier = Modifier.padding(vertical = 4.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text(
-                text = label,
-                color = MaterialTheme.colorScheme.onBackground,
-                fontSize = 14.sp,
-                fontFamily = FontFamily.Monospace
-            )
-            Text(
-                text = "${live.toInt()} m",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 13.sp,
-                fontFamily = FontFamily.Monospace
-            )
-        }
-        Slider(
-            value = live,
-            onValueChange = { live = it },
-            onValueChangeFinished = { onCommit(live.toInt()) },
-            valueRange = range,
-            steps = steps
-        )
-    }
-}
-
-/**
  * Masked entry for the user's OpenWeb Ninja API key. Commits on Save (persisted
  * encrypted via Settings/SecureStore), with a show/hide toggle and a set/unset
  * status line.
@@ -347,7 +308,7 @@ private fun ApiKeyField(currentKey: String, onSave: (String) -> Unit) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = if (isSet) "API key set — Waze feed enabled" else "No API key — Waze feed off",
+                text = if (isSet) "API key set" else "No API key — this backend is off",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 11.sp,
                 fontFamily = FontFamily.Monospace,

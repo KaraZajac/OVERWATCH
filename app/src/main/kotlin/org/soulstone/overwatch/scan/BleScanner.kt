@@ -313,22 +313,29 @@ class BleScanner(
             (fromList + fromData).distinct().ifEmpty { null }
         }
         val mfgSpecific = record?.manufacturerSpecificData
-        // Iterate ALL manufacturer-data entries; some devices advertise multiple
-        // and XUNTONG might not be the first one. Prefer the XUNTONG match if
-        // present, otherwise fall back to the first entry so we still surface
-        // *some* mfg signal in the observation.
+        // Iterate ALL manufacturer-data entries; some devices advertise several,
+        // and only one company id rides in the observation. Rank them: XUNTONG
+        // (Flock/Raven) first, then any COMMERCIAL company id, then whichever came
+        // first, so we still surface *some* mfg signal. Without the middle rank a
+        // glasses or Echo id behind a lower-numbered entry was never seen
+        // (SparseArray iterates in key order).
         var companyId: Int? = null
         var payload: ByteArray? = null
         if (mfgSpecific != null && mfgSpecific.size() > 0) {
+            var bestRank = -1
             for (i in 0 until mfgSpecific.size()) {
                 val cid = mfgSpecific.keyAt(i)
-                val data = mfgSpecific.valueAt(i)
-                if (cid == org.soulstone.overwatch.data.targets.Manufacturers.XUNTONG_COMPANY_ID) {
-                    companyId = cid
-                    payload = data
-                    break
+                val rank = when (cid) {
+                    org.soulstone.overwatch.data.targets.Manufacturers.XUNTONG_COMPANY_ID -> 2
+                    in MicTargets.COMPANY_IDS -> 1
+                    else -> 0
                 }
-                if (companyId == null) { companyId = cid; payload = data }
+                if (rank > bestRank) {
+                    bestRank = rank
+                    companyId = cid
+                    payload = mfgSpecific.valueAt(i)
+                }
+                if (rank == 2) break
             }
         }
 

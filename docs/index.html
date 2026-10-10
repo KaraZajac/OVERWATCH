@@ -53,7 +53,7 @@
   <div class="container hero-inner">
     <div class="hero-eyebrow">
       <span class="dot dot-pulse"></span>
-      v0.5.17 · Android · defensive
+      v0.5.18 · Android · defensive
     </div>
     <h1 class="hero-title">
       <span class="display-wordmark">OVERWATCH</span>
@@ -72,10 +72,10 @@
     </div>
 
     <div class="stats-row" id="stats-row">
-      <div class="stat-chip"><span class="num" data-target="6">0</span><span>fused sources</span></div>
+      <div class="stat-chip"><span class="num" data-target="6">0</span><span>sources</span></div>
       <div class="stat-chip stat-vfy"><span class="num" data-target="4">0</span><span>threat tiers</span></div>
-      <div class="stat-chip"><span class="num" data-target="0">0</span><span>packets sent</span></div>
-      <div class="stat-chip"><span class="num" data-target="31">0</span><span>releases</span></div>
+      <div class="stat-chip"><span class="num" data-target="0">0</span><span>devices paired</span></div>
+      <div class="stat-chip"><span class="num" data-target="32">0</span><span>releases</span></div>
     </div>
 
     <div class="cta-row">
@@ -118,17 +118,19 @@
       <p class="lead">
         While scanning, the circle becomes an <strong>OpenStreetMap centered on
         you</strong>, wrapped in a threat-color ring for the current tier and
-        marked with a ⌖ crosshair. Every detection is a dot, color-coded by
-        source — so each mark is self-explanatory. Lock the screen and the
-        foreground notification keeps the tier live; the phone vibrates only
-        when the threat <em>escalates</em>.
+        marked with a ⌖ crosshair. Mapped cameras, police reports and aircraft
+        are dots, color-coded by source; radio hits are listed in the
+        drill-down. Lock the screen and the foreground notification keeps the
+        tier live, though Android then allows only filtered Bluetooth scans, so
+        MAC-prefix matches such as Axon's wait for the screen to wake. The phone
+        vibrates only when the threat <em>escalates</em>.
       </p>
     </div>
 
     <div class="feature-split">
       <div class="phone-frame">
         <img class="phone" src="img/overwatch-sources.png" width="856" height="2000"
-          alt="Detection-sources drill-down: BLE, WiFi, DeFlock, Waze and Commercial rows, each with a color tier dot and the observations that fired it." loading="lazy">
+          alt="Detection-sources drill-down from before v0.5.8: BLE, WiFi, DeFlock, Citizen, Waze and Commercial rows, each with a color tier dot and the observations that fired it. Today Aircraft replaces the retired Citizen row." loading="lazy">
       </div>
       <div class="explain-annotations">
         <div class="annotation">
@@ -144,11 +146,13 @@
           <span class="anno-num">2</span>
           <div>
             <strong>Source-color dots</strong>
-            <p><span class="legend-dot red"></span> Flock / DeFlock cameras red ·
+            <p><span class="legend-dot red"></span> plate readers red ·
+            <span class="legend-dot" style="background:#FF9800"></span> speed cameras amber ·
+            <span class="legend-dot" style="background:#9E9E9E"></span> other cameras gray ·
             <span class="legend-dot blue"></span> Waze police blue ·
             <span class="legend-dot" style="background:#7C4DFF"></span> aircraft violet ·
             user position as a ⌖ crosshair.
-            Tap any row for coordinates + a Maps deep-link.</p>
+            Rows with a location carry a pin that opens it in Google Maps.</p>
           </div>
         </div>
         <div class="annotation">
@@ -156,8 +160,8 @@
           <div>
             <strong>Foreground notification</strong>
             <p>Rebuilt on every tier change — <code>OVERWATCH • RED</code> with
-            the top detection's score. Priority bumps to HIGH on RED so the
-            system surfaces it as a heads-up, screen locked or not.</p>
+            the top detection's score. It updates silently, with no heads-up
+            pop-up; the vibration is the alert.</p>
           </div>
         </div>
         <div class="annotation">
@@ -213,7 +217,8 @@
           of them American,
           and scored by distance, altitude and <em>orbit behaviour</em> — because
           surveillance aircraft circle, and airliners don't. An unlisted aircraft
-          loitering low and slow overhead still registers.
+          loitering low and slow overhead still registers. The feeds are told
+          only the centre of your 1 km grid square.
         </p>
       </article>
 
@@ -221,22 +226,23 @@
         <div class="bento-icon">📡</div>
         <h3>WiFi</h3>
         <p>
-          BSSID OUI prefixes for Flock infrastructure (31-prefix superset), the
+          BSSID OUI prefixes for Flock infrastructure (flock-you's 31), the
           same 18 surveillance-vendor OUIs (WatchGuard in-car APs, Alta readers,
           WiFi cameras), and <code>Flock-XXXX</code> SSID patterns, polled every
-          35 s — just under the Android 11+ scan throttle.
+          35 s — just under the Android 9+ scan throttle.
         </p>
       </article>
 
       <article class="bento-card bento-cam">
         <div class="bento-icon">🎥</div>
-        <h3>DeFlock — ALPR map</h3>
+        <h3>DeFlock — camera map</h3>
         <p>
-          Crowdsourced ALPR camera locations near you (shown within 500 m by
-          default) via the Overpass API (<code>overpass.deflock.org</code> →
-          fallback <code>overpass-api.de</code>), cached for the current scan
-          only and deleted when you stop, with failure backoff. Refetches when
-          you move &gt; 1.5 km.
+          Crowdsourced locations of plate readers, speed cameras and other
+          surveillance cameras near you (shown within 500 m by default) via the
+          Overpass API (<code>overpass.deflock.org</code> → fallback
+          <code>overpass-api.de</code>), which is told only your ~5.5 km grid
+          cell. Cached for the current scan only and deleted when you stop, with
+          failure backoff. Refetches when you move &gt; 1.5 km.
         </p>
       </article>
 
@@ -244,15 +250,16 @@
         <div class="bento-icon">🚓</div>
         <h3>Waze — police alerts</h3>
         <p>
-          Live user-reported <code>POLICE</code> alerts (default 500 m,
-          ~45 min freshness). Waze's public map endpoint now 403s automated
+          User-reported <code>POLICE</code> alerts within 2 km, up to 45 minutes
+          old. Waze's public map endpoint now 403s automated
           clients at Google's edge, so OVERWATCH offers <strong>two ways
           in</strong> and lets you choose. <strong>OpenWeb Ninja</strong>
           (default) reads their hosted feed at
           <code>api.openwebninja.com</code> using <strong>your own API
-          key</strong>, pasted into Settings and stored encrypted in the
-          Android Keystore — Waze never sees you, and each install bills to
-          its own account (about 7.5¢ per hour of scanning). <strong>Direct</strong> speaks Waze's
+          key</strong>, pasted into Settings and stored encrypted with an
+          Android Keystore key — Waze never sees you, OpenWeb Ninja is told only
+          your 1 km grid square, and each install bills to its own account
+          (about 7.5¢ per hour of scanning). <strong>Direct</strong> speaks Waze's
           own app protocol over an anonymous account: free, keyless and live,
           but on every poll it tells a Google service which 1 km grid square
           you are in. Never the exact fix, but enough to follow a drive square
@@ -306,7 +313,7 @@
       <div class="tier tier-red">
         <div class="tier-range">85 +</div>
         <div class="tier-name">RED</div>
-        <p>Certain. Notification jumps to HIGH priority; escalating triple pulse.</p>
+        <p>Certain. Escalating triple pulse.</p>
       </div>
     </div>
   </div>
@@ -318,9 +325,11 @@
     <div class="section-head">
       <span class="section-tag">screenshots</span>
       <h2>The whole app, top to bottom.</h2>
-      <p class="lead">No account, no onboarding, no cloud dashboard to
+      <p class="lead">No OVERWATCH account, no onboarding, no cloud dashboard to
       configure — open it, hit START, and drill into any source. Three taps
-      deep is as complex as it gets.</p>
+      deep is as complex as it gets. (These screenshots predate v0.5.8: the app
+      has since dropped the Citizen source and gained the Aircraft source, a
+      color legend and a range slider. New ones are coming.)</p>
     </div>
 
     <div class="shots">
@@ -331,13 +340,13 @@
       </figure>
       <figure class="shot">
         <img class="phone" src="img/overwatch-sources.png" width="856" height="2000"
-          alt="Detection-sources drill-down: BLE, WiFi, DeFlock, Waze and Commercial rows, each with a color tier dot and the observations that fired it." loading="lazy">
+          alt="Detection-sources drill-down from before v0.5.8: BLE, WiFi, DeFlock, Citizen, Waze and Commercial rows, each with a color tier dot and the observations that fired it. Today Aircraft replaces the retired Citizen row." loading="lazy">
         <figcaption><strong>Source drill-down</strong>Tap the ring for every source, its live tier, and the exact observation that fired it.</figcaption>
       </figure>
       <figure class="shot">
         <img class="phone" src="img/overwatch-settings.png" width="856" height="2000"
-          alt="Settings screen: per-source toggles and the encrypted Waze API key field." loading="lazy">
-        <figcaption><strong>Settings</strong>Toggle each source, tune proximity distances, and paste your own encrypted Waze API key.</figcaption>
+          alt="Settings screen from before v0.5.8: per-source toggles, since-removed per-source distance sliders, and the Waze section." loading="lazy">
+        <figcaption><strong>Settings</strong>Toggle each source, choose the Waze backend, and decide whether map tiles are kept.</figcaption>
       </figure>
     </div>
   </div>
@@ -353,13 +362,13 @@
 
     <div class="bento">
       <article class="bento-card bento-lg">
-        <div class="bento-icon">🔇</div>
+        <div class="bento-icon">✋</div>
         <h3>Hands-off by design</h3>
         <p>
           OVERWATCH never connects to, pairs with, or jams anything it detects.
           Its radio scans are the ordinary ones every Android phone makes, and
-          its online sources send a box around your position to the services
-          they query. The Axon advertise/fuzz code from one of the reference
+          its online sources are told only the centre of the 1 km grid square
+          you are in (the camera map, its ~5.5 km cell), never your position. The Axon advertise/fuzz code from one of the reference
           projects is <strong>intentionally excluded</strong>.
         </p>
       </article>
@@ -379,7 +388,8 @@
         <h3>Bring your own key</h3>
         <p>
           The Waze feed uses <em>your</em> OpenWeb Ninja key, encrypted via the
-          Android Keystore and sent only to that one host. No shared
+          Android Keystore and sent only to that one host, which learns only
+          your 1 km grid square. No shared
           credential, no secrets in the APK — and revoking it is your call.
         </p>
       </article>
@@ -388,9 +398,9 @@
         <div class="bento-icon">🩺</div>
         <h3>Honest per-source health</h3>
         <p>
-          The drill-down marks a source <code>Source unreachable</code> when
-          its scanner couldn't reach its feed — a silent empty result and a
-          real failure look different.
+          When a scanner can't reach its feed, the drill-down says why (say,
+          <code>Overpass unreachable: HTTP 504</code>) — a silent empty result
+          and a real failure look different.
         </p>
       </article>
 
@@ -398,9 +408,10 @@
         <div class="bento-icon">🗺</div>
         <h3>Your position, not your data</h3>
         <p>
-          Location drives the proximity checks and the map on-device. No
-          account, no telemetry, no analytics — the scans and feeds run and
-          the results stay on your phone.
+          Location drives the proximity checks and the map on-device; the
+          online feeds are told at most which 1 km grid square you are in, and
+          the map's tiles come from OpenStreetMap. No OVERWATCH account, no telemetry, no analytics — the scans and feeds
+          run and the results stay on your phone.
         </p>
       </article>
     </div>
@@ -444,7 +455,7 @@
           <ul>
             <li>Grab the latest debug-signed APK from
               <a href="https://github.com/KaraZajac/OVERWATCH/releases/latest">Releases</a>
-              (currently <strong>v0.5.17</strong>).</li>
+              (currently <strong>v0.5.18</strong>).</li>
           </ul>
         </div>
         <div class="tl-col tl-active">
@@ -513,7 +524,7 @@
       with, jams, or interferes with any device or network it detects.
     </p>
     <p class="footer-meta">
-      v0.5.17 · <a href="https://github.com/KaraZajac/OVERWATCH">github.com/KaraZajac/OVERWATCH</a> · <a href="https://github.com/KaraZajac/OVERWATCH/blob/main/LICENSE">BSD-3-Clause</a>
+      v0.5.18 · <a href="https://github.com/KaraZajac/OVERWATCH">github.com/KaraZajac/OVERWATCH</a> · <a href="https://github.com/KaraZajac/OVERWATCH/blob/main/LICENSE">BSD-3-Clause</a>
     </p>
     <div class="onion-line">
       <span class="onion-label">Also on Tor</span>

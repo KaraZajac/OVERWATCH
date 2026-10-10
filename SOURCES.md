@@ -25,7 +25,10 @@ Two radio sources (local) and three network sources (position-driven). The app
 **never connects to, pairs with, or jams** anything it detects. It is not
 radio-silent, though: Android's scans transmit — Wi-Fi scanning sends probe
 requests and Bluetooth scanning sends scan requests to advertisers — and the
-network sources send a box around the user's position to the services in §2.
+network sources have to say where to look. Since v0.5.18 none of them is given
+the phone's position: the ADS-B feeds, OpenWeb Ninja and Waze direct get the
+centre of the 1 km grid square it is in, Overpass its ~5.5 km cache cell, and the
+map's tiles come from OpenStreetMap. §5.4 lists every destination.
 
 ---
 
@@ -63,13 +66,23 @@ Measured node counts in a 5 km bbox (2026-09-17):
 Widening past ALPR roughly doubles the worst case rather than exploding it,
 which is why generic cameras are worth carrying.
 
-- Response cached on disk per 0.05° grid cell (`deflock2_<lat>_<lon>`), for the
-  current scan only. The directory doubles as a list of every ~5.5 km area
+- **What Overpass learns.** The box is ±0.05° around the centre of the phone's
+  0.05° grid cell, never around the fix, so Overpass learns only which ~5.5 km
+  cell you are in. Until v0.5.18 it was centred exactly on the fix, so its centre
+  was your position. Centring on the cell also closed a coverage gap: a box
+  centred on whichever fix first filled a cell could leave part of a later fix's
+  1.2 km evaluation circle outside it (12.5% of positions in a 200,000-fix
+  simulation). A cell-centred box reaches at least 0.025° past every edge of the
+  cell (~2.8 km north–south, ~2.2 km east–west at 38°), which holds the circle for
+  every fix below about 64° latitude.
+- Response cached on disk per 0.05° grid cell (`deflock3_<i>_<j>`, the cell's
+  grid indices `floor(coordinate / 0.05)`), for the current scan only. The directory doubles as a list of every ~5.5 km area
   scanned, so `LocationTraces` deletes it every time scanning stops and again at
   the next start, and a request still in flight at the stop does not write.
   Before v0.5.17 the files were never deleted; a 24 h TTL only made old ones
   ignored.
-- Refetch when the user moves > 1.5 km from the last fetch centre.
+- Refetch when the user moves > 1.5 km from the last fetch point; a fix in a
+  cell already fetched this scan is served from the cache.
 - A `200 OK` body containing `{"remark": "...timed out..."}` is treated as a
   failure, so an Overpass timeout cannot poison the cache.
 - **Dead:** `cdn.deflock.me/regions/*.json` — behind Cloudflare bot mitigation,
@@ -88,6 +101,7 @@ so neither leaks into scoring or UI. Default is OpenWeb Ninja.
 | Poll | 240 s | 60 s |
 | Latency | ~20 min behind live | live |
 | Position sent to Waze | none | 1 km grid square, every poll |
+| Position sent to OpenWeb Ninja | 1 km grid square, every poll, with your key (the exact fix until v0.5.18) | none |
 | Default | yes | no, opt-in |
 
 #### 2.2a OpenWeb Ninja (default)
@@ -98,6 +112,13 @@ GET https://api.openwebninja.com/waze/alerts-and-jams
     &max_alerts=200&max_jams=0&alert_types=POLICE
 Header: X-API-Key: <the user's own key>
 ```
+
+**What OpenWeb Ninja learns.** The box is centred on the centre of the 1 km grid
+square from `PositionCloak` (§2.2b), never on the fix, and grown to ±(2000 + 919)
+m so the 2 km evaluation circle around the real position stays inside it. So the
+provider learns that square every 240 s, tied to your key. Until v0.5.18 the box
+was centred exactly on the fix. Checked with the shipping class on 2026-10-10:
+two positions 300 m apart in one square produce byte-identical requests.
 
 **Bring your own key** — sign up at openwebninja.com, subscribe to the Waze API,
 paste the key into Settings. Stored encrypted (Android Keystore AES/GCM via
@@ -129,7 +150,9 @@ Content-Type: binary/octet-stream      Response: application/x-protobuf
 ```
 
 Regional hosts: `rt-xlb-am` (North America), `rt-xlb-il` (Israel),
-`rt-xlb-row` (rest of world).
+`rt-xlb-row` (rest of world). OVERWATCH hard-codes the North America region
+(`WazeRtClient.DEFAULT_REGION = "na"`), so it only ever talks to `rt-xlb-am`,
+wherever the phone is.
 
 No key and no account of the user's: `/static` mints an anonymous
 username/password pair on request. The request body is line-oriented — protobuf
@@ -160,12 +183,13 @@ emulator:
   slowly, which is why the poll is 60 s.
 - Anonymous-account registration is capped per device per day (10), so the
   account is persisted encrypted and reused, and a rejected account backs off
-  30 s → 10 min instead of spinning the register loop.
+  30 s, doubling to 10 min, instead of spinning the register loop. (Until v0.5.18
+  the doubling stopped at 8 min.)
 
 **What it costs the user, and why it is off by default:** the app becomes a Waze
 client. It holds a Waze account and, on every poll, tells Waze which 1 km grid
-square it is in. The exact fix never leaves the phone, but one persistent
-account reporting squares is a coarse track a Google service can follow. The
+square it is in. Waze never gets the exact fix, but one persistent account
+reporting squares is a coarse track a Google service can follow. The
 Settings screen says so in those terms before the toggle.
 
 **Where the position actually goes.** Three things in the protocol carry a
@@ -190,8 +214,11 @@ command Location             Location,-77.106238,38.832417      0.0 m
 command MapDisplayed centre  38.832417, -77.106238      0.0 m   (×7 in one fetch)
 ```
 
-**v0.5.16 fix — `scan/wazert/PositionCloak.java`.** Every position-bearing
-message is now built from the centre of a 1 km grid square, never from the fix:
+**v0.5.16 fix — `PositionCloak`.** Every position-bearing message is now built
+from the centre of a 1 km grid square, never from the fix. (The class lived in
+`scan/wazert/` until v0.5.18 moved it to `data/location/PositionCloak.java` to
+share it with the ADS-B and OpenWeb Ninja clients. The move changed no cell:
+fed the same 400,000 positions, old and new return bit-identical centres.)
 
 - **A fixed grid, not random noise.** Fresh noise on every poll averages out
   over a minute-by-minute stream. Every point in a square maps to one centre,
@@ -203,10 +230,11 @@ message is now built from the centre of a 1 km grid square, never from the fix:
   squares and the flipping would itself pinpoint you. A square is kept until the
   device is 150 m past it; ±30 m wander across an edge never flips it.
 - **Detection unaffected.** The cell centre is at most `√2 × (500 + 150) ≈ 919 m`
-  from the real position, and the query area is widened by exactly that, so the
-  2 km evaluation circle around the real fix stays inside the second query box
-  (3000 m half-width). Distances are still measured on the device from the real
-  fix.
+  from the real position. The query radius is `max(2000 + 919, 8000) = 8000 m`, so
+  the 8 km floor dominates: after the 0.75 shrink the boxes are 6000, 3000, 1500,
+  750 and 375 m half-width, and the 2 km evaluation circle around the real fix,
+  which reaches at most 2919 m from the centre, stays inside the second.
+  Distances are still measured on the device from the real fix.
 
 Verified on the wire the same day: two real positions **745 m apart in one
 square produced byte-identical command lines**; every `Location` and
@@ -222,9 +250,13 @@ carries `x-waze-stealth-mode-activated: false`. What that header tracks is
 **unverified** — treat "invisible to other drivers" as requested, not proven.
 
 The protocol layer under `scan/wazert/` is **vendored** from
-highway-radar-sabre-plus (MIT, licence kept beside the code), unmodified apart
-from the package name, removal of the report-submission path, and swapping OkHttp
-for `HttpURLConnection`. OVERWATCH reads alerts and never reports one.
+highway-radar-sabre-plus (MIT, licence kept beside the code): the codec, session,
+constants, geometry, alert cache and model classes plus `proto/waze.proto`,
+unmodified apart from the package name, removal of the report-submission path,
+and a rewrite of the HTTP client from OkHttp to `HttpURLConnection`.
+`WazeRtFetcher.java` is OVERWATCH's own driver modelled on upstream's, carried
+under the same licence; `PositionCloak` is OVERWATCH's own and lives outside that
+directory. OVERWATCH reads alerts and never reports one.
 
 **Why not `live-map/api/georss`:** the endpoint every scraper used is fronted by
 Google's edge, which returns **HTTP 403** to automated clients. Tested 2026-07
@@ -245,6 +277,15 @@ GET https://api.adsb.lol/v2/lat/<lat>/lon/<lon>/dist/30           (fallback)
 
 **No API key, no account.** Both are volunteer data-in/data-out networks running
 the same readsb-derived schema, so one parser covers both.
+
+**What the feeds learn.** `<lat>`/`<lon>` are the centre of the 1 km grid square
+from `PositionCloak` (§2.2b), to four decimals with a `.` separator, never the
+fix. The 30 nm query dwarfs the ≤919 m offset, and distances are measured on the
+device. Until v0.5.18 the URL carried the fix itself (~11 m) every 60 s, and it
+was formatted in the phone's locale: on a German, French or Spanish phone the
+request read `lat/38,8895/…`, which the feeds answer with HTTP 400, so the source
+never worked there. (Checked 2026-10-10: comma form → 400; the v0.5.18 client
+under a German locale → 200 with 66 aircraft.)
 
 Community networks matter specifically here: the commercial trackers
 (FlightAware, Flightradar24) filter military and sensitive law-enforcement
@@ -267,8 +308,8 @@ ADSBexchange, adsb.fi, adsb.lol and airplanes.live do not filter.
 https://downloads.adsbexchange.com/downloads/basic-ac-db.json.gz
 ```
 
-14.5 MB gzipped, **618,270 aircraft**, newline-delimited JSON, derived from the
-FAA registry and **already keyed by ICAO hex** — which is what ADS-B broadcasts,
+14.5 MB gzipped, **618,270 aircraft**, newline-delimited JSON, derived mostly
+from the FAA registry and **already keyed by ICAO hex** — which is what ADS-B broadcasts,
 so no N-number→hex conversion is needed. Fields: `icao`, `reg`, `ownop`
 (owner/operator), `icaotype`, `model`, `faa_pia`, `faa_ladd`, `mil`.
 
@@ -276,10 +317,13 @@ Filtering `ownop` for law-enforcement patterns yields **1,971 aircraft**
 (213 LADD-flagged), bundled as `app/src/main/res/raw/le_aircraft.csv` (~83 KB).
 **1,935 are US agencies; 36 are foreign police** the same patterns catch: the
 Korean National Police (8), New South Wales Police (8), Western Australia Police
-(8), Royal Oman Police (3), and one each from the Australian Federal Police,
-Victoria Police, the Dutch police and Canadian services in Ontario,
-Saskatchewan, Peel and York. They are kept because they matter to users outside
-the US. 18 of the US entries sit outside the civil US address block
+(8), Royal Oman Police (3), one each from the Australian Federal Police, Victoria
+Police and the Dutch police, and six Canadian entries: Ontario's Ministry of the
+Solicitor General (2), Peel and York regional police, a board of police
+commissioners whose name the registry truncates, and the Saskatchewan Public
+Safety Agency. That last one matched on `PUBLIC SAFETY`, and its air operations
+are most likely wildfire work, so it is probably not police — the pattern's
+limit. They are kept because they matter to users outside the US. 18 of the US entries sit outside the civil US address block
 `A00001–ADF7C7`; all are CBP or DHS.
 Regenerate with `scripts/gen-le-aircraft.py`. It runs at development time and
 commits its output; the app never downloads it.
@@ -287,7 +331,7 @@ commits its output; the app never downloads it.
 Owner-match patterns: `SHERIFF`, `POLICE`, `STATE PATROL`, `HIGHWAY PATROL`,
 `STATE TROOPER`, `PUBLIC SAFETY`, `US MARSHAL`, `MARSHALS SERVICE`, `CONSTABLE`,
 `DEPT/DEPARTMENT OF CORRECTION`, `BORDER PATROL`, `CUSTOMS AND BORDER`,
-`HOMELAND SECURITY`, `DRUG ENFORCEMENT`, `FEDERAL BUREAU OF INVESTIGATION`.
+`CUSTOMS & BOR` (owner names arrive truncated), `HOMELAND SECURITY`, `DRUG ENFORCEMENT`, `FEDERAL BUREAU OF INVESTIGATION`.
 
 Excluded to avoid false positives: `MARSHALL SPACE` (NASA), plus `FIRE`,
 `AMBULANCE`, `MEDICAL`, `EMS`, `AIR METHODS`, `LIFE FLIGHT`, `MEDEVAC`,
@@ -332,7 +376,8 @@ which rules out a parameter-shape mismatch. Every sibling path (`nearby`,
 
 That is a decommissioned surface, not a changed contract. Structured incident
 data is now Citizen's paid Enterprise API only. The source was removed entirely
-in v0.5.7 rather than left as a permanently-failing row.
+in v0.5.8 rather than left as a permanently-failing row. (No v0.5.7 was ever
+released; the version went from 0.5.6 to 0.5.8.)
 
 *(Historical footnote for the talk: passing that empty string to `JSONObject`
 throws `Value of type java.lang.String cannot be converted to JSONObject` —
@@ -358,8 +403,11 @@ b4:e3:f9  3c:91:80  d8:f3:bc  80:30:49  14:5a:fc  9c:2f:9d  94:08:53  e4:aa:ea
 
 ### 3.2 WiFi OUIs — Flock infrastructure
 
-`data/targets/WifiOuis.kt`. 31-prefix superset (flock-you research by
-NitekryDPaul + DeFlockJoplin), overlapping flock-detection's 24:
+`data/targets/WifiOuis.kt`. flock-you's 31 prefixes (research by NitekryDPaul +
+DeFlockJoplin). Despite the "superset" label upstream, only 14 of
+flock-detection's 24 BLE prefixes are among them, and `82:6b:f2` has the
+locally-administered bit set, so it is not an IEEE OUI; it is kept because
+flock-you observed it:
 ```
 70:c9:4e  3c:91:80  d8:f3:bc  80:30:49  b8:35:32  14:5a:fc  74:4c:a1  08:3a:88
 9c:2f:9d  c0:35:32  94:08:53  e4:aa:ea  f4:6a:dd  f8:a2:d6  24:b2:b9  00:f4:8d
@@ -424,8 +472,11 @@ eight, because a filter only decides which advertisements get delivered.
 `"TN"`-prefixed serial in the payload adds 20.
 
 The BLE scanner iterates **every** manufacturer-data entry in an advertisement,
-not just the first — devices advertise multiple and the target is often not
-first in the list.
+not just the first — devices advertise several and the target is often not
+first in the list. Only one company id is kept per observation, ranked XUNTONG
+first, then any COMMERCIAL company id (§3.7), then whatever came first. Until
+v0.5.18 the middle rank was missing, so a glasses or Echo id behind a
+lower-numbered entry went unseen.
 
 ### 3.6 Name and SSID patterns
 
@@ -487,7 +538,10 @@ service-data keys — HeyCyan frames have been seen carrying it either way):
 
 Both service UUIDs are also added to the screen-off `ScanFilter` set (§5.1),
 ahead of the company ids, because they are exact signatures and are what
-should survive if the 16-slot list is trimmed.
+should survive if the 16-slot list is trimmed. With COMMERCIAL on it always is:
+1 XUNTONG + 8 Raven + 2 service UUIDs + 8 company ids makes 19, so the last
+three company ids (Amazon, Google, Sonos) never get a slot, while the five
+glasses ids do.
 
 Name tokens: the case-sensitive hints (`Spectacles`, `Ray-Ban`, `RayNeo`,
 `Vuzix`, `XREAL`, `Rokid`, plus the Echo/Ring/Nest set) and, matched
@@ -504,12 +558,15 @@ the radio protocol — not the project's code. Two small upstream notes worth
 passing back: the CSV's `Snap` row carries `0x0D53`, which is Luxottica (the
 project's own README and code have Snap correctly as `0x03C2`), and its
 scanner reads only the first manufacturer-data entry (`keyAt(0)`), whereas
-some devices advertise several.
+some devices advertise several. (OVERWATCH had the same gap for COMMERCIAL ids
+until v0.5.18; see §3.5.)
 
 Hidden-camera OUIs: `fc:b4:67` (Yingxin/SmartLife), `00:e0:4c` (Realtek, in many
 cheap cams), `dc:4f:22` (Tuya-affiliated modules), `a4:c1:38` (Telink, common in
 cheap BLE mics), `8c:ce:4e` (Shenzhen iComm, frequent in spy-cam BOMs).
 
+Weights: OUI 30, name 45, company id 30, service UUID 50, SSID 45; +10 when two
+or more methods agree on one device, +5 above −50 dBm, +8 for rise-peak-fall.
 Scores are **capped at 84** so a cluster of doorbells — or a passing pair of
 Ray-Bans — can never read as ALPR-grade certainty. RED is reserved for
 ALPR/Axon-grade evidence.
@@ -532,43 +589,56 @@ RED        85 +    certain
 
 Sources that carry real coordinates are scored on a **continuous falloff over
 actual distance**, linearly interpolated between anchors. The anchors are
-**absolute metres and deliberately independent of the user's detection-radius
+**absolute metres and deliberately independent of the user's `show within`
 setting**: a camera 200 m away is equally close whether the slider reads 300 m
-or 5 km, so moving a setting must never move the threat level. The radius
-decides what gets *reported*, never how alarming it is.
+or 5 km, so moving a setting must never move the threat level. The setting
+decides only what is drawn and listed, never what is evaluated or how alarming
+it is.
 
 | Distance | ALPR | Speed camera | Generic camera | Waze police | Aircraft |
 |---|---|---|---|---|---|
 | 0 m | 95 | 78 | 55 | 80 | 88 |
-| 50 m | 85 | 70 | 46 | 78 | — |
+| 50 m | 85 | 70 | 46 | 75 | — |
 | 100 m | 72 | 63 | 42 | 70 | — |
-| 200 m | 55 | 50 | 34 | 62 | — |
-| 350 m | 42 | 38 | 28 | 52 | — |
-| 500 m | 35 | 32 | 26 | 47 | — |
-| 1000 m | 26 | 27 | 20 | 34 | 80 |
+| 200 m | 55 | 51 | 35 | 63 | — |
+| 350 m | 42 | 40 | 29 | 53 | — |
+| 500 m | 35 | 32 | 27 | 48 | — |
+| 1000 m | 26 | 27 | 21 | 35 | 80 |
 | 3000 m | 18 | 16 | 14 | 23 | 68 |
 | 15000 m | — | — | — | — | 30 |
+
+Values are the code's (linear interpolation, then rounded), before any modifier.
+Each first drops below 40 at: ALPR ~403 m, speed camera ~351 m, generic camera
+~132 m, Waze ~769 m, aircraft ~11 km.
 
 **Every curve crosses below 40 (YELLOW) at roughly the distance the thing stops
 being able to act on you**, and **scoring is fully decoupled from the range
 control**: scanners evaluate everything inside their own fixed radii (DeFlock
-1200 m, Waze 2000 m, aircraft 15 km) and the tier is computed from that, so the
+1200 m, Waze 2000 m, aircraft 15 km, or 8 km for an unlisted plane) and the tier is computed from that, so the
 `show within` slider cannot move it in either direction. Anything at YELLOW or
 above is displayed whatever the range says, since a view setting that can hide a
 live alert is a trap rather than a feature.
 
-Getting there took two passes, and the second one is the instructive half. The on-screen tier is `max(score)` over everything reported,
-and the slider decides what is reported, so loose curves let the setting leak
-into the alarm: measured against a real 195-node cache, standing still and
-dragging from 300 m to 500 m flipped the app GREEN → YELLOW with nothing
-physical changing. After recalibration, sweeping 200 m → 4900 m leaves the tier
-untouched (reported items 0 → 133), while standing 29 m from a Flock camera
-still reads 89 RED.
+Getting there took three passes. v0.5.8 made the anchors absolute. But the
+on-screen tier is `max(score)` over everything reported, and the slider then
+decided what was reported, so loose curves let the setting leak into the alarm:
+measured against a real 195-node cache, standing still and dragging from 300 m
+to 500 m flipped the app GREEN → YELLOW with nothing physical changing. v0.5.10
+recalibrated the curves, and sweeping 200 m → 4900 m then left the tier untouched
+(reported items 0 → 133) — but that sweep ran where the nearest item scored 35,
+so it could not catch the opposite case: *narrowing* the range still hid a real
+alert. On a device, a police report 312 m away scoring 52 went GREEN when the
+view went from 1100 m to 300 m. v0.5.12 decoupled the two: the scanners evaluate
+at fixed radii, and anything YELLOW or above is shown whatever the range.
+Standing 29 m from a Flock camera still reads 89 RED.
 
-Aircraft are exempt from the range slider entirely — `AircraftScanner` uses its
-own 15 km reporting range (8 km for unregistered contacts), because an aircraft
-orbiting overhead is still watching you from a distance at which a camera
-cannot see you at all.
+Aircraft are evaluated over their own fixed ranges — 15 km for a registry hit,
+8 km for a loitering unknown — because an aircraft orbiting overhead is still
+watching you from a distance at which a camera cannot see you at all. Display
+works as for every source: YELLOW and above always shows, and a weaker aircraft
+beyond the `show within` range is hidden. Since the range tops out at 5 km, a
+sub-40 aircraft further out is never drawn: a registered airframe 9 km away at
+9,000 ft scores 33.
 
 A surveyed ALPR peaks highest and decays fastest — its position is exact and it
 cannot see you from a kilometre away. A Waze report is a coarse pin on a car
@@ -579,23 +649,33 @@ orbiting 5 km away is still watching you.
 
 - **Waze age decay** — up to −12 points across the 45-minute freshness window.
   Police move; a surveyed camera does not.
-- **Waze crowd trust** — `reliability ≥ 7` +5, `confidence ≥ 4` +5.
+- **Waze crowd trust** — `reliability ≥ 7` +5, `confidence ≥ 4` +5. On the direct
+  backend confidence is always 0 and reliability is the thumbs-up count capped
+  at 10, so only the first can apply.
 - **Aircraft altitude** — ≤3,000 ft +6; ≤8,000 ft +0; ≤15,000 ft −12;
   above −30. A known police airframe at 30,000 ft is an airliner's neighbour,
   not an observer.
 - **Aircraft loitering** — +10. Surveillance aircraft orbit; airliners and
   medevac flights heading somewhere do not.
 - **Aircraft LADD** — +4. The operator asked public trackers to hide it.
-- **Unidentified aircraft cap** — 69. Behaviour-only evidence never reaches the
-  "certain" band; circling could still be news or survey work.
+- **Unidentified aircraft cap** — 69, the top of YELLOW. Behaviour-only evidence
+  never reaches ORANGE, let alone RED; circling could still be news or survey
+  work.
+- **Radio base weights.** BLE: OUI 40 (Axon 80, police-exclusive vendor 75), name
+  45 (Penguin numeric 15), XUNTONG maker id 60 (+20 with a `TN` serial), Raven 70
+  (90 for three or more counted UUIDs). WiFi: OUI 40 (police-exclusive 75), Flock
+  SSID format 65, generic SSID 50. Methods on one device add up, capped at 100.
 - **Multi-method bonus** — +20 when two independent BLE/WiFi methods agree.
-- **Strong RSSI** (> −50 dBm) +10; **stationary** (rise-peak-fall) +15.
+- **Strong RSSI** (> −50 dBm) +10; **stationary** (rise-peak-fall) +15. COMMERCIAL
+  uses +10, +5 and +8 (§3.7).
 
 ### 4.3 Loiter detection
 
 An aircraft is "loitering" when, over the last 15 minutes of tracked history:
 at least **3 samples** spanning at least **4 minutes**, every one within
-**5 km** of their own centroid, while below **12,000 ft** and under **200 kt**.
+**5 km** of their own centroid, with the latest report at or below **12,000 ft**
+and **200 kt**. A contact reporting `ground` altitude, or no speed, does not count
+as low or slow.
 
 A registry hit is reported wherever it is, within 15 km. An *unregistered*
 aircraft is reported only when it is both loitering **and** within 8 km, so
@@ -629,7 +709,7 @@ So the scanner switches strategy on `ACTION_SCREEN_ON` / `ACTION_SCREEN_OFF`:
 | Screen | Scan | Covers | Loses |
 |---|---|---|---|
 | on | unfiltered | everything — OUI, name, UUID, manufacturer | — |
-| off | filtered (≤16) | Raven service UUIDs, XUNTONG manufacturer id, mic-target company ids | OUI prefixes, name substrings |
+| off | filtered (≤16) | Raven service UUIDs, XUNTONG manufacturer id, the Echo and HeyCyan service UUIDs, the glasses company ids (Amazon, Google and Sonos are trimmed when COMMERCIAL is on, §3.7) | OUI prefixes, name substrings |
 
 Filter slots are a hardware resource and chipsets differ; a common allocation is
 16. Overflow is meant to fall back to software filtering, but since a scan that
@@ -664,13 +744,15 @@ source does not depend on the radio.
 
 ### 5.3 What stays on the phone
 
-Detections live in memory and clear when scanning stops. Two disk caches could
-otherwise show roughly where the app has been used (`data/cache/LocationTraces.kt`):
+Detections live in memory and clear when scanning stops. Two disk caches and the
+system log could otherwise show roughly where the app has been used
+(`data/cache/LocationTraces.kt`):
 
 | Cache | What it reveals | When it is deleted |
 |---|---|---|
 | `cache/deflock/` | one file per ~5.5 km area scanned | every stop, and again at the next start |
 | `cache/osmdroid-tiles/cache.db` | OpenStreetMap tiles wherever the map was shown | same schedule, only if **Settings → Privacy → Delete map tiles when scanning stops** is on (default off) |
+| Android's log (logcat) | since v0.5.18, nothing positional: no coordinates, cell names or request URLs. v0.5.17 and earlier logged the exact fix on every camera-map fetch | not the app's to delete: it lives in RAM, rotates, and clears on reboot. One gap remains outside the app's code: osmdroid logs a tile's number when that tile fails to download |
 
 Tiles stay by default because OpenStreetMap's tile usage policy asks apps to
 cache tiles rather than re-download them. They live in one SQLite database that
@@ -678,6 +760,24 @@ every MapView shares through osmdroid's static connection, and a MapView can
 still be attached when scanning stops. So the file is never deleted out from
 under it. Tiles are purged through that same connection, then `VACUUM` rewrites
 the file, so deleted rows don't linger in free pages.
+
+### 5.4 What leaves the phone
+
+Every online destination, and the most each one learns:
+
+| Destination | What it learns | How often |
+|---|---|---|
+| ADS-B feeds (`opendata.adsb.fi`, `api.adsb.lol`) | the centre of your 1 km grid square | every 60 s while scanning |
+| OpenWeb Ninja (default Waze backend) | the centre of your 1 km grid square, tied to your API key | every 240 s |
+| Waze (direct backend, opt-in) | the centre of your 1 km grid square, tied to an anonymous account; `ClientInfo` gets that centre jittered | every 60 s |
+| Overpass (`overpass.deflock.org`, `overpass-api.de`) | which 0.05° (~5.5 km) cell you are in | at start, then after each 1.5 km of movement if the cell is new to this scan |
+| OpenStreetMap tile servers | the tiles the map loads, i.e. roughly the area on screen | while the map or bubble is visible, for tiles not already cached |
+
+Before v0.5.18 the ADS-B feeds got the fix itself (~11 m), and the Overpass and
+OpenWeb Ninja boxes were centred exactly on it; before v0.5.16 Waze direct got it
+too. The location fix itself comes from Google Play services' fused provider;
+whether that consults Google's servers depends on the phone's location settings,
+not on OVERWATCH.
 
 ## 6. Testing notes
 
@@ -721,7 +821,7 @@ Reference projects studied while building (kept under a gitignored `REFERENCES/`
   connects with what it detects.
 - **flock-detection** — the confidence-scoring algorithm, RSSI rise-peak-fall
   stationary detection, OUIs, UUIDs and name patterns.
-- **flock-you** — the 31-OUI WiFi superset.
+- **flock-you** — the 31-prefix Flock WiFi list.
 - **deflock / deflock-app** — the Overpass query shape and proximity-alert
   pattern.
 - **wazepolice** — the original `live-map/api/georss` recipe, now dead.
@@ -729,5 +829,6 @@ Reference projects studied while building (kept under a gitignored `REFERENCES/`
   wiki points to) — consulted, not used, for what the `SeeMe` visibility values
   mean. Nothing from it is in OVERWATCH.
 - **highway-radar-sabre-plus** (MIT) — the Waze RT protocol layer. The only
-  reference that is *vendored* rather than studied: `scan/wazert/*.java` and
+  reference that is *vendored* rather than studied: `scan/wazert/*.java` (apart
+  from `WazeRtFetcher.java`, OVERWATCH's own driver modelled on upstream's) and
   `proto/waze.proto` are that project's code, carried with its licence.

@@ -6,6 +6,7 @@ import android.os.SystemClock;
 import android.util.Log;
 
 import org.json.JSONObject;
+import org.soulstone.overwatch.data.location.PositionCloak;
 import org.soulstone.overwatch.data.settings.SecureStore;
 
 import java.util.ArrayList;
@@ -20,7 +21,8 @@ import java.util.List;
  * WazeProtocolSource — no Highway Radar plumbing, no reporting, no tile decoding,
  * no keepalive thread — and carried under that project's MIT License like the
  * rest of this directory (see LICENSE here). The position cloaking it applies
- * lives in {@link PositionCloak}, which is OVERWATCH's own.
+ * is OVERWATCH's own {@link PositionCloak}, kept outside this directory because
+ * the other online sources use it too.
  *
  * <p><b>What talking to Waze costs the user.</b> The RT protocol is the one the
  * Waze app itself speaks. Using it means registering an anonymous account with
@@ -308,7 +310,8 @@ public final class WazeRtFetcher {
     }
 
     private void setBackoff() {
-        int step = Math.min(Math.max(consecutiveRejections, 1), 5);
+        // Six steps so the doubling actually reaches the ceiling: 30 s, 1, 2, 4, 8, 10 min.
+        int step = Math.min(Math.max(consecutiveRejections, 1), 6);
         long delay = Math.min(BACKOFF_MAX_MS, BACKOFF_BASE_MS * (1L << (step - 1)));
         backoffUntilMs = SystemClock.elapsedRealtime() + delay;
         Log.w(TAG, "Waze RT backing off " + (delay / 1000) + "s");

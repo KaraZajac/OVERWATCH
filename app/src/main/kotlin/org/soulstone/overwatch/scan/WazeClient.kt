@@ -12,6 +12,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import org.soulstone.overwatch.data.location.PositionCloak
 // The alert and result types are shared with the other WAZE backend. Importing the
 // nested names keeps this client's body reading the way it always has. (A typealias
 // would not: Kotlin will not resolve a nested class through one.)
@@ -36,6 +37,13 @@ import org.soulstone.overwatch.scan.WazeSource.FetchResult
  * 100 requests/month is
  * enough to try it but not to run it continuously.
  *
+ * **What OpenWeb Ninja learns.** The box is centred on the centre of the ~1 km
+ * grid square [PositionCloak] puts the device in, not on the fix, and is grown by
+ * [PositionCloak.MAX_OFFSET_M] so the evaluation radius around the real position
+ * still fits inside it. So the provider learns which square you are in, every
+ * poll, under your key. Until v0.5.18 the box was centred exactly on the fix, so
+ * its centre was your position. Waze itself never sees the request.
+ *
  * An empty key means the source is unconfigured — [isConfigured] is false and
  * the scanner reports that instead of calling out, so Waze stays dormant rather
  * than erroring on every poll.
@@ -44,8 +52,9 @@ import org.soulstone.overwatch.scan.WazeSource.FetchResult
  * scraper used, is fronted by Google's edge and 403s automated clients outright
  * — no IP, header or browser makes it answer. A direct path does exist (the Waze
  * app's own protocol, see [org.soulstone.overwatch.scan.wazert.WazeRtClient]) but
- * it means holding a Waze account and reporting a coarse position, so it is
- * opt-in and this metered-but-anonymous backend stays the default.
+ * it means holding a Waze account and reporting a coarse position to Google, so
+ * it is opt-in and this metered backend, which keeps Waze out of it entirely,
+ * stays the default. It is not anonymous: every request carries the user's key.
  *
  * Response shape (verified live 2026-09-16): `{ "data": { "alerts": [...],
  * "jams": [...] } }`, each alert carrying `alert_id`, `type`, `subtype`
@@ -73,6 +82,9 @@ class WazeClient(
 
     override val backendName: String = "OpenWeb Ninja"
 
+    /** The only source of coordinates that reach OpenWeb Ninja. */
+    private val cloak = PositionCloak()
+
     /** True when the user has entered an API key. False → source is unconfigured. */
     override val isConfigured: Boolean get() = apiKey().isNotBlank()
 
@@ -92,13 +104,18 @@ class WazeClient(
     ): FetchResult = withContext(Dispatchers.IO) {
         if (!isConfigured) return@withContext FetchResult.Failed("API key not set")
 
-        val r = radiusMeters.toDouble().coerceAtLeast(BBOX_MIN_RADIUS_M)
+        // Centre the box on the grid square, not the fix, and grow it by the most
+        // the two can differ. Distances are measured later, from the real fix.
+        val pub = cloak.publicPosition(lat, lon)
+        val cLat = pub[0]
+        val cLon = pub[1]
+        val r = radiusMeters.toDouble().coerceAtLeast(BBOX_MIN_RADIUS_M) + PositionCloak.MAX_OFFSET_M
         val latDelta = r / 111_000.0
-        val lonDelta = r / (111_000.0 * cos(Math.toRadians(lat)).coerceAtLeast(0.01))
+        val lonDelta = r / (111_000.0 * cos(Math.toRadians(cLat)).coerceAtLeast(0.01))
         // Double.toString() is locale-independent (always '.'), so string-building
         // the coordinates avoids any comma-decimal-separator surprise.
-        val bottomLeft = "${lat - latDelta},${lon - lonDelta}"
-        val topRight = "${lat + latDelta},${lon + lonDelta}"
+        val bottomLeft = "${cLat - latDelta},${cLon - lonDelta}"
+        val topRight = "${cLat + latDelta},${cLon + lonDelta}"
         // alert_types=POLICE is honored server-side (verified 2026-09-16) and
         // max_jams=0 drops the jam payload outright — together they cut a typical
         // response from ~18 KB to ~1.5 KB, which matters on cellular. max_alerts
@@ -137,7 +154,9 @@ class WazeClient(
                 }
             }
         } catch (e: Exception) {
-            Log.w(TAG, "Waze feed fetch failed: ${e.message}")
+            // Class name only: some exception messages quote the request URL,
+            // which carries the box, and logcat outlives the scan.
+            Log.w(TAG, "Waze feed fetch failed: ${e.javaClass.simpleName}")
             FetchResult.Failed(e.message ?: e.javaClass.simpleName)
         } finally {
             conn.disconnect()
