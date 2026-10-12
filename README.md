@@ -15,11 +15,12 @@ online sources carry on.
 > Wi-Fi scanning sends probe requests, Bluetooth scanning sends scan requests —
 > and the online sources have to say where to look: each is told the centre of
 > the 1 km grid square you are in (the camera map, its ~5.5 km cell), never your
-> position itself, and the map's tiles come from OpenStreetMap (see
+> position itself, and the map's tiles come from OpenStreetMap. A row's map pin,
+> when you tap it, opens Google Maps at that detection (see
 > [SOURCES.md §5.4](SOURCES.md)). The Axon advertise/fuzz code from one of
 > the reference projects is intentionally excluded.
 
-Website: **[overwatch.netslum.io](https://overwatch.netslum.io)**  ·  Latest release: [v0.5.18](https://github.com/KaraZajac/OVERWATCH/releases) (debug-signed APK, sideload).
+Website: **[overwatch.netslum.io](https://overwatch.netslum.io)**  ·  Latest release: [v0.5.19](https://github.com/KaraZajac/OVERWATCH/releases) (debug-signed APK, sideload).
 
 ---
 
@@ -33,7 +34,7 @@ Website: **[overwatch.netslum.io](https://overwatch.netslum.io)**  ·  Latest re
   <img src="docs/img/overwatch-settings.png" width="240" alt="Settings" />
 </p>
 
-<p align="center"><sub>Live threat-map circle · source drill-down · settings — taken before v0.5.8, so they still show the retired Citizen source; new screenshots are coming.</sub></p>
+<p align="center"><sub>Live threat-map circle · source drill-down · settings — taken on v0.5.5 or earlier, so they still show the retired Citizen source and Waze proxy-token field, and no Aircraft source; new screenshots are coming.</sub></p>
 
 ---
 
@@ -41,9 +42,9 @@ Website: **[overwatch.netslum.io](https://overwatch.netslum.io)**  ·  Latest re
 
 | Source | What it looks at | Where it comes from |
 |---|---|---|
-| **BLE** | Bluetooth-LE advertisements: vendor MAC OUIs (Axon, Flock Penguin / Raven, XUNTONG mfg id `0x09C8`, "TN" serial pattern), Raven service UUIDs, device-name patterns — plus 18 IEEE-verified surveillance-vendor OUIs (ShotSpotter, WatchGuard/Motorola, Verkada, Avigilon Alta, Axis body cams, FLIR, Hanwha, March Networks, GeoVision, Mobotix, Sunell) with vendor-named labels | Local radio scan (BLE callback API). Iterates every manufacturer-specific data entry to find XUNTONG (then any COMMERCIAL company id), not just the first. **Screen off:** Android suspends unfiltered scans, so the scanner switches to a filtered scan (Raven UUIDs, XUNTONG, the Echo and HeyCyan service UUIDs and the glasses company ids — 16 filters at most, so Amazon, Google and Sonos drop out); OUI-prefix and name matching resume when the screen is on — see [SOURCES.md §5.1](SOURCES.md). Police-exclusive OUIs (WatchGuard, ShotSpotter) score ORANGE on sight, same rationale as Axon. |
-| **WiFi** | BSSID OUI prefixes for Flock infrastructure (flock-you's 31-prefix list) + the same 18 vendor OUIs (WatchGuard 4RE in-car APs, Openpath/Alta readers, WiFi-capable cameras), `Flock-XXXX` and other generic SSID patterns | `WifiManager.getScanResults()` polled every 35 s (just under the Android 9+ 4-scans/2-min throttle) |
-| **DEFLOCK** | Mapped ALPRs, speed cameras and other surveillance cameras within 1.2 km, each scored on its own curve by how close it actually is | POST to Overpass API (`overpass.deflock.org` → fallback `overpass-api.de`) for every `man_made=surveillance` node plus `highway=speed_camera`, in a box ±0.05° around the centre of your 0.05° grid cell (never around your position), so Overpass learns only which ~5.5 km cell you are in; cached per cell for the current scan only, and deleted when scanning stops. Refetches when the user moves > 1.5 km from the last fetch point. Backoffs after Overpass failures; treats `{"remark": "...timed out..."}` 200-responses as failure so timeouts don't poison the cache. |
+| **BLE** | Bluetooth-LE advertisements: MAC OUI prefixes (Axon's own, and the radio-module makers' prefixes seen on Flock Penguin / Raven hardware, none of them registered to Flock), XUNTONG mfg id `0x09C8`, "TN" serial pattern, Raven service UUIDs, device-name patterns — plus 19 IEEE-verified surveillance-vendor OUIs (Flock Safety's own `b4:1e:52`, ShotSpotter, WatchGuard/Motorola, Verkada, Avigilon Alta, Axis body cams, FLIR, Hanwha, March Networks, GeoVision, Mobotix, Sunell) with vendor-named labels | Local radio scan (BLE callback API). Iterates every manufacturer-specific data entry to find XUNTONG (then any COMMERCIAL company id), not just the first. **Screen off:** Android suspends unfiltered scans, so the scanner switches to a filtered scan (Raven UUIDs, XUNTONG, the Echo and HeyCyan service UUIDs and the glasses company ids — 16 filters at most, so Amazon, Google and Sonos drop out); OUI-prefix and name matching resume when the screen is on — see [SOURCES.md §5.1](SOURCES.md). Police-exclusive OUIs (WatchGuard, ShotSpotter) score ORANGE on sight, same rationale as Axon. |
+| **WiFi** | BSSID prefixes seen on Flock hardware (flock-you's list of 31, all radio-module makers' prefixes, none registered to Flock) + the same 19 vendor OUIs, Flock Safety's own among them (WatchGuard 4RE in-car APs, Openpath/Alta readers, WiFi-capable cameras), `Flock-XXXX` and other generic SSID patterns | `WifiManager.getScanResults()` polled every 35 s (just under the Android 9+ 4-scans/2-min throttle) |
+| **DEFLOCK** | Mapped ALPRs, speed cameras and other surveillance cameras within 1.2 km, each scored on its own curve by how close it actually is | POST to Overpass API (`overpass.deflock.org` → fallback `overpass-api.de`) for every `man_made=surveillance` node plus `highway=speed_camera`, in a box ±0.05° around the centre of your 0.05° grid cell (never around your position), so Overpass learns only which ~5.5 km cell you are in; cached per cell for the current scan only, and deleted when scanning stops. Fetches the next cell as soon as your 1.2 km circle would reach past the loaded box, so every position is checked against a box that covers it (below about 64° latitude), and retries a failed fetch after 60 s. Treats `{"remark": "...timed out..."}` 200-responses as failure so timeouts don't poison the cache. |
 | **WAZE** | User-reported `POLICE` alerts still active in the feed within 2 km, up to ~45 min old, scored by distance and age | **Two selectable backends.** *OpenWeb Ninja* (default): `api.openwebninja.com/waze/alerts-and-jams` called with **your own API key** (`X-API-Key`, entered in Settings, stored encrypted on-device), polled every ~4 min with `alert_types=POLICE&max_jams=0` (~1.5 KB/poll). Metered, lags live Waze by ~20 min, and Waze never sees you — the request is made by OpenWeb Ninja's servers, which are told the centre of your 1 km grid square, under your key. *Direct* (opt-in, off by default): speaks the Waze app's own protocol over an anonymous account OVERWATCH registers, polled every 60 s. Free, keyless and live, but it reports which 1 km grid square you are in to a Google service on every poll. Waze never gets the exact fix. Both re-filter to POLICE client-side so an upstream change can't let other types through. Alerts carry crowd-trust signals that nudge the score up. |
 | **AIRCRAFT** | Police / surveillance aircraft overhead — identified from a bundled registry of 1,971 law-enforcement airframes, all but 36 of them American, plus loiter detection for unlisted ones | `opendata.adsb.fi` → fallback `api.adsb.lol`, polled every 60 s and told the centre of your 1 km grid square, not your position. **No API key.** Community ADS-B networks are used specifically because the commercial trackers filter law-enforcement flights at government request. Matched on the ICAO 24-bit address; scored by ground distance, altitude and orbit behaviour. |
 | **COMMERCIAL** | Nearby consumer smart-home / voice gear (Nest, Ring, Echo, Sonos, hidden cams) and camera-bearing smart glasses (Meta Ray-Ban / Oakley, Snap Spectacles, Vuzix, and HeyCyan-SDK frames such as the Nilox Smart AI Glasses) as a secondary situational signal | Rides the BLE + WiFi scans — OUI / device-name / service-UUID / SSID matches plus Bluetooth SIG company IDs from `MicTargets`. Score-capped at ORANGE so a cluster of doorbells (or a passing pair of Ray-Bans) never reads as ALPR-grade certainty. |
@@ -198,10 +199,13 @@ used, and all three are handled:
 - **Map tiles.** The map keeps the OpenStreetMap tiles it showed, because
   OpenStreetMap's tile policy asks apps to cache them. **Settings → Privacy →
   Delete map tiles when scanning stops** deletes them on the same schedule.
-- **System log.** Since v0.5.18 the app writes no coordinates, cell names or
-  request URLs to Android's log. v0.5.17 and earlier logged the exact position on
-  every camera-map fetch. One gap is outside the app's own code: the map library
-  (osmdroid) logs a tile's number when that tile fails to download.
+- **System log.** The app writes no coordinates, cell names, request URLs or
+  account details to Android's log. v0.5.17 and earlier logged the exact position
+  on every camera-map fetch. v0.5.18 still quoted a malformed server reply whole,
+  with the positions of the cameras, aircraft or police in it, and the direct Waze
+  backend logged its account name; since v0.5.19 those lines carry the error's
+  class only. One gap is outside the app's own code: the map library (osmdroid)
+  logs a tile's number when that tile fails to download.
 
 The service uses `START_NOT_STICKY` — system kill doesn't auto-restart into a
 stuck state.
@@ -244,7 +248,8 @@ dormant again.
 1 km grid square you are in, never around your position, so OpenWeb Ninja learns
 that square every 4 minutes, tied to your key. Waze itself never sees the request.
 
-**What it costs.** Pay-as-you-go is roughly **$0.005/request**. OVERWATCH polls
+**What it costs.** Pay-as-you-go is roughly **$0.005/request** (OpenWeb Ninja's
+pricing as of October 2026). OVERWATCH polls
 about every 4 minutes *while scanning*, so ≈15 requests per hour of scanning,
 which comes to **about 7.5¢ an hour**; an hour a day is about $2.25 a month.
 The free tier's 100
@@ -284,11 +289,12 @@ gets your square every 4 minutes, under your key).
 
 Practical notes:
 
-- **gear icon → Waze police feed → Direct from Waze**, then Start. Nothing else
-  to configure.
+- **gear icon → Waze police feed → Direct from Waze**, then Start (or **Restart
+  scan to apply** if a scan is running). Nothing else to configure.
 - Waze caps how many anonymous accounts a device may register per day, so the
   account is persisted and reused. **Forget** wipes it; the next poll mints a
-  new one, and that counts against the cap.
+  new one, a running scan's included, and that counts against the cap. (Before
+  v0.5.19 a running scan kept using the forgotten account until you stopped it.)
 - A rejected account (they get purged upstream) backs off 30 s → 10 min rather
   than spinning a re-register loop.
 - A brand-new account's first request often draws a transient `504 Retry` from
@@ -371,7 +377,8 @@ Tap the gear icon in the top-right.
 - **Detection sources**: toggle BLE / WiFi / DeFlock / Waze / Aircraft / Commercial independently.
   Changes take effect on the next Start (COMMERCIAL applies right away). While
   scanning, a **Restart scan to apply** button appears that does `stop()` +
-  `start()` in one tap.
+  `start()` in one tap; it applies the Waze backend choice too. (v0.5.18's
+  restart kept the backend the scan had started with.)
 - **Range** (`show within`) lives on the **main screen**, under the map — it's
   the one control you reach for while moving. 100 m – 5000 m, default 500 m,
   committing on release rather than per-pixel so the map isn't re-zoomed on every
@@ -387,9 +394,9 @@ Tap the gear icon in the top-right.
   into the APK; empty key = Waze source off. *Direct from Waze* needs no key but
   registers an anonymous Waze account and reports your 1 km grid square each
   poll (never the exact fix), so it is off until you pick it; **Forget** wipes
-  the stored account.
+  the stored account, and a running scan switches to a new one at its next poll.
 - **Privacy**: says what the online sources learn (your 1 km grid square; the
-  camera map, its ~5.5 km cell). The camera cache is always deleted when scanning
+  camera map, its ~5.5 km cell) and that a row's map pin opens Google Maps. The camera cache is always deleted when scanning
   stops. **Delete
   map tiles when scanning stops** (default off) does the same for the map's
   OpenStreetMap tiles, which are otherwise kept because OpenStreetMap asks apps
@@ -415,12 +422,12 @@ These live under `REFERENCES/` (gitignored):
 
 ---
 
-- **highway-radar-sabre-plus** (MIT) — the Waze RT protocol layer behind the **direct** Waze backend. Unlike every other reference here, this one is *vendored*, not just studied: the files in `app/src/main/java/org/soulstone/overwatch/scan/wazert/` and `app/src/main/proto/waze.proto` are that project's code under its MIT licence, unmodified apart from the package name, the removal of the report-submission path, and an OkHttp-to-`HttpURLConnection` rewrite of the HTTP client so OVERWATCH takes no extra dependency. The exception is `WazeRtFetcher.java`, OVERWATCH's own slimmed driver modelled on upstream's and carried under the same licence, whose text sits in that directory. The position cloak the backend applies is OVERWATCH's own (`data/location/PositionCloak.java`). OVERWATCH reads alerts and never reports.
+- **highway-radar-sabre-plus** (MIT) — the Waze RT protocol layer behind the **direct** Waze backend. Unlike every other reference here, this one is *vendored*, not just studied: the files in `app/src/main/java/org/soulstone/overwatch/scan/wazert/` and `app/src/main/proto/waze.proto` are that project's code under its MIT licence, unmodified apart from the package name, the removal of the report-submission path, an OkHttp-to-`HttpURLConnection` rewrite of the HTTP client so OVERWATCH takes no extra dependency, and log lines that no longer print the account name or session id. The exception is `WazeRtFetcher.java`, OVERWATCH's own slimmed driver modelled on upstream's and carried under the same licence, whose text sits in that directory. The position cloak the backend applies is OVERWATCH's own (`data/location/PositionCloak.java`). OVERWATCH reads alerts and never reports.
 
 ## Status
 
 Phases 1–5 (skeleton, BLE, WiFi, DeFlock, polish) complete and
-field-tested. Current release **v0.5.18**. Notable changes:
+field-tested. Current release **v0.5.19**. Notable changes:
 
 - v0.1.2 — Android 14+ foreground service type fix; NaN-coordinate filter on map data.
 - v0.1.3 — DeFlock CDN replaced by direct Overpass calls (Cloudflare-blocked).
@@ -449,7 +456,8 @@ field-tested. Current release **v0.5.18**. Notable changes:
 - v0.5.15 — **A second Waze backend: straight from Waze, no API key.** The public `live-map/api/georss` endpoint 403s automated clients at Google's edge, so until now the only way in was OpenWeb Ninja's metered feed. OVERWATCH can now instead speak the Waze app's own protocol over an anonymous account it registers itself: free, keyless, live, and polled every 60 s instead of every 4 min. It is **off by default and opt-in**, because it makes the app a Waze client — it holds a Waze account and sends a position to a Google service on every poll, and in a surveillance-detection app that has to be your call, not a default. *(Correction: this entry originally said that position was blurred by up to 500 m. It wasn't — v0.5.15 sent the exact fix. See v0.5.16.)* OpenWeb Ninja remains the default and is unchanged; pick either under **gear → Waze police feed**. See [Waze setup](#waze-setup-choosing-a-backend) and [SOURCES.md §2.2](SOURCES.md). The protocol layer is vendored from **highway-radar-sabre-plus** (MIT, credited below), with the report-submission path removed — OVERWATCH reads alerts and never reports one. Also: radio rows in Settings are now tappable across their whole width instead of only on the 20 dp circle.
 - v0.5.16 — **Privacy fix: the direct Waze backend no longer sends your exact position.** v0.5.15's Settings screen said the position sent to Waze was blurred by up to 500 m. Only the register and login messages were. The handshake's `Location` line and the centre of every map query carried the exact GPS fix, several times a minute. Every message that carries a location is now built from the centre of the 1 km grid square you are in, with 150 m of hysteresis so parking on a square's edge can't make it flicker between squares and pinpoint you. Detection is unchanged: distances are still measured on the phone from the real fix, and the area Waze is asked about grows to cover the difference. Verified on the wire: two real positions 745 m apart in one square produce byte-identical requests ([SOURCES.md §2.2b](SOURCES.md)). Settings, this README, SOURCES.md and the website now say exactly that. Also: OVERWATCH is now **BSD 3-Clause** licensed — it had no license file, so it wasn't actually open source — and release builds pass lint again (androidx.fragment constrained to 1.9.1). Toolchain and libraries brought current: AGP 9.4.1, Gradle 9.8.1, Kotlin 2.4.21, Compose BOM 2026.09.00, core-ktx 1.19.1, protobuf 4.36.2.
 - v0.5.17 — **No more location trail, fewer false Raven alarms, and claims that match the code.** The camera cache recorded every ~5.5 km area you scanned and was never deleted; it is now deleted every time scanning stops, and again at the next start in case the app was killed mid-scan. Map tiles stay cached by default, as OpenStreetMap asks, and **Settings → Privacy → Delete map tiles when scanning stops** removes those too. Raven detection no longer fires on ordinary Bluetooth gear: three of its eight service UUIDs are standard ones a Bluetooth thermometer or GPS unit advertises, and any single one used to score ORANGE as a gunshot detector. They now count only as the full set of three that Raven's oldest firmware advertises, while Raven's own five UUIDs still count alone, so every documented Raven firmware scores as before. Docs, site and Settings now say what the app actually does: it never connects to, pairs with or jams what it detects, though its scans do transmit; 36 of the 1,971 registry aircraft are foreign police; the tier is the single highest score, not a sum across sources; and the paid Waze feed costs about 7.5¢ per hour of scanning.
-- v0.5.18 — **No online source learns your exact position any more, and four bugs fixed.** v0.5.16 stopped sending the exact fix to Waze, but the other online sources still had it: the ADS-B aircraft feeds got your position to about 11 m every minute, OpenWeb Ninja got a box centred exactly on you every 4 minutes, and Overpass got a box centred on you at each camera-map fetch. Now the aircraft feeds and OpenWeb Ninja are told only the centre of the 1 km grid square you are in (the same cloak, moved to `data/location/PositionCloak.java`), and Overpass only its ~5.5 km cache cell. Detection is unchanged: distances are still measured on the phone from the real fix, and each query area grows to cover the difference. Fixes: the camera-map fetch wrote your exact position to Android's system log, and no log line now carries a coordinate; the aircraft source failed with HTTP 400 on phones set to a comma-decimal language (German, French, Spanish and many more), because it formatted coordinates in the phone's locale; **Restart scan to apply** could leave scanning stopped, because its STOP ended the service without regard to the START right behind it; and the camera map could miss cameras near the edge of its cached area, because the box was centred on whichever position first filled the cell. Also: COMMERCIAL now finds a matching Bluetooth company id even when a device advertises it second, a rejected direct-Waze account now backs off all the way to the documented 10 minutes, and Settings, this README, SOURCES.md and the site now say all of this, drop a promised heads-up notification the app never shows, and fix wrong score-table cells.
+- v0.5.18 — **No online source learns your exact position any more, and four bugs fixed.** v0.5.16 stopped sending the exact fix to Waze, but the other online sources still had it: the ADS-B aircraft feeds got your position to about 11 m every minute, OpenWeb Ninja got a box centred exactly on you every 4 minutes, and Overpass got a box centred on you at each camera-map fetch. Now the aircraft feeds and OpenWeb Ninja are told only the centre of the 1 km grid square you are in (the same cloak, moved to `data/location/PositionCloak.java`), and Overpass only its ~5.5 km cache cell. Detection is unchanged: distances are still measured on the phone from the real fix; OpenWeb Ninja's box grows by the up to 919 m the square's centre can be from you, and the aircraft query's 30 nm radius already covers it. Fixes: the camera-map fetch no longer writes your exact position to Android's system log; the aircraft source failed with HTTP 400 on phones set to a comma-decimal language (German, French, Spanish and many more), because it formatted coordinates in the phone's locale; **Restart scan to apply** could leave scanning stopped, because its STOP ended the service without regard to the START right behind it; and the camera map could miss cameras near the edge of its cached area, because the box was centred on whichever position first filled the cell. Also: COMMERCIAL now finds a matching Bluetooth company id even when a device advertises it second, a rejected direct-Waze account now backs off all the way to the documented 10 minutes, and Settings, this README, SOURCES.md and the site now say all of this, drop a promised heads-up notification the app never shows, and fix wrong score-table cells. *(Correction: this entry originally said every query area grows to cover the difference, and that no log line carries a coordinate. Only OpenWeb Ninja's grows, and a malformed server reply was still logged whole, positions included. The release also had two gaps it didn't mention: for a while after you entered a new cell, the camera map still checked you against the old cell's box, and the Restart fix made Restart keep the Waze backend the scan had started with. All fixed in v0.5.19.)*
+- v0.5.19 — **Two Waze privacy fixes, a camera map that loads reliably, and no server replies in the log.** **Restart scan to apply** now applies a Waze backend switch: v0.5.18's restart fix kept the running service, which had picked its backend when it was created, so switching from Direct to OpenWeb Ninja and restarting kept sending your grid square to Waze until a full Stop. The backend is now built at every Start. **Forget** now reaches a running scan: it wiped the stored account, but the scan carried on logging in as that account until Stop; now its next poll registers a new one (verified against v0.5.18's fetcher, which logged in again as the forgotten account). The camera map could stay empty: a location fix arriving during a fetch cancelled it and threw the reply away, which at Start, when the phone's cached position and its first live fix land within a second, could lose the first fetch; and a failed fetch was retried only after you had moved 1.5 km. In a test with the v0.5.18 scanner, a parked phone was still without cameras after 70 s either way. Now a fetch always finishes and a failure is retried after 60 s. The map also no longer checks you against the previous cell's box for a while after you cross into a new cell (0.64% of fixes at 38°N and 11.7% at 60°N had part of their 1.2 km circle outside it on simulated drives; now none below about 64°): it fetches the new cell as soon as your circle would reach past the loaded box. Logs: a malformed reply from Overpass, the aircraft feeds or OpenWeb Ninja was written to Android's log whole, with the positions of the cameras, aircraft or police around you in it, because Android's JSON parser quotes its entire input in a syntax error; the direct Waze backend logged its anonymous account name, and an unreadable stored account would have been logged with its password. Those lines now carry the error's class only. Detection: Flock Safety's own IEEE-registered MAC prefix, `b4:1e:52`, which neither Flock list ever carried, is now matched over BLE and WiFi and labelled "Flock Safety device"; like the other vendor OUIs it scores 40, YELLOW. Docs: SOURCES.md now lists Google Maps as a destination, for when you tap a row's map pin; the "Flock" OUI lists are described as what they are, radio-module makers' prefixes seen on Flock hardware, none registered to Flock; the hidden-camera OUIs carry their real owners (three are Espressif), and the Amazon and Google sets are documented as holding six prefixes registered to other companies; the aircraft registry's agency counts add up every spelling (DHS 306, Arizona DPS 67); SOURCES.md states the score of 40 below which a radio hit is never shown, and the OpenWeb Ninja prices as of October 2026; and the screenshots are labelled as v0.5.5 or earlier.
 
 ## License
 

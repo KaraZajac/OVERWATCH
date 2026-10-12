@@ -198,7 +198,9 @@ class WazeClient(
             }
             out
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to parse Waze feed response: ${e.message}")
+            // Class only: Android's org.json quotes its whole input in a syntax
+            // error, and this input is every police report around you, with positions.
+            Log.w(TAG, "Failed to parse Waze feed response: ${e.javaClass.simpleName}")
             emptyList()
         }
     }

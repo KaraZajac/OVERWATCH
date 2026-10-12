@@ -6,6 +6,7 @@ import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
+import kotlin.math.cos
 import kotlin.math.floor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
@@ -41,7 +42,8 @@ import org.soulstone.overwatch.data.cache.LocationTraces
  *    (0.025°, ~2.8 km north-south and ~2.2 km east-west at 38°) beyond any fix in
  *    it: more than the 1.2 km DeflockScanner evaluates, below about 64° latitude.
  *    A box centred on whichever fix first filled the cell could leave part of
- *    that circle uncovered.
+ *    that circle uncovered. DeflockScanner asks for a new cell when a fix's
+ *    circle reaches past the loaded box ([Cell.holds]).
  */
 class DeflockClient(context: Context) {
 
@@ -51,6 +53,11 @@ class DeflockClient(context: Context) {
         private const val CELL_DEG = 0.05
         /** Query half-width around the cell centre (~5.5 km north-south). */
         private const val FETCH_RADIUS_DEG = CELL_DEG
+        // Metres per degree, rounded down from their smallest WGS84 values, so
+        // [Cell.holds] overstates a circle's extent in degrees rather than
+        // understating it: a "yes" is safe to act on.
+        private const val M_PER_DEG_LAT = 110_574.0
+        private const val M_PER_DEG_LON_EQUATOR = 111_319.0
         private const val CACHE_TTL_MS = 24L * 60L * 60L * 1000L
         private const val USER_AGENT = "OVERWATCH/0.1 (+github.com/KaraZajac/OVERWATCH)"
         private const val TIMEOUT_MS = 30_000
@@ -80,6 +87,33 @@ class DeflockClient(context: Context) {
         val manufacturer: String? = null
     )
 
+    /**
+     * One 0.05° grid cell: what Overpass is asked about and what the cache is keyed
+     * by. Its box reaches [FETCH_RADIUS_DEG] either side of the cell's centre, so
+     * half a cell past every edge.
+     */
+    data class Cell(val latIndex: Int, val lonIndex: Int) {
+        val centreLat: Double get() = (latIndex + 0.5) * CELL_DEG
+        val centreLon: Double get() = (lonIndex + 0.5) * CELL_DEG
+        val south: Double get() = centreLat - FETCH_RADIUS_DEG
+        val north: Double get() = centreLat + FETCH_RADIUS_DEG
+        val west: Double get() = centreLon - FETCH_RADIUS_DEG
+        val east: Double get() = centreLon + FETCH_RADIUS_DEG
+
+        /** True when this cell's box holds the whole circle of [radiusM] around the point. */
+        fun holds(lat: Double, lon: Double, radiusM: Double): Boolean {
+            val dLat = radiusM / M_PER_DEG_LAT
+            val dLon = radiusM / (M_PER_DEG_LON_EQUATOR * cos(Math.toRadians(lat))).coerceAtLeast(1.0)
+            return lat - dLat >= south && lat + dLat <= north &&
+                lon - dLon >= west && lon + dLon <= east
+        }
+
+        companion object {
+            fun of(lat: Double, lon: Double): Cell =
+                Cell(floor(lat / CELL_DEG).toInt(), floor(lon / CELL_DEG).toInt())
+        }
+    }
+
     /** Outcome of a fetch — distinguishes "no ALPRs in area" from "couldn't reach the API." */
     sealed class FetchResult {
         data class Success(val points: List<SurveillancePoint>) : FetchResult()
@@ -91,23 +125,18 @@ class DeflockClient(context: Context) {
     private val cacheDir: File =
         File(context.cacheDir, LocationTraces.CAMERA_CACHE_DIR).apply { mkdirs() }
 
+    /** The cameras in the box of the cell holding (lat, lon), from the cache if this
+     *  scan already fetched that cell. */
     suspend fun fetchAround(lat: Double, lon: Double): FetchResult = withContext(Dispatchers.IO) {
-        val latCell = floor(lat / CELL_DEG).toInt()
-        val lonCell = floor(lon / CELL_DEG).toInt()
-        val key = cacheKeyFor(latCell, lonCell)
+        val cell = Cell.of(lat, lon)
+        val key = cacheKeyFor(cell)
         val cached = cachedJson(key)
         if (cached != null) {
             // No key in the log: it names the cell, and logcat outlives the scan.
             Log.d(TAG, "Camera cache hit")
             return@withContext FetchResult.Success(parseSafely(cached))
         }
-        val centreLat = (latCell + 0.5) * CELL_DEG
-        val centreLon = (lonCell + 0.5) * CELL_DEG
-        val south = centreLat - FETCH_RADIUS_DEG
-        val north = centreLat + FETCH_RADIUS_DEG
-        val west = centreLon - FETCH_RADIUS_DEG
-        val east = centreLon + FETCH_RADIUS_DEG
-        val query = buildQuery(south, west, north, east)
+        val query = buildQuery(cell.south, cell.west, cell.north, cell.east)
         val (body, lastError) = downloadFromAny(query)
         if (body == null) {
             return@withContext FetchResult.Failed(lastError ?: "Network error")
@@ -123,11 +152,11 @@ class DeflockClient(context: Context) {
         FetchResult.Success(parseSafely(body))
     }
 
-    private fun cacheKeyFor(latCell: Int, lonCell: Int): String {
+    private fun cacheKeyFor(cell: Cell): String {
         // One key per 0.05° grid cell, so moving around inside a cell doesn't
         // refetch. v3: v2 entries hold boxes centred on a fix rather than on the
         // cell, so a file left by an older build killed mid-scan must not be read.
-        return "deflock3_${latCell}_${lonCell}"
+        return "deflock3_${cell.latIndex}_${cell.lonIndex}"
     }
 
     private fun cachedJson(key: String): String? {
@@ -243,7 +272,9 @@ class DeflockClient(context: Context) {
             }
             out
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to parse Overpass response: ${e.message}")
+            // Class only: Android's org.json quotes its whole input in a syntax
+            // error, and this input is every camera around you, with coordinates.
+            Log.w(TAG, "Failed to parse Overpass response: ${e.javaClass.simpleName}")
             emptyList()
         }
     }

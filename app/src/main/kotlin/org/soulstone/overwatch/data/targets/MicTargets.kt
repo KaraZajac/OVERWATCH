@@ -40,7 +40,11 @@ object MicTargets {
      * Bluetooth SIG company identifiers for camera-bearing smart glasses. The
      * manufacturer-id field is the reliable vector — device names and service
      * UUIDs are inconsistent across advertising frames (per the open-source
-     * Nearby Glasses project, which this mirrors). Caveat: these ids are
+     * Nearby Glasses project, which this mirrors). Reliable to identify, but weak
+     * to alert on: alone it scores 30, under the 40 a hit needs to be shown, so a
+     * frame carrying only the company id shows only very close (above −50 dBm)
+     * with a rise-peak-fall signal: 30 + 5 + 8. A name token or the HeyCyan
+     * service UUID shows on its own. Caveat: these ids are
      * manufacturer-wide, so Meta's also match Quest VR headsets (still a
      * camera/mic device, so an acceptable secondary signal). Luxottica in BLE
      * mfg data is essentially only their *smart* eyewear — plain sunglasses
@@ -81,27 +85,38 @@ object MicTargets {
     /** Every advertised-service UUID this object recognises, for screen-off ScanFilters. */
     val SERVICE_UUIDS: Set<UUID> = setOf(UUID_AVS, UUID_HEYCYAN)
 
-    /** Lab126 (Amazon — Echo, Ring, Fire TV) WiFi/BLE OUIs. */
+    /** Lab126 (Amazon — Echo, Ring, Fire TV) WiFi/BLE OUIs. All registered to
+     *  Amazon or Ring except a8:51:5b, which is Samsung's; it is kept, so a Samsung
+     *  device with it can be labelled Amazon gear. A lone OUI hit (30) shows only
+     *  very close with a rise-peak-fall signal. */
     private val OUIS_AMAZON: Set<String> = setOf(
         "0c:47:c9", "38:f7:3d", "44:65:0d", "50:dc:e7", "78:e1:03",
         "a8:51:5b", "b0:09:da", "f0:27:2d", "f0:81:73", "f0:d2:f1",
         "fc:65:de", "fc:a1:83", "ac:63:be", "00:bb:3a"
     )
 
-    /** Google (Nest, Home, Chromecast) WiFi/BLE OUIs. */
+    /** Google (Nest, Home, Chromecast) WiFi/BLE OUIs. Five are not Google's or
+     *  Nest's in the IEEE registry: 94:eb:cd (BlackBerry), 6c:ad:f8 (AzureWave, a
+     *  WiFi-module maker), 94:c9:60 (Zhongshan B&T), f4:f1:9e (Wistron, a contract
+     *  manufacturer), and fc:9f:e9 is unassigned. They are kept, so other devices
+     *  with them can be labelled Google gear; a lone OUI hit (30) shows only very
+     *  close with a rise-peak-fall signal. */
     private val OUIS_GOOGLE: Set<String> = setOf(
         "f8:8f:ca", "f4:f5:e8", "94:eb:cd", "64:16:66", "fc:9f:e9",
         "1c:f2:9a", "08:9e:08", "20:df:b9", "30:fd:38", "48:d6:d5",
         "54:60:09", "6c:ad:f8", "70:3a:cb", "94:c9:60", "f4:f1:9e"
     )
 
-    /** Generic Chinese hidden-cam / smart-mic vendor OUIs (high-noise; opt-in). */
+    /** Radio-module makers' OUIs, common in cheap cameras and mics but also in
+     *  countless other gadgets: high-noise, and a lone hit (30) shows only very
+     *  close with a rise-peak-fall signal. Owners per the IEEE registry; earlier
+     *  comments named other companies. */
     private val OUIS_HIDDEN_CAM: Set<String> = setOf(
-        "fc:b4:67",   // Yingxin / SmartLife mini cams
+        "fc:b4:67",   // Espressif
         "00:e0:4c",   // Realtek (used in many cheap cams)
-        "dc:4f:22",   // Tuya-affiliated module vendors
+        "dc:4f:22",   // Espressif
         "a4:c1:38",   // Telink (often inside cheap BLE mics)
-        "8c:ce:4e"    // Shenzhen iComm — frequent in spy-cam BOMs
+        "8c:ce:4e"    // Espressif
     )
 
     private val ALL_OUIS: Set<String> = OUIS_AMAZON + OUIS_GOOGLE + OUIS_HIDDEN_CAM

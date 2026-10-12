@@ -4,12 +4,18 @@ package org.soulstone.overwatch.data.targets
  * Enterprise / municipal surveillance-vendor OUI prefixes, shared by [BleOuis]
  * and [WifiOuis] (both merge [ALL] into their match sets).
  *
- * All 18 verified against the IEEE registry (Wireshark manuf snapshot,
- * 2026-08-28) — every prefix is the vendor's own registration, so unlike the
- * Flock supply-chain OUIs a hit identifies the maker directly, and the
+ * All 19 verified against the IEEE registry (18 against the Wireshark manuf
+ * snapshot of 2026-08-28; Flock Safety's, added in v0.5.19, against hwdata 0.411)
+ * — every prefix is the vendor's own registration, so unlike the module-maker
+ * prefixes seen on Flock hardware a hit identifies the maker directly, and the
  * drill-down label can say so.
  *
  * Radio reality (what can actually show up in a phone-side scan):
+ *  - Flock Safety: its own registration. The Flock lists in [BleOuis] and
+ *    [WifiOuis] are radio-module makers' prefixes and never carried it. Which
+ *    Flock products transmit with it isn't documented; listed so any that do are
+ *    named. Not police-exclusive (Flock also sells to HOAs and businesses), so it
+ *    scores like any vendor OUI.
  *  - ShotSpotter: acoustic gunshot sensors; patents cite WiFi/BT/Zigbee/LPWAN
  *    backhaul. Police-exclusive product line.
  *  - WatchGuard Video (Motorola): V300/V700 body cams (BT 5.0 + WiFi) and 4RE
@@ -46,7 +52,8 @@ object VendorOuis {
         "00:12:81" to "March Networks video",     // March Networks S.p.A.
         "00:13:e2" to "GeoVision camera",         // GeoVision Inc.
         "00:03:c5" to "Mobotix camera",           // Mobotix AG
-        "00:1c:27" to "Sunell camera"             // Sunell Electronics Co.
+        "00:1c:27" to "Sunell camera",            // Sunell Electronics Co.
+        "b4:1e:52" to "Flock Safety device"       // Flock Safety
     )
 
     /** Vendors whose product line is exclusively police equipment — an

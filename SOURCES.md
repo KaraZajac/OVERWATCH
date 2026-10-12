@@ -73,16 +73,35 @@ which is why generic cameras are worth carrying.
   centred on whichever fix first filled a cell could leave part of a later fix's
   1.2 km evaluation circle outside it (12.5% of positions in a 200,000-fix
   simulation). A cell-centred box reaches at least 0.025° past every edge of the
-  cell (~2.8 km north–south, ~2.2 km east–west at 38°), which holds the circle for
-  every fix below about 64° latitude.
+  cell (~2.8 km north–south, ~2.2 km east–west at 38°), which holds the circle of
+  every fix *inside that cell* below about 64° latitude. Keeping each fix inside
+  the cell it is checked against is the scanner's job (next bullets).
 - Response cached on disk per 0.05° grid cell (`deflock3_<i>_<j>`, the cell's
   grid indices `floor(coordinate / 0.05)`), for the current scan only. The directory doubles as a list of every ~5.5 km area
   scanned, so `LocationTraces` deletes it every time scanning stops and again at
   the next start, and a request still in flight at the stop does not write.
   Before v0.5.17 the files were never deleted; a 24 h TTL only made old ones
   ignored.
-- Refetch when the user moves > 1.5 km from the last fetch point; a fix in a
-  cell already fetched this scan is served from the cache.
+- **When it fetches.** On every fix the scanner checks whether the loaded box
+  still holds that fix's 1.2 km circle (`DeflockClient.Cell.holds`, with
+  metres-per-degree rounded down so it errs toward fetching). When it doesn't, it
+  asks for the fix's own cell, whose box does; a cell already fetched this scan
+  comes from the cache without a request. A failed fetch is retried after 60 s,
+  moving or not. On simulated drives through the shipping classes (45,000 fixes
+  each, 100 m apart, checked against the true geodesic circle), no fix at 38°N or
+  60°N was checked against a box missing part of its circle; at 64°N, 2 were.
+  Until v0.5.19 the scanner refetched only after 1.5 km of movement, so for a
+  while after entering a new cell a fix was checked against the old box: 0.64% of
+  fixes at 38°N, 11.7% at 60°N and 18% at 64°N had part of their circle outside
+  it. A retry also needed 1.5 km of movement, so one failure while parked left the
+  map empty until you drove off.
+- **A fetch in flight is never cancelled.** Until v0.5.19 the scanner used
+  `collectLatest`, so a fix arriving mid-fetch cancelled it and the reply was
+  thrown away. At start the phone's cached position and its first live fix often
+  land within a second, so the first fetch could be lost, and with the 1.5 km rule
+  nothing asked again while the phone stayed put: with a 2.5 s reply and the live
+  fix 0.8 s after the cached one, the v0.5.18 scanner was still empty after 70 s.
+  Now newer fixes wait for the fetch, and the latest is scored when it returns.
 - A `200 OK` body containing `{"remark": "...timed out..."}` is treated as a
   failure, so an Overpass timeout cannot poison the cache.
 - **Dead:** `cdn.deflock.me/regions/*.json` — behind Cloudflare bot mitigation,
@@ -92,12 +111,16 @@ which is why generic cameras are worth carrying.
 
 The WAZE source reads user-reported `POLICE` alerts. Two backends exist and the
 user picks one in Settings; `scan/WazeSource.kt` is the interface both implement,
-so neither leaks into scoring or UI. Default is OpenWeb Ninja.
+so neither leaks into scoring or UI. Default is OpenWeb Ninja. The service builds
+the chosen backend at every Start, so **Restart scan to apply** switches it. In
+v0.5.18 it was built once per service, and that release's restart fix kept the
+service alive, so switching to OpenWeb Ninja and restarting kept polling Waze
+directly until a full Stop.
 
 |  | OpenWeb Ninja | Direct (Waze RT) |
 |---|---|---|
 | Key | user's own, required | none |
-| Cost | ~$0.005/request | free |
+| Cost | ~$0.005/request (Oct 2026) | free |
 | Poll | 240 s | 60 s |
 | Latency | ~20 min behind live | live |
 | Position sent to Waze | none | 1 km grid square, every poll |
@@ -126,6 +149,10 @@ paste the key into Settings. Stored encrypted (Android Keystore AES/GCM via
 ≈ 15 requests per hour of scanning at the 4-minute poll, so **≈ 7.5¢ an hour** —
 about $2.25 a month at an hour a day. The free
 tier's 100 requests/month verifies the integration but will not run it.
+Prices from `openwebninja.com/api/waze`, checked 2026-10-11: Free $0/month for 100
+requests; Pro $25 for 10,000 (+$0.003 each after); Ultra $75 for 50,000
+(+$0.002); Mega $150 for 200,000 (+$0.001); Pay As You Go $0.005 a request. The
+separate agent storefront (`agents.openwebninja.com`) prices differently.
 
 Verified behaviour (2026-09-16):
 
@@ -185,6 +212,11 @@ emulator:
   account is persisted encrypted and reused, and a rejected account backs off
   30 s, doubling to 10 min, instead of spinning the register loop. (Until v0.5.18
   the doubling stopped at 8 min.)
+- **Forget** (Settings) wipes the stored account, and a running scan registers a
+  new one at its next poll. Until v0.5.19 the scan carried on under the forgotten
+  account until Stop: Settings forgets through a `WazeRtFetcher` of its own, and
+  the scan's fetcher held its session, credentials included, in memory. Now every
+  forget bumps a process-wide counter that the scan's fetcher checks each poll.
 
 **What it costs the user, and why it is off by default:** the app becomes a Waze
 client. It holds a Waze account and, on every poll, tells Waze which 1 km grid
@@ -319,8 +351,9 @@ Filtering `ownop` for law-enforcement patterns yields **1,971 aircraft**
 Korean National Police (8), New South Wales Police (8), Western Australia Police
 (8), Royal Oman Police (3), one each from the Australian Federal Police, Victoria
 Police and the Dutch police, and six Canadian entries: Ontario's Ministry of the
-Solicitor General (2), Peel and York regional police, a board of police
-commissioners whose name the registry truncates, and the Saskatchewan Public
+Solicitor General (2), Peel and York regional police, the Regina Board of Police
+Commissioners (`C-GRPF`, a Cessna 182: ADSBexchange has the full name, and our
+generator cuts every owner name at 48 characters), and the Saskatchewan Public
 Safety Agency. That last one matched on `PUBLIC SAFETY`, and its air operations
 are most likely wildfire work, so it is probably not police — the pattern's
 limit. They are kept because they matter to users outside the US. 18 of the US entries sit outside the civil US address block
@@ -331,15 +364,19 @@ commits its output; the app never downloads it.
 Owner-match patterns: `SHERIFF`, `POLICE`, `STATE PATROL`, `HIGHWAY PATROL`,
 `STATE TROOPER`, `PUBLIC SAFETY`, `US MARSHAL`, `MARSHALS SERVICE`, `CONSTABLE`,
 `DEPT/DEPARTMENT OF CORRECTION`, `BORDER PATROL`, `CUSTOMS AND BORDER`,
-`CUSTOMS & BOR` (owner names arrive truncated), `HOMELAND SECURITY`, `DRUG ENFORCEMENT`, `FEDERAL BUREAU OF INVESTIGATION`.
+`CUSTOMS & BOR` (a prefix, so it matches however the name goes on; the source names are complete, and only the generator's 48-character cut shortens them), `HOMELAND SECURITY`, `DRUG ENFORCEMENT`, `FEDERAL BUREAU OF INVESTIGATION`.
 
 Excluded to avoid false positives: `MARSHALL SPACE` (NASA), plus `FIRE`,
 `AMBULANCE`, `MEDICAL`, `EMS`, `AIR METHODS`, `LIFE FLIGHT`, `MEDEVAC`,
 `HOSPITAL` — air-ambulance operators share a lot of vocabulary with police
 aviation, and a medevac helicopter is not what this app exists to warn about.
 
-Top operators by airframe count: DHS 98, US CBP 54, Arizona DPS 35, CHP 24,
-Texas DPS 23, US Border Patrol 20.
+Top operators by airframe count, adding up every spelling of an agency's name:
+DHS 306 (CBP with its Air and Marine Operations, Border Patrol and DHS itself,
+under 26 spellings), Arizona DPS 67, the California Highway Patrol 58 and Texas
+DPS 32. A single spelling undercounts: the largest, `DEPARTMENT OF HOMELAND
+SECURITY`, covers 98. (Until v0.5.19 this line mixed single spellings with totals
+and left the LADD-flagged aircraft out of two figures.)
 
 **Rejected alternatives:**
 
@@ -394,20 +431,27 @@ exact string, leaked into the app's UI, is how the shutdown was first noticed.)*
 
 **Axon** (flagged separately, scores 80): `00:25:df`
 
-**Flock + supply chain** (24, from flock-detection):
+**Seen on Flock hardware** (24, from flock-detection). None is registered to
+Flock Safety. The IEEE registry (hwdata 0.411, checked 2026-10-11) gives ten to
+Silicon Labs, nine to Liteon, three to Espressif and one to USI, all radio-module
+makers, and `d8:a0:d8` is unassigned. A hit is a module those makers also sell
+for everything else, which is why an OUI alone scores 40, the bottom of YELLOW.
+Flock Safety's own registration, `b4:1e:52`, sits with the vendor OUIs (§3.3).
 ```
 58:8e:81  cc:cc:cc  ec:1b:bd  90:35:ea  f0:82:c0  1c:34:f1  38:5b:44  94:34:69
 b4:e3:f9  3c:91:80  d8:f3:bc  80:30:49  14:5a:fc  9c:2f:9d  94:08:53  e4:aa:ea
 48:e7:29  c8:c9:a3  74:4c:a1  70:c9:4e  04:0d:84  08:3a:88  a4:cf:12  d8:a0:d8
 ```
 
-### 3.2 WiFi OUIs — Flock infrastructure
+### 3.2 WiFi OUIs — seen on Flock hardware
 
 `data/targets/WifiOuis.kt`. flock-you's 31 prefixes (research by NitekryDPaul +
 DeFlockJoplin). Despite the "superset" label upstream, only 14 of
 flock-detection's 24 BLE prefixes are among them, and `82:6b:f2` has the
 locally-administered bit set, so it is not an IEEE OUI; it is kept because
-flock-you observed it:
+flock-you observed it. None is registered to Flock Safety: by the IEEE registry
+they are 21 Liteon, 3 Silicon Labs, 2 Espressif, 2 USI and 1 Samsung, and
+`b8:35:32` is unassigned.
 ```
 70:c9:4e  3c:91:80  d8:f3:bc  80:30:49  b8:35:32  14:5a:fc  74:4c:a1  08:3a:88
 9c:2f:9d  c0:35:32  94:08:53  e4:aa:ea  f4:6a:dd  f8:a2:d6  24:b2:b9  00:f4:8d
@@ -420,12 +464,14 @@ wildcard-probe tricks are not portable to a userspace Android app.
 
 ### 3.3 Vendor OUIs — enterprise / municipal surveillance
 
-`data/targets/VendorOuis.kt`. All 18 verified against the IEEE registry
-(Wireshark `manuf` snapshot, 2026-08-28), so a hit names the manufacturer
-directly. Merged into **both** the BLE and WiFi match sets.
+`data/targets/VendorOuis.kt`. All 19 verified against the IEEE registry (18
+against the Wireshark `manuf` snapshot of 2026-08-28, Flock Safety's against
+hwdata 0.411 on 2026-10-11), so a hit names the manufacturer directly. Merged
+into **both** the BLE and WiFi match sets.
 
 | OUI | Vendor | Radio reality |
 |---|---|---|
+| `b4:1e:52` | Flock Safety | Flock's own registration, added in v0.5.19; the Flock lists in §3.1 and §3.2 are module makers' prefixes and never carried it. Which Flock products transmit with it isn't documented. Not police-exclusive (Flock also sells to HOAs and businesses), so it scores 40. |
 | `d4:11:d6` | ShotSpotter / SoundThinking | Acoustic gunshot sensors; patents cite WiFi/BT/Zigbee/LPWAN backhaul. **Police-exclusive.** |
 | `00:1d:96` | WatchGuard Video (Motorola) | V300 body cams (BT 5.0 + WiFi), 4RE in-car systems run cruiser-local APs. **Police-exclusive.** |
 | `e0:a7:00` | Verkada | AD33/AD34 readers advertise BLE for app unlock; SV sensors carry BLE. Cameras are PoE. |
@@ -561,9 +607,18 @@ scanner reads only the first manufacturer-data entry (`keyAt(0)`), whereas
 some devices advertise several. (OVERWATCH had the same gap for COMMERCIAL ids
 until v0.5.18; see §3.5.)
 
-Hidden-camera OUIs: `fc:b4:67` (Yingxin/SmartLife), `00:e0:4c` (Realtek, in many
-cheap cams), `dc:4f:22` (Tuya-affiliated modules), `a4:c1:38` (Telink, common in
-cheap BLE mics), `8c:ce:4e` (Shenzhen iComm, frequent in spy-cam BOMs).
+Hidden-camera OUIs, all radio-module makers' and so high-noise: `fc:b4:67`,
+`dc:4f:22` and `8c:ce:4e` (Espressif), `00:e0:4c` (Realtek, in many cheap cams)
+and `a4:c1:38` (Telink, common in cheap BLE mics). Until v0.5.19 the code credited
+three of them to Yingxin/SmartLife, Tuya and Shenzhen iComm; the IEEE registry
+says Espressif.
+
+The Amazon and Google OUI sets are not all Amazon's and Google's. The Amazon set
+includes Samsung's `a8:51:5b`; the Google set includes BlackBerry's `94:eb:cd`,
+AzureWave's `6c:ad:f8`, Zhongshan B&T's `94:c9:60`, Wistron's `f4:f1:9e` and the
+unassigned `fc:9f:e9`. They are kept, so a device with one of those prefixes can
+be labelled Amazon or Google gear when it is neither; a lone OUI hit scores 30, so
+it shows only very close and passing (§4.2).
 
 Weights: OUI 30, name 45, company id 30, service UUID 50, SSID 45; +10 when two
 or more methods agree on one device, +5 above −50 dBm, +8 for rise-peak-fall.
@@ -668,6 +723,14 @@ orbiting 5 km away is still watching you.
 - **Multi-method bonus** — +20 when two independent BLE/WiFi methods agree.
 - **Strong RSSI** (> −50 dBm) +10; **stationary** (rise-peak-fall) +15. COMMERCIAL
   uses +10, +5 and +8 (§3.7).
+- **Display floor** — a BLE, WiFi or COMMERCIAL hit scoring under 40 is dropped:
+  it is never shown and never counts toward the tier (`ALARM_THRESHOLD` in
+  `BleScanner` and `WifiScanner`).
+  Most single methods clear it alone. Three don't. A Penguin numeric name (15)
+  needs both a strong signal and a rise-peak-fall (15 + 10 + 15), and so does a
+  lone COMMERCIAL OUI or company id (30 + 5 + 8). So glasses that advertise only
+  Meta's or Luxottica's company id show only very close, as you pass them; a
+  matching name or the HeyCyan service UUID shows at any range the radio reaches.
 
 ### 4.3 Loiter detection
 
@@ -701,7 +764,7 @@ arrives.
 The catch is that **a `ScanFilter` cannot express an OUI prefix.** It can match
 an exact address, an exact name, a service UUID, or manufacturer data — and
 OUI-prefix matching is OVERWATCH's primary BLE method (Axon `00:25:df`, the 24
-Flock prefixes, the 18 vendor prefixes). There is no filter that means "any MAC
+Flock prefixes, the 19 vendor prefixes). There is no filter that means "any MAC
 starting with these three octets", and no filter that means "any device".
 
 So the scanner switches strategy on `ACTION_SCREEN_ON` / `ACTION_SCREEN_OFF`:
@@ -752,7 +815,7 @@ system log could otherwise show roughly where the app has been used
 |---|---|---|
 | `cache/deflock/` | one file per ~5.5 km area scanned | every stop, and again at the next start |
 | `cache/osmdroid-tiles/cache.db` | OpenStreetMap tiles wherever the map was shown | same schedule, only if **Settings → Privacy → Delete map tiles when scanning stops** is on (default off) |
-| Android's log (logcat) | since v0.5.18, nothing positional: no coordinates, cell names or request URLs. v0.5.17 and earlier logged the exact fix on every camera-map fetch | not the app's to delete: it lives in RAM, rotates, and clears on reboot. One gap remains outside the app's code: osmdroid logs a tile's number when that tile fails to download |
+| Android's log (logcat) | nothing positional and no account details: no coordinates, cell names, request URLs or Waze account name. v0.5.17 and earlier logged the exact fix on every camera-map fetch. v0.5.18 still quoted a malformed reply from Overpass, the aircraft feeds or OpenWeb Ninja whole (Android's org.json puts its entire input in a syntax error, so: the positions of the cameras, aircraft or police around you), and logged the direct backend's account name; since v0.5.19 those lines carry the error's class only | not the app's to delete: it lives in RAM, rotates, and clears on reboot. One gap remains outside the app's code: osmdroid logs a tile's number when that tile fails to download |
 
 Tiles stay by default because OpenStreetMap's tile usage policy asks apps to
 cache tiles rather than re-download them. They live in one SQLite database that
@@ -770,8 +833,9 @@ Every online destination, and the most each one learns:
 | ADS-B feeds (`opendata.adsb.fi`, `api.adsb.lol`) | the centre of your 1 km grid square | every 60 s while scanning |
 | OpenWeb Ninja (default Waze backend) | the centre of your 1 km grid square, tied to your API key | every 240 s |
 | Waze (direct backend, opt-in) | the centre of your 1 km grid square, tied to an anonymous account; `ClientInfo` gets that centre jittered | every 60 s |
-| Overpass (`overpass.deflock.org`, `overpass-api.de`) | which 0.05° (~5.5 km) cell you are in | at start, then after each 1.5 km of movement if the cell is new to this scan |
+| Overpass (`overpass.deflock.org`, `overpass-api.de`) | which 0.05° (~5.5 km) cell you are in | at start, then when your 1.2 km circle reaches past the loaded box, for a cell not yet fetched this scan; a failure is retried after 60 s |
 | OpenStreetMap tile servers | the tiles the map loads, i.e. roughly the area on screen | while the map or bubble is visible, for tiles not already cached |
+| Google Maps (a row's map pin) | the exact position of that detection: a mapped camera within 1.2 km of you, a police report within 2 km, or an aircraft | only when you tap the pin |
 
 Before v0.5.18 the ADS-B feeds got the fix itself (~11 m), and the Overpass and
 OpenWeb Ninja boxes were centred exactly on it; before v0.5.16 Waze direct got it

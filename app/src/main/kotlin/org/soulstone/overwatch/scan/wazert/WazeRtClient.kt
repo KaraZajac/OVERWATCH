@@ -78,7 +78,8 @@ class WazeRtClient(
         }
     }
 
-    /** Drop the stored anonymous account; the next poll registers a fresh one. */
+    /** Drop the stored anonymous account; the next poll registers a fresh one,
+     *  including a running scan's (it uses its own client, which notices). */
     fun forgetAccount() = fetcher.forgetAccount()
 
     /** True once an anonymous account has been minted and persisted. */

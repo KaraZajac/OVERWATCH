@@ -1,8 +1,9 @@
 package org.soulstone.overwatch.scan.wazert;
 
 // Vendored from highway-radar-sabre-plus (MIT). See LICENSE in this directory.
-// Changed for OVERWATCH: package declaration, and the user-report submission
-// methods are removed — OVERWATCH only reads alerts, it never reports.
+// Changed for OVERWATCH: package declaration, the user-report submission methods
+// are removed — OVERWATCH only reads alerts, it never reports — and the account
+// name and server session id are no longer written to the log.
 
 import android.os.SystemClock;
 import android.util.Log;
@@ -145,7 +146,7 @@ final class WazeSession {
                 if (user == null || user.isEmpty()) throw new WazeExceptions.WazeOperationException("empty community from register");
                 if (pass == null || pass.isEmpty()) throw new WazeExceptions.WazeOperationException("empty secret from register");
                 credentials = new WazeCredentials(user, pass);
-                Log.d(TAG, "Registered anonymous account: " + user);
+                Log.d(TAG, "Registered an anonymous account");
                 return;
             }
         }
@@ -196,7 +197,7 @@ final class WazeSession {
                         String.valueOf(s.getGlobalUserId()));
                 seqCount = 2;
                 lastRequestMs = SystemClock.elapsedRealtime();
-                Log.d(TAG, "Login OK: sessionId=" + s.getServerSessionId());
+                Log.d(TAG, "Login OK");
                 return;
             }
         }

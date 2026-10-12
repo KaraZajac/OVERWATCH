@@ -4,9 +4,12 @@ package org.soulstone.overwatch.data.targets
  * Known BLE-bearing surveillance equipment OUI prefixes (first 3 octets of MAC).
  *
  * Sources:
- *  - flock-detection (24 prefixes — Flock, LiteOn, Cradlepoint, Murata, Espressif, Penguin BLE)
+ *  - flock-detection (24 prefixes seen on Flock hardware, Penguin BLE included). None
+ *    is registered to Flock: the IEEE registry gives 10 to Silicon Labs, 9 to Liteon,
+ *    3 to Espressif and 1 to USI, all radio-module makers, and leaves d8:a0:d8
+ *    unassigned. So a hit is a module that vendor also sells to everyone else.
  *  - AxonCadabra (Axon body cam manufacturer prefix 00:25:DF)
- *  - [VendorOuis] (18 IEEE-verified surveillance-vendor registrations — ShotSpotter,
+ *  - [VendorOuis] (19 IEEE-verified surveillance-vendor registrations — Flock Safety's own, ShotSpotter,
  *    WatchGuard, Verkada, Avigilon Alta, Axis body cams, FLIR, and the wired-video
  *    vendors, merged below)
  *

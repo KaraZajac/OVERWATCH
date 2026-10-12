@@ -2,12 +2,15 @@
 # for your machine.
 
 # Android SDK location. Required for any Android build.
-# Android Studio's setup wizard installs to ~/Library/Android/sdk by default.
-# Alternative: brew install --cask android-commandlinetools (path would be
+# Android Studio's setup wizard installs to ~/Library/Android/sdk on macOS and
+# ~/Android/Sdk on Linux.
+# Alternative on macOS: brew install --cask android-commandlinetools (path would be
 # /usr/local/share/android-commandlinetools or /opt/homebrew/share/android-commandlinetools).
 sdk.dir=/Users/YOUR_USERNAME/Library/Android/sdk
+# sdk.dir=/home/YOUR_USERNAME/Android/Sdk
 
-# JDK 21 home. AGP 8.7.x supports JDK 17 / 21 — JDK 26 is too new for AGP.
+# JDK 17 or 21. The build uses AGP 9.4.1, which needs at least JDK 17; releases
+# are built with 17.
 # This project's gradle wrapper runs on whatever JAVA_HOME points to.
 # Either:
 #   (a) export JAVA_HOME=/usr/local/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home
@@ -15,7 +18,8 @@ sdk.dir=/Users/YOUR_USERNAME/Library/Android/sdk
 #   (b) put the line below into ~/.gradle/gradle.properties (NOT project gradle.properties):
 #       org.gradle.java.home=/usr/local/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home
 
-# The Waze police source no longer uses an app-side key. The OpenWeb Ninja key
-# lives only on the api.blackflagintel.com proxy (server-side); the app calls
-# that proxy with a token pasted into Settings (stored encrypted on-device).
-# Nothing to configure here for Waze.
+# Nothing to configure here for Waze. The OpenWeb Ninja backend takes each user's
+# own API key, entered in the app's Settings and stored encrypted on-device; the
+# direct backend needs no key. Never put a key in this file or anywhere in the
+# repo. (The api.blackflagintel.com proxy that older builds used was retired in
+# v0.5.6.)

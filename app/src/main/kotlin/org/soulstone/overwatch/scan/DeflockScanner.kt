@@ -7,7 +7,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import org.soulstone.overwatch.data.location.LocationProvider
 import org.soulstone.overwatch.fusion.ConfidenceEngine
@@ -19,11 +18,18 @@ import org.soulstone.overwatch.fusion.SourceHealth
 /**
  * DeFlock orchestrator.
  *
- * Subscribes to [LocationProvider]; when the user has moved more than
- * [REFETCH_THRESHOLD_M] from the last fetch center (or there is no last
- * center), runs an Overpass query via [DeflockClient] for the surrounding
- * 5-km bbox. For each cached ALPR within [proximityMeters], submits a
- * detection event.
+ * Subscribes to [LocationProvider] and keeps one grid cell's box of mapped
+ * cameras loaded (see [DeflockClient]). On each fix it scores every camera within
+ * [proximityMeters]. It asks the client for the fix's own cell only when that
+ * circle reaches past the loaded box, and the cell is a different one: below about
+ * 64° latitude a cell's box holds the circle of every fix inside the cell, so
+ * every fix is scored against a box that covers it. A cell already fetched this
+ * scan comes back from the cache without a request.
+ *
+ * Until v0.5.19 it refetched only after 1.5 km of movement, so for a while after
+ * entering a new cell fixes were checked against the old box, and part of the
+ * circle could lie outside it (0.64% of fixes at 38°N and 11.7% at 60°N on
+ * simulated drives; none with this rule, see SOURCES.md §2.1).
  */
 class DeflockScanner(
     private val store: DetectionStore,
@@ -41,25 +47,30 @@ class DeflockScanner(
          * YELLOW past ~500 m, so this carries margin while keeping the store small.
          */
         const val EVAL_RADIUS_M = 1200f
-        private const val REFETCH_THRESHOLD_M = 1500f
-        /** Don't retry an Overpass POST within this window after a failure. */
+        /** After a failed fetch, wait this long before asking again, moving or not. */
         private const val FAILURE_BACKOFF_MS = 60_000L
     }
 
     private var job: Job? = null
-    private var lastFetchLat: Double? = null
-    private var lastFetchLon: Double? = null
-    private var lastAttemptMs: Long = 0L
-    private var lastAttemptOk: Boolean = false
+    /** The cell whose box [cachedPoints] holds; null until a fetch succeeds. */
+    private var loadedCell: DeflockClient.Cell? = null
+    /** When the last fetch failed; 0 once one succeeds. */
+    private var lastFailureMs: Long = 0L
     private val _cachedPoints = MutableStateFlow<List<DeflockClient.SurveillancePoint>>(emptyList())
-    /** All ALPR points in the current cell — exposed so the UI map can render them.
+    /** Every mapped camera in the loaded cell's box — exposed so the UI map can render them.
      *  Distinct from the proximity-filtered DetectionEvents on [DetectionStore]. */
     val cachedPoints: StateFlow<List<DeflockClient.SurveillancePoint>> = _cachedPoints.asStateFlow()
 
     fun start(scope: CoroutineScope): Boolean {
         if (job != null) return true
         job = scope.launch {
-            locationProvider.location.collectLatest { fix ->
+            // collect, not collectLatest: a newer fix must not cancel a fetch in
+            // flight. Cancelling discards the response, and fixes arrive every
+            // 5-15 s, often sooner at start, when the phone's cached position and
+            // its first live fix land within a second. Until v0.5.19 a discarded
+            // first fetch could leave the map empty until the user had moved 1.5 km.
+            // While a fetch runs, newer fixes wait; the latest is scored after it.
+            locationProvider.location.collect { fix ->
                 if (fix != null) handleFix(fix)
             }
         }
@@ -70,25 +81,19 @@ class DeflockScanner(
     fun stop() {
         job?.cancel()
         job = null
-        lastFetchLat = null
-        lastFetchLon = null
-        lastAttemptMs = 0L
-        lastAttemptOk = false
+        loadedCell = null
+        lastFailureMs = 0L
         _cachedPoints.value = emptyList()
         Log.i(TAG, "DeflockScanner stopped")
     }
 
     private suspend fun handleFix(fix: Location) {
-        if (shouldRefetch(fix)) {
-            // Mark the attempt before the network call so a concurrent location
-            // tick doesn't trigger a parallel re-fetch of the same area.
-            lastFetchLat = fix.latitude
-            lastFetchLon = fix.longitude
-            lastAttemptMs = System.currentTimeMillis()
+        if (needsFetch(fix)) {
             when (val result = client.fetchAround(fix.latitude, fix.longitude)) {
                 is DeflockClient.FetchResult.Success -> {
                     _cachedPoints.value = result.points
-                    lastAttemptOk = true
+                    loadedCell = DeflockClient.Cell.of(fix.latitude, fix.longitude)
+                    lastFailureMs = 0L
                     SourceHealth.record(DetectionSource.DEFLOCK, ok = true)
                     // Never a coordinate here: logcat outlives the scan and turns
                     // up in bug reports, so a position would be a location trail
@@ -96,14 +101,15 @@ class DeflockScanner(
                     Log.i(TAG, "Loaded ${result.points.size} surveillance nodes")
                 }
                 is DeflockClient.FetchResult.Failed -> {
-                    lastAttemptOk = false
+                    lastFailureMs = System.currentTimeMillis()
                     SourceHealth.record(
                         DetectionSource.DEFLOCK,
                         ok = false,
                         message = "Overpass unreachable: ${result.reason}"
                     )
                     Log.w(TAG, "Overpass fetch failed: ${result.reason}")
-                    // Keep using cachedPoints (may be empty on first failure).
+                    // Keep scoring against the loaded box, if any: it still covers
+                    // part of the circle.
                 }
             }
         }
@@ -145,17 +151,18 @@ class DeflockScanner(
         }
     }
 
-    private fun shouldRefetch(fix: Location): Boolean {
-        val lat = lastFetchLat ?: return true
-        val lon = lastFetchLon ?: return true
-        // After a failed attempt, hold off for FAILURE_BACKOFF_MS even if the
-        // user hasn't moved — avoids hammering Overpass when it's struggling.
-        if (!lastAttemptOk &&
-            System.currentTimeMillis() - lastAttemptMs < FAILURE_BACKOFF_MS) {
+    private fun needsFetch(fix: Location): Boolean {
+        // After a failure, wait out the backoff, then ask again whether or not the
+        // user has moved. (Until v0.5.19 a retry also needed 1.5 km of movement,
+        // so one failure while parked emptied the map until you drove off.)
+        if (lastFailureMs != 0L &&
+            System.currentTimeMillis() - lastFailureMs < FAILURE_BACKOFF_MS) {
             return false
         }
-        val out = FloatArray(1)
-        Location.distanceBetween(lat, lon, fix.latitude, fix.longitude, out)
-        return out[0] > REFETCH_THRESHOLD_M
+        val loaded = loadedCell ?: return true
+        if (loaded.holds(fix.latitude, fix.longitude, proximityMeters().toDouble())) return false
+        // Past ~64° latitude even a fix's own cell can't hold the whole circle, and
+        // asking for it again would only re-read the cache.
+        return DeflockClient.Cell.of(fix.latitude, fix.longitude) != loaded
     }
 }

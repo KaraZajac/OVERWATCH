@@ -1,11 +1,14 @@
 package org.soulstone.overwatch.data.targets
 
 /**
- * WiFi BSSID OUI prefixes for Flock Safety infrastructure.
+ * WiFi BSSID OUI prefixes seen on Flock Safety hardware. None is Flock's own
+ * registration: per the IEEE registry they belong to radio-module makers (21
+ * Liteon, 3 Silicon Labs, 2 Espressif, 2 USI, 1 Samsung), b8:35:32 is unassigned
+ * and 82:6b:f2 is locally administered.
  *
  * 31-prefix superset from flock-you (research by NitekryDPaul + DeFlockJoplin),
- * plus the overlap with flock-detection's 24-prefix list, plus the 18
- * IEEE-verified vendor registrations from [VendorOuis] (WatchGuard 4RE in-car
+ * plus the overlap with flock-detection's 24-prefix list, plus the 19
+ * IEEE-verified vendor registrations from [VendorOuis] (Flock Safety's own, WatchGuard 4RE in-car
  * APs, Openpath/Alta readers, WiFi-capable cameras and transit recorders).
  *
  * Note: Android's WifiManager only exposes BSSID; the addr1 / wildcard-probe

@@ -161,7 +161,9 @@ class AircraftClient {
             }
             out
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to parse ADS-B response: ${e.message}")
+            // Class only: Android's org.json quotes its whole input in a syntax
+            // error, and this input is every aircraft around you, with positions.
+            Log.w(TAG, "Failed to parse ADS-B response: ${e.javaClass.simpleName}")
             emptyList()
         }
     }

@@ -21,8 +21,8 @@ import kotlinx.coroutines.flow.asStateFlow
 /**
  * Wraps [FusedLocationProviderClient] and exposes the latest fix as a [StateFlow].
  *
- * Update cadence: 15s desired, 5s minimum, BALANCED_POWER_ACCURACY (≈100m precision —
- * good enough for ALPR proximity alerts ≤200m, easy on battery).
+ * Update cadence: 15 s desired, 5 s minimum, at PRIORITY_HIGH_ACCURACY (the note on
+ * [request] says why not BALANCED).
  */
 class LocationProvider(private val context: Context) {
 

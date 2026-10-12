@@ -11,6 +11,7 @@ import org.soulstone.overwatch.data.settings.SecureStore;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * OVERWATCH's driver for the vendored Waze RT protocol layer: owns the anonymous
@@ -45,7 +46,11 @@ import java.util.List;
  * register→login loop. A generic failure (5xx, network flap) backs off 15 s.
  *
  * <p>Every public method is synchronized: a poll can overlap a Settings action
- * ("forget account") and both touch the session and the cache.
+ * ("forget account") and both touch the session and the cache. Settings forgets
+ * through a short-lived instance of its own, not the scan's, so a forget also
+ * bumps a process-wide counter; the scan's fetcher checks it before every poll
+ * and drops a session whose account was forgotten. Until v0.5.19 it didn't, and
+ * a running scan kept polling under the forgotten account until Stop.
  */
 public final class WazeRtFetcher {
 
@@ -69,6 +74,9 @@ public final class WazeRtFetcher {
     private static final long BACKOFF_MAX_MS = 10 * 60_000L;
     private static final long GENERIC_FAIL_BACKOFF_MS = 15_000L;
     private static final long DAY_MS = 24 * 3600_000L;
+
+    /** Bumped by every {@link #forgetAccount}, on any instance. */
+    private static final AtomicInteger FORGET_GENERATION = new AtomicInteger();
 
     /** One Waze police report, reduced to what OVERWATCH scores. */
     public static final class PoliceAlert {
@@ -98,6 +106,8 @@ public final class WazeRtFetcher {
     private WazeSession session;
     private int consecutiveRejections = 0;
     private long backoffUntilMs = 0L;
+    /** The forget generation {@link #session} belongs to. */
+    private int seenForgetGeneration = FORGET_GENERATION.get();
 
     public WazeRtFetcher(Context context, String region) {
         this.ctx = context.getApplicationContext();
@@ -111,6 +121,15 @@ public final class WazeRtFetcher {
      */
     public synchronized List<PoliceAlert> fetchPoliceNear(double lat, double lon, double radiusMeters)
             throws Exception {
+        int generation = FORGET_GENERATION.get();
+        if (generation != seenForgetGeneration) {
+            // The account was forgotten (from Settings) while this scan ran. The
+            // session still holds its credentials, so drop it: the query below
+            // then registers a new account instead of carrying on as the old one.
+            seenForgetGeneration = generation;
+            session = null;
+            cache.clear();
+        }
         long now = SystemClock.elapsedRealtime();
         if (now < backoffUntilMs) {
             throw new WazeExceptions.WazeOperationException(
@@ -249,7 +268,10 @@ public final class WazeRtFetcher {
                     o.getInt("w"), o.getInt("h"), o.getString("installation_id"));
             return new WazeSession(region, device, creds);
         } catch (Exception e) {
-            Log.w(TAG, "Stored Waze account unreadable, registering a new one: " + e.getMessage());
+            // Class only: a JSON syntax error quotes its whole input, and this input
+            // is the account, password included.
+            Log.w(TAG, "Stored Waze account unreadable, registering a new one: "
+                    + e.getClass().getSimpleName());
             return new WazeSession(region);
         }
     }
@@ -268,15 +290,17 @@ public final class WazeRtFetcher {
             o.put("installation_id", d.installationId);
             SecureStore.INSTANCE.put(ctx, KEY_ACCOUNT, o.toString());
         } catch (Exception e) {
-            Log.w(TAG, "Could not persist the Waze account: " + e.getMessage());
+            Log.w(TAG, "Could not persist the Waze account: " + e.getClass().getSimpleName());
         }
     }
 
-    /** Wipe the stored anonymous account. Also the Settings "forget" action. */
+    /** Wipe the stored anonymous account. Also the Settings "forget" action, which
+     *  a running scan's fetcher picks up at its next poll (see the class note). */
     public synchronized void forgetAccount() {
         SecureStore.INSTANCE.put(ctx, KEY_ACCOUNT, "");   // empty clears the entry
         cache.clear();
         session = null;
+        seenForgetGeneration = FORGET_GENERATION.incrementAndGet();
     }
 
     public synchronized boolean hasAccount() {

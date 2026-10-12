@@ -42,12 +42,14 @@ import org.soulstone.overwatch.scan.DeflockScanner
 import org.soulstone.overwatch.scan.DeflockClient.SurveillancePoint
 import org.soulstone.overwatch.scan.WazeClient
 import org.soulstone.overwatch.scan.WazeScanner
+import org.soulstone.overwatch.scan.WazeSource
 import org.soulstone.overwatch.scan.wazert.WazeRtClient
 import org.soulstone.overwatch.scan.WifiScanner
 
 /**
- * Foreground service that owns all four scanners (BLE, WiFi, DeFlock, Waze)
- * and the [DetectionStore]. UI observes companion-object state flows directly.
+ * Foreground service that owns the scanners (BLE, WiFi, DeFlock, Waze, Aircraft;
+ * COMMERCIAL rides the BLE and WiFi scans) and the [DetectionStore]. UI observes
+ * companion-object state flows directly.
  *
  * Responsibilities beyond scanner orchestration:
  *  - Updates the foreground notification on every threat-tier change so a
@@ -108,7 +110,8 @@ class DetectionService : LifecycleService() {
     private lateinit var wifiScanner: WifiScanner
     private lateinit var locationProvider: LocationProvider
     private lateinit var deflockScanner: DeflockScanner
-    private lateinit var wazeScanner: WazeScanner
+    /** Built per scan, in [beginScanning]: see the note there. */
+    private var wazeScanner: WazeScanner? = null
     private lateinit var aircraftScanner: AircraftScanner
     private lateinit var overlayManager: OverlayManager
     private var pruneJob: Job? = null
@@ -134,16 +137,6 @@ class DetectionService : LifecycleService() {
         // "show within" setting is a view control and must never decide what
         // gets scored, or narrowing it would hide a real alert.
         deflockScanner = DeflockScanner(store, locationProvider, DeflockClient(this))
-        // Backend is read once per service lifetime, like the source toggles:
-        // Start/Stop applies a change, a live switch does not.
-        wazeScanner = WazeScanner(
-            store, locationProvider,
-            source = when (settings.wazeBackend.value) {
-                Settings.WazeBackend.DIRECT -> WazeRtClient(this)
-                Settings.WazeBackend.OPENWEB_NINJA ->
-                    WazeClient(apiKey = { settings.wazeApiKey.value })
-            }
-        )
         aircraftScanner = AircraftScanner(this, store, locationProvider)
         overlayManager = OverlayManager(
             context = this,
@@ -166,7 +159,9 @@ class DetectionService : LifecycleService() {
                 // the service regardless of that START, so its onDestroy() could
                 // run endScanning() just after the restart and leave scanning off.
                 // With the id, Android only stops the service when no newer start
-                // has arrived.
+                // has arrived. So a restart keeps this instance and onCreate() does
+                // not run again: anything a setting chooses must be built in
+                // beginScanning(), not in onCreate().
                 stopSelf(startId)
             }
         }
@@ -203,7 +198,14 @@ class DetectionService : LifecycleService() {
                     deflockScanner.start(lifecycleScope); deflockStarted = true
                 }
                 if (settings.wazeEnabled.value) {
-                    wazeScanner.start(lifecycleScope); wazeStarted = true
+                    // The backend is chosen here, per scan, not once in onCreate():
+                    // a restart keeps this service, so a backend picked there would
+                    // outlive a switch the user restarted to apply. v0.5.18 did
+                    // exactly that, and kept sending the grid square to Waze after
+                    // the user had switched to OpenWeb Ninja.
+                    wazeScanner = WazeScanner(store, locationProvider, source = newWazeSource())
+                        .also { it.start(lifecycleScope) }
+                    wazeStarted = true
                 }
                 if (settings.aircraftEnabled.value) {
                     aircraftScanner.start(lifecycleScope); aircraftStarted = true
@@ -285,15 +287,24 @@ class DetectionService : LifecycleService() {
         }
     }
 
+    /** A fresh client for the backend Settings names now. A new direct client
+     *  restores the stored anonymous account, so a Forget also takes effect here. */
+    private fun newWazeSource(): WazeSource = when (settings.wazeBackend.value) {
+        Settings.WazeBackend.DIRECT -> WazeRtClient(this)
+        Settings.WazeBackend.OPENWEB_NINJA -> WazeClient(apiKey = { settings.wazeApiKey.value })
+    }
+
     private fun endScanning() {
-        if (!_running.value && !bleStarted && !wifiStarted && !deflockStarted && !wazeStarted) {
+        if (!_running.value && !bleStarted && !wifiStarted && !deflockStarted && !wazeStarted &&
+            !aircraftStarted
+        ) {
             return
         }
         _running.value = false
         if (bleStarted) { bleScanner.stop(); bleStarted = false }
         if (wifiStarted) { wifiScanner.stop(); wifiStarted = false }
         if (deflockStarted) { deflockScanner.stop(); deflockStarted = false }
-        if (wazeStarted) { wazeScanner.stop(); wazeStarted = false }
+        if (wazeStarted) { wazeScanner?.stop(); wazeScanner = null; wazeStarted = false }
         if (aircraftStarted) { aircraftScanner.stop(); aircraftStarted = false }
         locationProvider.stop()
         // The camera cache is a list of every ~5.5 km area this scan covered;

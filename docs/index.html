@@ -4,9 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>OVERWATCH — surveillance detection for Android</title>
-<meta name="description" content="A native Android app that flags nearby Flock Safety ALPRs, Axon body cameras, and police presence. Fuses BLE/WiFi radio scans, the DeFlock ALPR map, and live Waze police reports into a green→red threat tier. Never connects to, pairs with, or jams anything it detects.">
+<meta name="description" content="A native Android app that flags nearby Flock Safety ALPRs, Axon body cameras, police presence and surveillance aircraft. It watches BLE/WiFi radio scans, the DeFlock camera map, live Waze police reports and ADS-B, and shows the strongest signal as a green→red threat tier. Never connects to, pairs with, or jams anything it detects.">
 <meta property="og:title" content="OVERWATCH — surveillance detection">
-<meta property="og:description" content="Android app that flags nearby Flock ALPRs, Axon body cams, and police by fusing BLE/WiFi + the DeFlock map + Waze police reports. It never connects to, pairs with, or jams anything it detects.">
+<meta property="og:description" content="Android app that flags nearby Flock ALPRs, Axon body cams, police and surveillance aircraft from BLE/WiFi scans, the DeFlock map, Waze police reports and ADS-B. It never connects to, pairs with, or jams anything it detects.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://overwatch.netslum.io/">
 <meta property="og:image" content="https://overwatch.netslum.io/og.png">
@@ -53,7 +53,7 @@
   <div class="container hero-inner">
     <div class="hero-eyebrow">
       <span class="dot dot-pulse"></span>
-      v0.5.18 · Android · defensive
+      v0.5.19 · Android · defensive
     </div>
     <h1 class="hero-title">
       <span class="display-wordmark">OVERWATCH</span>
@@ -75,7 +75,7 @@
       <div class="stat-chip"><span class="num" data-target="6">0</span><span>sources</span></div>
       <div class="stat-chip stat-vfy"><span class="num" data-target="4">0</span><span>threat tiers</span></div>
       <div class="stat-chip"><span class="num" data-target="0">0</span><span>devices paired</span></div>
-      <div class="stat-chip"><span class="num" data-target="32">0</span><span>releases</span></div>
+      <div class="stat-chip"><span class="num" data-target="33">0</span><span>releases</span></div>
     </div>
 
     <div class="cta-row">
@@ -97,7 +97,7 @@
 <section class="trust-strip">
   <div class="container">
     <div class="trust-row">
-      <span class="trust-label">Fuses signal from</span>
+      <span class="trust-label">Watches signal from</span>
       <ul class="trust-items">
         <li>Bluetooth-LE + WiFi radio</li>
         <li>DeFlock ALPR map</li>
@@ -130,7 +130,7 @@
     <div class="feature-split">
       <div class="phone-frame">
         <img class="phone" src="img/overwatch-sources.png" width="856" height="2000"
-          alt="Detection-sources drill-down from before v0.5.8: BLE, WiFi, DeFlock, Citizen, Waze and Commercial rows, each with a color tier dot and the observations that fired it. Today Aircraft replaces the retired Citizen row." loading="lazy">
+          alt="Detection-sources drill-down from v0.5.5 or earlier: BLE, WiFi, DeFlock, Citizen, Waze and Commercial rows, each with a color tier dot and the observations that fired it. Today Aircraft replaces the retired Citizen row." loading="lazy">
       </div>
       <div class="explain-annotations">
         <div class="annotation">
@@ -195,9 +195,11 @@
         <div class="bento-icon">📶</div>
         <h3>BLE — Bluetooth-LE</h3>
         <p>
-          Vendor MAC OUIs (Axon, Flock Penguin / Raven, XUNTONG mfg id
-          <code>0x09C8</code>, "TN" serial pattern), Raven service UUIDs, and
-          device-name patterns — plus 18 IEEE-verified vendor OUIs: ShotSpotter,
+          MAC OUI prefixes (Axon's own, and the radio-module makers' prefixes
+          seen on Flock Penguin / Raven hardware), XUNTONG mfg id
+          <code>0x09C8</code>, "TN" serial pattern, Raven service UUIDs, and
+          device-name patterns — plus 19 IEEE-verified vendor OUIs: Flock
+          Safety's own, ShotSpotter,
           WatchGuard, Verkada, Avigilon Alta readers, Axis body cams, FLIR and
           more, with police-exclusive vendors scoring ORANGE on sight. Iterates
           <em>every</em> manufacturer-data entry per advert — not just the
@@ -226,8 +228,10 @@
         <div class="bento-icon">📡</div>
         <h3>WiFi</h3>
         <p>
-          BSSID OUI prefixes for Flock infrastructure (flock-you's 31), the
-          same 18 surveillance-vendor OUIs (WatchGuard in-car APs, Alta readers,
+          BSSID prefixes seen on Flock hardware (flock-you's 31, all
+          radio-module makers' rather than Flock's own), the
+          same 19 surveillance-vendor OUIs (Flock Safety's own, WatchGuard in-car
+          APs, Alta readers,
           WiFi cameras), and <code>Flock-XXXX</code> SSID patterns, polled every
           35 s — just under the Android 9+ scan throttle.
         </p>
@@ -242,7 +246,8 @@
           Overpass API (<code>overpass.deflock.org</code> → fallback
           <code>overpass-api.de</code>), which is told only your ~5.5 km grid
           cell. Cached for the current scan only and deleted when you stop, with
-          failure backoff. Refetches when you move &gt; 1.5 km.
+          a retry a minute after a failure. A new cell is fetched as soon as
+          your 1.2 km circle would reach past the area already loaded.
         </p>
       </article>
 
@@ -327,9 +332,10 @@
       <h2>The whole app, top to bottom.</h2>
       <p class="lead">No OVERWATCH account, no onboarding, no cloud dashboard to
       configure — open it, hit START, and drill into any source. Three taps
-      deep is as complex as it gets. (These screenshots predate v0.5.8: the app
-      has since dropped the Citizen source and gained the Aircraft source, a
-      color legend and a range slider. New ones are coming.)</p>
+      deep is as complex as it gets. (These screenshots are from v0.5.5 or
+      earlier: the app has since dropped the Citizen source and the Waze proxy
+      token, and gained the Aircraft source, your own Waze key, a color legend
+      and a range slider. New ones are coming.)</p>
     </div>
 
     <div class="shots">
@@ -340,12 +346,12 @@
       </figure>
       <figure class="shot">
         <img class="phone" src="img/overwatch-sources.png" width="856" height="2000"
-          alt="Detection-sources drill-down from before v0.5.8: BLE, WiFi, DeFlock, Citizen, Waze and Commercial rows, each with a color tier dot and the observations that fired it. Today Aircraft replaces the retired Citizen row." loading="lazy">
+          alt="Detection-sources drill-down from v0.5.5 or earlier: BLE, WiFi, DeFlock, Citizen, Waze and Commercial rows, each with a color tier dot and the observations that fired it. Today Aircraft replaces the retired Citizen row." loading="lazy">
         <figcaption><strong>Source drill-down</strong>Tap the ring for every source, its live tier, and the exact observation that fired it.</figcaption>
       </figure>
       <figure class="shot">
         <img class="phone" src="img/overwatch-settings.png" width="856" height="2000"
-          alt="Settings screen from before v0.5.8: per-source toggles, since-removed per-source distance sliders, and the Waze section." loading="lazy">
+          alt="Settings screen from v0.5.5 or earlier: per-source toggles including the retired Citizen feed, since-removed per-source distance sliders, and the retired Waze proxy-token field." loading="lazy">
         <figcaption><strong>Settings</strong>Toggle each source, choose the Waze backend, and decide whether map tiles are kept.</figcaption>
       </figure>
     </div>
@@ -409,8 +415,9 @@
         <h3>Your position, not your data</h3>
         <p>
           Location drives the proximity checks and the map on-device; the
-          online feeds are told at most which 1 km grid square you are in, and
-          the map's tiles come from OpenStreetMap. No OVERWATCH account, no telemetry, no analytics — the scans and feeds
+          online feeds are told at most which 1 km grid square you are in, the
+          map's tiles come from OpenStreetMap, and a row's map pin opens Google
+          Maps at that detection when you tap it. No OVERWATCH account, no telemetry, no analytics — the scans and feeds
           run and the results stay on your phone.
         </p>
       </article>
@@ -447,7 +454,7 @@
     <div class="feature-split">
       <div class="phone-frame">
         <img class="phone" src="img/overwatch-settings.png" width="856" height="2000"
-          alt="Settings screen: per-source toggles (BLE, WiFi, DeFlock, Waze, Aircraft, Commercial) and the encrypted Waze API key field." loading="lazy">
+          alt="Settings screen from v0.5.5 or earlier: per-source toggles including the retired Citizen feed, since-removed per-source distance sliders, and the retired Waze proxy-token field." loading="lazy">
       </div>
       <div class="timeline dl-steps">
         <div class="tl-col tl-shipped">
@@ -455,7 +462,7 @@
           <ul>
             <li>Grab the latest debug-signed APK from
               <a href="https://github.com/KaraZajac/OVERWATCH/releases/latest">Releases</a>
-              (currently <strong>v0.5.18</strong>).</li>
+              (currently <strong>v0.5.19</strong>).</li>
           </ul>
         </div>
         <div class="tl-col tl-active">
@@ -508,12 +515,15 @@
         <li><a href="https://deflock.me">DeFlock ALPR map</a></li>
         <li><a href="https://www.waze.com">Waze</a></li>
         <li><a href="https://www.openstreetmap.org">OpenStreetMap</a></li>
+        <li><a href="https://adsb.fi">adsb.fi</a> · <a href="https://adsb.lol">adsb.lol</a> ADS-B</li>
+        <li><a href="https://www.adsbexchange.com">ADSBexchange</a> aircraft registry</li>
+        <li><a href="https://www.openwebninja.com">OpenWeb Ninja</a> Waze feed</li>
       </ul>
     </div>
     <div class="footer-col">
       <h4>More</h4>
       <ul>
-        <li><a href="https://netslum.io/notes/overwatch-passive-counter-surveillance/">The writeup</a></li>
+        <li><a href="https://netslum.io/notes/overwatch-passive-counter-surveillance/">The July writeup</a> (v0.1, out of date)</li>
         <li><a href="https://netslum.io">netslum.io</a></li>
       </ul>
     </div>
@@ -524,7 +534,7 @@
       with, jams, or interferes with any device or network it detects.
     </p>
     <p class="footer-meta">
-      v0.5.18 · <a href="https://github.com/KaraZajac/OVERWATCH">github.com/KaraZajac/OVERWATCH</a> · <a href="https://github.com/KaraZajac/OVERWATCH/blob/main/LICENSE">BSD-3-Clause</a>
+      v0.5.19 · <a href="https://github.com/KaraZajac/OVERWATCH">github.com/KaraZajac/OVERWATCH</a> · <a href="https://github.com/KaraZajac/OVERWATCH/blob/main/LICENSE">BSD-3-Clause</a>
     </p>
     <div class="onion-line">
       <span class="onion-label">Also on Tor</span>

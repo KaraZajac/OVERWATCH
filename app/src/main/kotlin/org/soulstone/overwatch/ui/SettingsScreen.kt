@@ -178,7 +178,8 @@ fun SettingsScreen(
         HelpText(
             "Online sources are told only which 1 km grid square you are in (the " +
                 "camera map, which ~5.5 km cell). The map's tiles come from " +
-                "OpenStreetMap, which sees the ones you load.\n\n" +
+                "OpenStreetMap, which sees the ones you load, and a row's map pin " +
+                "opens Google Maps at that camera, report or aircraft.\n\n" +
                 "The camera map cache records each ~5.5 km area you scan, so it is " +
                 "deleted every time scanning stops. Map tiles are kept by default " +
                 "so the map doesn't re-download them, as OpenStreetMap asks of apps. " +
