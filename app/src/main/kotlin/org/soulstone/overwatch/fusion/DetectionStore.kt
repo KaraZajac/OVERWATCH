@@ -37,6 +37,20 @@ class DetectionStore(
         recompute(merged)
     }
 
+    /** Replace every event from [source] with [events], for a scanner that
+     *  re-scores its whole set at each fix: whatever it leaves out is gone now,
+     *  not after [retentionMs]. One update, so the tier never dips in between
+     *  (a dip and rise would fire the escalation vibration; see WazeScanner). */
+    @Synchronized
+    fun replaceSource(source: DetectionSource, events: List<DetectionEvent>) {
+        val cutoff = nowMs() - retentionMs
+        val merged = (_events.value.filter { it.source != source && it.timestampMs >= cutoff } +
+            events.distinctBy { it.key })
+            .sortedByDescending { it.score }
+        _events.value = merged
+        recompute(merged)
+    }
+
     @Synchronized
     fun clear() {
         _events.value = emptyList()

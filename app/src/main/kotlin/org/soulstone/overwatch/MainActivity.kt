@@ -4,15 +4,20 @@ import android.Manifest
 import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.Configuration
+import android.content.res.Resources
+import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings as AndroidSettings
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -26,6 +31,7 @@ import org.soulstone.overwatch.service.DetectionService
 import org.soulstone.overwatch.ui.MainScreen
 import org.soulstone.overwatch.ui.SettingsScreen
 import org.soulstone.overwatch.ui.theme.OverwatchTheme
+import org.soulstone.overwatch.ui.theme.isDarkTheme
 
 class MainActivity : ComponentActivity() {
 
@@ -84,10 +90,28 @@ class MainActivity : ComponentActivity() {
         // shifting underneath the user on an upgrade; every screen then pads
         // itself with WindowInsets.safeDrawing, which covers the system bars
         // *and* a camera cutout.
-        enableEdgeToEdge()
+        //
+        // The bars' icons follow the theme the app shows, not the system's:
+        // the app defaults to dark whatever the system says, and a bare
+        // enableEdgeToEdge() gave a phone in light mode dark status-bar icons
+        // on the dark background. androidx re-runs this first call's check on
+        // every configuration change, so the check reads the setting each time
+        // instead of capturing it; a change of setting re-runs it below.
+        val appIsDark = { res: Resources ->
+            val systemDark = (res.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
+                Configuration.UI_MODE_NIGHT_YES
+            isDarkTheme(settings.themeMode.value, systemDark)
+        }
+        val statusBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT, appIsDark)
+        val navigationBarStyle = SystemBarStyle.auto(LIGHT_SCRIM, DARK_SCRIM, appIsDark)
+        enableEdgeToEdge(statusBarStyle, navigationBarStyle)
 
         setContent {
             val themeMode by settings.themeMode.collectAsState()
+            DisposableEffect(themeMode) {
+                enableEdgeToEdge(statusBarStyle, navigationBarStyle)
+                onDispose { }
+            }
             OverwatchTheme(mode = themeMode) {
                 var screen by rememberSaveable { mutableStateOf(Screen.MAIN) }
 
@@ -194,4 +218,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private enum class Screen { MAIN, SETTINGS }
+
+    private companion object {
+        // androidx's own navigation-bar scrims, which only Android 8–9 draw
+        // (EdgeToEdge.DefaultLightScrim / DefaultDarkScrim aren't public).
+        val LIGHT_SCRIM = Color.argb(0xe6, 0xFF, 0xFF, 0xFF)
+        val DARK_SCRIM = Color.argb(0x80, 0x1b, 0x1b, 0x1b)
+    }
 }

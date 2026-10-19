@@ -89,6 +89,9 @@ class DeflockScanner(
 
     private suspend fun handleFix(fix: Location) {
         if (needsFetch(fix)) {
+            // Score against the box already loaded first: a fetch can take up to a
+            // minute, and cameras the circle has left shouldn't stay up meanwhile.
+            emitProximityEvents(fix)
             when (val result = client.fetchAround(fix.latitude, fix.longitude)) {
                 is DeflockClient.FetchResult.Success -> {
                     _cachedPoints.value = result.points
@@ -117,16 +120,22 @@ class DeflockScanner(
     }
 
 
+    /**
+     * Scores every mapped camera within reach of [fix] and replaces the DEFLOCK
+     * events with that set, so a camera the circle has left drops out at once.
+     * A camera doesn't move, so its distance from the latest fix is always known.
+     * Until v0.5.20 cameras were only ever added, and one left behind kept its
+     * last distance and score for the store's 5 minutes: after a jump in position
+     * (a stale first fix, a GPS glitch, the end of a tunnel) the screen still
+     * said "@ 66m" with an orange ring, kilometres away.
+     */
     private fun emitProximityEvents(fix: Location) {
-        val points = _cachedPoints.value
-        if (points.isEmpty()) return
-
         val limit = proximityMeters()
         val out = FloatArray(1)
-        for (p in points) {
+        val events = _cachedPoints.value.mapNotNull { p ->
             Location.distanceBetween(fix.latitude, fix.longitude, p.lat, p.lon, out)
             val dist = out[0]
-            if (dist > limit) continue
+            if (dist > limit) return@mapNotNull null
             val obs = ConfidenceEngine.DeflockObservation(
                 osmId = p.id,
                 distanceMeters = dist,
@@ -135,20 +144,19 @@ class DeflockScanner(
                 manufacturer = p.manufacturer
             )
             val scored = ConfidenceEngine.scoreDeflock(obs)
-            store.submit(
-                DetectionEvent(
-                    source = DetectionSource.DEFLOCK,
-                    key = "osm:${p.id}",
-                    label = scored.label,
-                    score = scored.score,
-                    matchedMethods = scored.methods,
-                    rssi = null,
-                    lat = p.lat,
-                    lon = p.lon,
-                    distanceMeters = dist
-                )
+            DetectionEvent(
+                source = DetectionSource.DEFLOCK,
+                key = "osm:${p.id}",
+                label = scored.label,
+                score = scored.score,
+                matchedMethods = scored.methods,
+                rssi = null,
+                lat = p.lat,
+                lon = p.lon,
+                distanceMeters = dist
             )
         }
+        store.replaceSource(DetectionSource.DEFLOCK, events)
     }
 
     private fun needsFetch(fix: Location): Boolean {

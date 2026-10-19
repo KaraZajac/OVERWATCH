@@ -35,16 +35,20 @@ object ThreatColors {
     val Red = Color(0xFFD7263D)
 }
 
+/** Whether [mode] shows the dark colours, given whether the system is in dark
+ *  mode. Shared with MainActivity, which styles the system bars to match. */
+fun isDarkTheme(mode: Settings.ThemeMode, systemDark: Boolean): Boolean = when (mode) {
+    Settings.ThemeMode.DARK -> true
+    Settings.ThemeMode.LIGHT -> false
+    Settings.ThemeMode.SYSTEM -> systemDark
+}
+
 @Composable
 fun OverwatchTheme(
     mode: Settings.ThemeMode = Settings.ThemeMode.DARK,
     content: @Composable () -> Unit
 ) {
-    val dark = when (mode) {
-        Settings.ThemeMode.DARK -> true
-        Settings.ThemeMode.LIGHT -> false
-        Settings.ThemeMode.SYSTEM -> isSystemInDarkTheme()
-    }
+    val dark = isDarkTheme(mode, isSystemInDarkTheme())
     MaterialTheme(
         colorScheme = if (dark) DarkColors else LightColors,
         content = content

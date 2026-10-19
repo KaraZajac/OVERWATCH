@@ -17,8 +17,8 @@ import org.soulstone.overwatch.fusion.SourceHealth
 
 /**
  * Polls a [WazeSource] backend for live POLICE alerts around the current
- * location, then submits any inside [proximityMeters] and younger than
- * [MAX_AGE_MS].
+ * location, then scores any inside [proximityMeters] and younger than
+ * [MAX_AGE_MS], again at every fix until the next poll.
  *
  * The backend supplies its own poll cadence, because the two differ by an order
  * of magnitude for good reasons: the metered hosted feed polls every 4 min to
@@ -46,9 +46,16 @@ class WazeScanner(
         // what that feed serves as "current" and is harmless for the live backend.
         /** Shared with ConfidenceEngine, which decays the score across this window. */
         private const val MAX_AGE_MS = ConfidenceEngine.WAZE_MAX_AGE_MS
+        /** How long a poll's alerts stay scored if later polls fail: the
+         *  DetectionStore's retention, which used to drop them. */
+        private const val ALERTS_KEPT_MS = 5 * 60 * 1000L
     }
 
     private var job: Job? = null
+    private var rescoreJob: Job? = null
+    /** The last successful poll's alerts, and when it returned. */
+    private var alerts: List<WazeSource.Alert> = emptyList()
+    private var alertsAtMs = 0L
 
     fun start(scope: CoroutineScope): Boolean {
         if (job != null) return true
@@ -62,6 +69,17 @@ class WazeScanner(
                 delay(source.pollIntervalMs)
             }
         }
+        // Between polls, re-score the last poll's alerts at every fix, as the
+        // camera map does: a report doesn't move, so its distance from the latest
+        // fix is always known. Until v0.5.20 a report kept the distance and score
+        // of the poll that found it until the store dropped it 5 minutes later:
+        // "@ 180m" on a phone that had since moved kilometres, or whose first fix
+        // at START was a stale cached position.
+        rescoreJob = scope.launch {
+            locationProvider.location.collect { fix ->
+                if (fix != null) emitProximityEvents(fix)
+            }
+        }
         Log.i(
             TAG,
             "WazeScanner started (backend=${source.backendName}, " +
@@ -73,6 +91,10 @@ class WazeScanner(
     fun stop() {
         job?.cancel()
         job = null
+        rescoreJob?.cancel()
+        rescoreJob = null
+        alerts = emptyList()
+        alertsAtMs = 0L
         Log.i(TAG, "WazeScanner stopped")
     }
 
@@ -92,28 +114,29 @@ class WazeScanner(
             }
             is WazeSource.FetchResult.Success -> {
                 SourceHealth.record(DetectionSource.WAZE, ok = true)
-                // Deliberately no clearSource() here: re-submitting refreshes
-                // still-present alerts by key (dedup) and lets vanished ones age
-                // out via the store's 5-min TTL. Clearing every poll would briefly
-                // drop the tier and re-raise it, double-firing the escalation
-                // vibration each cycle.
-                emitProximityEvents(fix, result.alerts)
+                alerts = result.alerts
+                alertsAtMs = System.currentTimeMillis()
+                // The fetch can take seconds: score from the latest fix.
+                emitProximityEvents(locationProvider.location.value ?: fix)
             }
         }
     }
 
 
-    private fun emitProximityEvents(fix: Location, alerts: List<WazeSource.Alert>) {
+    private fun emitProximityEvents(fix: Location) {
         val now = System.currentTimeMillis()
+        // After failed polls, keep the last alerts only as long as the store keeps
+        // an event, so an outage still ends with the reports gone.
+        val current = if (now - alertsAtMs > ALERTS_KEPT_MS) emptyList() else alerts
         val limit = proximityMeters()
         val out = FloatArray(1)
 
-        for (a in alerts) {
+        val events = current.mapNotNull { a ->
             val age = now - a.pubMillis
-            if (age > MAX_AGE_MS) continue
+            if (age > MAX_AGE_MS) return@mapNotNull null
             Location.distanceBetween(fix.latitude, fix.longitude, a.lat, a.lon, out)
             val dist = out[0]
-            if (dist > limit) continue
+            if (dist > limit) return@mapNotNull null
 
             val scored = ConfidenceEngine.scoreWaze(
                 ConfidenceEngine.WazeObservation(
@@ -125,19 +148,20 @@ class WazeScanner(
                     subtype = a.subtype
                 )
             )
-            store.submit(
-                DetectionEvent(
-                    source = DetectionSource.WAZE,
-                    key = "waze:${a.uuid}",
-                    label = scored.label,
-                    score = scored.score,
-                    matchedMethods = scored.methods,
-                    rssi = null,
-                    lat = a.lat,
-                    lon = a.lon,
-                    distanceMeters = dist
-                )
+            DetectionEvent(
+                source = DetectionSource.WAZE,
+                key = "waze:${a.uuid}",
+                label = scored.label,
+                score = scored.score,
+                matchedMethods = scored.methods,
+                rssi = null,
+                lat = a.lat,
+                lon = a.lon,
+                distanceMeters = dist
             )
         }
+        // One replacement, never a clear and re-add: a clear would drop the tier
+        // for a moment, and the re-add would fire the escalation vibration again.
+        store.replaceSource(DetectionSource.WAZE, events)
     }
 }

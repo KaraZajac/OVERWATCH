@@ -102,6 +102,15 @@ which is why generic cameras are worth carrying.
   nothing asked again while the phone stayed put: with a 2.5 s reply and the live
   fix 0.8 s after the cached one, the v0.5.18 scanner was still empty after 70 s.
   Now newer fixes wait for the fetch, and the latest is scored when it returns.
+- **A camera the circle has left drops out at once.** Every fix re-scores each
+  camera within 1.2 km and replaces the source's whole set, so the list, the ring
+  and every distance follow the latest fix. A fix that needs a new cell is first
+  scored against the box already loaded, so cameras left behind are gone before
+  the fetch returns. Until v0.5.20 cameras were only ever added: one left behind
+  kept the distance and score of the last fix that had it in range until the
+  store's 5-minute expiry. After a jump in position (a cached first fix from
+  somewhere else at Start, a GPS glitch, the end of a tunnel) the screen still
+  read "@ 66m" with an orange ring 12 km away, as seen on an emulator.
 - A `200 OK` body containing `{"remark": "...timed out..."}` is treated as a
   failure, so an Overpass timeout cannot poison the cache.
 - **Dead:** `cdn.deflock.me/regions/*.json` — behind Cloudflare bot mitigation,
@@ -126,6 +135,15 @@ directly until a full Stop.
 | Position sent to Waze | none | 1 km grid square, every poll |
 | Position sent to OpenWeb Ninja | 1 km grid square, every poll, with your key (the exact fix until v0.5.18) | none |
 | Default | yes | no, opt-in |
+
+Both backends' reports are scored the same way. A poll's reports are kept and
+re-scored at every fix until the next poll: a report doesn't move, so its
+distance from the latest fix is always known, and one more than 2 km away drops
+out at once. If a poll fails, the last reports stay scored for 5 minutes, then
+go. Until v0.5.20 a report kept the distance and score of the poll that found it
+until the store's 5-minute expiry: when the first fix at Start was the phone's
+cached position 12 km away, a report there read "@ 180m" for minutes, as seen on
+an emulator.
 
 #### 2.2a OpenWeb Ninja (default)
 
@@ -631,7 +649,11 @@ ALPR/Axon-grade evidence.
 ## 4. Scoring
 
 Score 0–100 per observation; the on-screen tier is the **maximum live score**
-across all sources. Events expire after 5 minutes.
+across all sources. Radio events (BLE, WiFi, Commercial) and aircraft expire 5
+minutes after they were last seen. The camera map and Waze reports sit at fixed,
+known positions, so they are re-scored at every fix and drop out as soon as they
+are out of range (§2.1, §2.2); until v0.5.20 they too stayed up to 5 minutes,
+with the distance they had when last in range.
 
 ```
 GREEN      < 40    nothing credible
