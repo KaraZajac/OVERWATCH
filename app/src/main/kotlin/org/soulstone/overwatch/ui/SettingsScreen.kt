@@ -66,6 +66,9 @@ fun SettingsScreen(
     val waze by settings.wazeEnabled.collectAsState()
     val aircraft by settings.aircraftEnabled.collectAsState()
     val mic by settings.micEnabled.collectAsState()
+    val hacker by settings.hackerEnabled.collectAsState()
+    val tracker by settings.trackerEnabled.collectAsState()
+    val skimmer by settings.skimmerScanEnabled.collectAsState()
     val wazeApiKey by settings.wazeApiKey.collectAsState()
     val wazeBackend by settings.wazeBackend.collectAsState()
     val theme by settings.themeMode.collectAsState()
@@ -111,8 +114,21 @@ fun SettingsScreen(
         SourceToggle("WIFI  •  WiFi BSSID + SSID", wifi) { settings.setWifiEnabled(it) }
         SourceToggle("DEFLOCK  •  Camera map (Overpass)", deflock) { settings.setDeflockEnabled(it) }
         SourceToggle("WAZE  •  Police reports", waze) { settings.setWazeEnabled(it) }
-        SourceToggle("AIRCRAFT  •  Police / surveillance planes", aircraft) { settings.setAircraftEnabled(it) }
+        SourceToggle("AIRCRAFT  •  Police planes + drones", aircraft) { settings.setAircraftEnabled(it) }
         SourceToggle("COMMERCIAL  •  Nest, Ring, Echo, glasses", mic) { settings.setMicEnabled(it) }
+        SourceToggle("HACKER  •  Flipper, spam floods, rogue APs", hacker) { settings.setHackerEnabled(it) }
+        SourceToggle("TRACKER  •  AirTags and tags away from owner", tracker) { settings.setTrackerEnabled(it) }
+        if (hacker) {
+            SourceToggle("Look for card skimmers", skimmer) { settings.setSkimmerScanEnabled(it) }
+            HelpText(
+                "Runs a Bluetooth Classic discovery every 3 minutes for the HC-05-type " +
+                    "modules gas-pump skimmers use, which BLE can't see. Unlike the rest " +
+                    "of the app it is not just listening: a module that answers gets a " +
+                    "name request, which shows it this phone's Bluetooth address. " +
+                    "Nothing is paired or connected. Off by default; takes effect on " +
+                    "the next Start."
+            )
+        }
         Spacer(Modifier.height(8.dp))
         if (isRunning) {
             Button(
@@ -132,7 +148,8 @@ fun SettingsScreen(
             }
         } else {
             Text(
-                "Source toggles take effect on the next Start; COMMERCIAL applies right away.",
+                "Source toggles take effect on the next Start; COMMERCIAL, HACKER, TRACKER " +
+                    "and drones apply right away.",
                 fontSize = 11.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

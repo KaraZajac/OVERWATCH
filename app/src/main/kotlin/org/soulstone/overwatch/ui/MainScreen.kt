@@ -4,6 +4,8 @@ import android.content.Intent
 import android.location.Location
 import android.net.Uri
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -241,7 +243,12 @@ fun MainScreen(
             sheetState = sheetState,
             containerColor = MaterialTheme.colorScheme.background
         ) {
-            Column(modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp)) {
+            // Eight sources no longer fit a small screen, so the sheet scrolls.
+            Column(
+                modifier = Modifier
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 24.dp, vertical = 8.dp)
+            ) {
                 Text(
                     text = "Detection sources",
                     color = MaterialTheme.colorScheme.onBackground,
@@ -482,7 +489,7 @@ private fun SourceLegend() {
         LegendDot(Color(DOT_SPEED_AMBER), "speed")
         LegendDot(Color(DOT_CAMERA_GRAY), "cam")
         LegendDot(Color(DOT_WAZE_BLUE), "police")
-        LegendDot(Color(DOT_AIRCRAFT_VIOLET), "air")
+        LegendDot(Color(DOT_AIRCRAFT_VIOLET), "air/drone")
     }
 }
 
@@ -607,6 +614,19 @@ private fun SourceRow(source: DetectionSource, events: List<DetectionEvent>) {
                     fontSize = 11.sp,
                     fontFamily = FontFamily.Monospace
                 )
+                // A source can be half up: AIRCRAFT's ADS-B feed can fail while
+                // drones' Remote ID still arrives by radio. Show what it has.
+                if (events.isNotEmpty()) {
+                    Spacer(Modifier.height(4.dp))
+                    events.take(3).forEach { e -> EventRow(e) }
+                    if (events.size > 3) {
+                        Text(
+                            text = "+${events.size - 3} more",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontSize = 11.sp
+                        )
+                    }
+                }
             } else if (events.isEmpty()) {
                 Spacer(Modifier.height(4.dp))
                 Text(

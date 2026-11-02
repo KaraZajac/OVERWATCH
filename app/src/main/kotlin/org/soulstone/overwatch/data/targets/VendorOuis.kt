@@ -1,14 +1,19 @@
 package org.soulstone.overwatch.data.targets
 
 /**
- * Enterprise / municipal surveillance-vendor OUI prefixes, shared by [BleOuis]
- * and [WifiOuis] (both merge [ALL] into their match sets).
+ * Enterprise / municipal surveillance-vendor address blocks, consulted by both the
+ * BLE and the WiFi scanner.
  *
- * All 19 verified against the IEEE registry (18 against the Wireshark manuf
- * snapshot of 2026-08-28; Flock Safety's, added in v0.5.19, against hwdata 0.411)
- * — every prefix is the vendor's own registration, so unlike the module-maker
+ * Every entry is the vendor's own IEEE registration, so unlike the module-maker
  * prefixes seen on Flock hardware a hit identifies the maker directly, and the
- * drill-down label can say so.
+ * drill-down label can say so. 19 were verified against the Wireshark manuf
+ * snapshot of 2026-08-28 (Flock Safety's, added in v0.5.19, against hwdata 0.411);
+ * the 18 added in v0.6.0 against the IEEE MA-L, MA-M and MA-S CSVs of 2026-11-01.
+ *
+ * **Block sizes.** An MA-L block is 24 bits ("xx:xx:xx"); MA-M is 28 bits and MA-S
+ * 36, written here with the extra nibble(s) after a colon ("58:e8:76:c",
+ * "70:b3:d5:52:1"). [lookup] tries the longest form first, so a small block inside
+ * a shared MA-L range names only its own holder.
  *
  * Radio reality (what can actually show up in a phone-side scan):
  *  - Flock Safety: its own registration. The Flock lists in [BleOuis] and
@@ -19,7 +24,20 @@ package org.soulstone.overwatch.data.targets
  *  - ShotSpotter: acoustic gunshot sensors; patents cite WiFi/BT/Zigbee/LPWAN
  *    backhaul. Police-exclusive product line.
  *  - WatchGuard Video (Motorola): V300/V700 body cams (BT 5.0 + WiFi) and 4RE
- *    in-car systems that run cruiser-local WiFi APs. Police-exclusive.
+ *    in-car systems that run cruiser-local WiFi APs. Police-exclusive. Not
+ *    WatchGuard Technologies, the firewall maker (00:01:21, 00:90:7f).
+ *  - Digital Ally, Utility Inc. (BodyWorn), Kustom Signals: in-car video, body cams
+ *    and police radar. Police-exclusive. Utility's 00:09:bc carries the BodyWorn
+ *    remotes that all-cameras-are-beacons' source captured (10 MACs, 2025-08).
+ *  - Applied Concepts (Stalker) and Decatur: police radar and lidar, but both also
+ *    sell sports radar guns, so they score like any vendor.
+ *  - Motorola Solutions: radios, Avigilon cameras, Vigilant ALPR. Its blocks show
+ *    up mostly on fixed building hardware (27 of 27 indoor hits in
+ *    all-cameras-are-beacons' logs), so they are not police-exclusive either.
+ *  - Federal Signal SSG (lightbars, sirens), Fusus (Axon's real-time-crime-center
+ *    camera hubs), Leonardo ELSAG / Selex ES, Neology and Genetec (ALPR makers):
+ *    registry entries with no field sighting yet, listed so a radio that uses one
+ *    is named.
  *  - Verkada: AD33/AD34 access readers advertise BLE for app unlock; SV-series
  *    sensors also carry BLE. Cameras are PoE.
  *  - Avigilon Alta (Openpath): access readers use BLE + WiFi (+ UWB) for
@@ -33,7 +51,7 @@ package org.soulstone.overwatch.data.targets
  */
 object VendorOuis {
 
-    /** OUI prefix → short human label shown in the drill-down. */
+    /** Block → short human label shown in the drill-down. */
     val LABELS: Map<String, String> = mapOf(
         "d4:11:d6" to "ShotSpotter sensor",       // ShotSpotter, Inc. (SoundThinking)
         "00:1d:96" to "WatchGuard police video",  // WatchGuard Video (Motorola)
@@ -53,29 +71,61 @@ object VendorOuis {
         "00:13:e2" to "GeoVision camera",         // GeoVision Inc.
         "00:03:c5" to "Mobotix camera",           // Mobotix AG
         "00:1c:27" to "Sunell camera",            // Sunell Electronics Co.
-        "b4:1e:52" to "Flock Safety device"       // Flock Safety
+        "b4:1e:52" to "Flock Safety device",      // Flock Safety
+        // v0.6.0 additions (IEEE CSVs, 2026-11-01)
+        "00:23:bd" to "Digital Ally police video",     // Digital Ally, Inc.
+        "00:09:bc" to "Utility BodyWorn police video", // Utility, Inc
+        "00:16:ed" to "Utility BodyWorn police video", // Utility, Inc
+        "58:e8:76:c" to "Kustom Signals police radar", // KUSTOM SIGNALS INC (MA-M)
+        "1c:82:59:d" to "Stalker radar",               // Applied Concepts, Inc. (MA-M)
+        "6c:18:11" to "Decatur radar",                 // Decatur Electronics
+        "00:04:7d" to "Motorola Solutions device",     // Motorola Solutions Inc.
+        "00:18:85" to "Motorola Solutions device",     // Motorola Solutions Inc.
+        "00:1f:92" to "Motorola Solutions device",     // Motorola Solutions Inc.
+        "4c:cc:34" to "Motorola Solutions device",     // Motorola Solutions Inc.
+        "10:74:6f" to "Motorola Solutions device",     // Motorola Solutions Malaysia
+        "9c:86:2b" to "Motorola Solutions device",     // Motorola Solutions Malaysia
+        "b8:e2:8c" to "Motorola Solutions device",     // Motorola Solutions Malaysia
+        "08:3c:03:0" to "Federal Signal emergency-vehicle device", // Federal Signal SSG (MA-M)
+        "7c:83:34:4" to "Fusus police camera hub",     // Fusus (MA-M)
+        "84:b3:86:5" to "Fusus police camera hub",     // Fusus (MA-M)
+        "70:b3:d5:52:1" to "ELSAG / Selex ALPR device", // Selex ES Inc. (MA-S)
+        "70:b3:d5:f5:e" to "ELSAG / Selex ALPR device", // Selex ES Inc. (MA-S)
+        "70:b3:d5:1c:5" to "ELSAG / Selex ALPR device", // ELSAG (MA-S)
+        "00:17:3d" to "Neology ALPR / tolling device", // Neology
+        "00:bf:15" to "Genetec ALPR / video device",   // Genetec Inc.
+        "0c:bf:15" to "Genetec ALPR / video device"    // Genetec Inc.
     )
 
     /** Vendors whose product line is exclusively police equipment — an
      *  over-the-air hit is ORANGE-grade on its own (same rationale as the Axon
      *  OUI): these prefixes appear on nothing consumer. */
     val POLICE_EXCLUSIVE: Set<String> = setOf(
-        "d4:11:d6",  // ShotSpotter
-        "00:1d:96"   // WatchGuard Video
+        "d4:11:d6",   // ShotSpotter
+        "00:1d:96",   // WatchGuard Video
+        "00:23:bd",   // Digital Ally
+        "00:09:bc",   // Utility (BodyWorn)
+        "00:16:ed",   // Utility (BodyWorn)
+        "58:e8:76:c"  // Kustom Signals
     )
 
-    val ALL: Set<String> = LABELS.keys
+    private val byHex: Map<String, String> = LABELS.mapKeys { it.key.replace(":", "") }
+    private val policeHex: Set<String> = POLICE_EXCLUSIVE.map { it.replace(":", "") }.toSet()
 
-    /** Vendor label for a MAC/BSSID, or null if its OUI isn't in this table. */
-    fun label(mac: String): String? {
-        val lower = mac.lowercase()
-        if (lower.length < 8) return null
-        return LABELS[lower.substring(0, 8)]
+    /** The registered block a MAC/BSSID falls in, as written in [LABELS], or null. */
+    private fun block(mac: String): String? {
+        val hex = mac.lowercase().replace(":", "")
+        if (hex.length < 6) return null
+        for (len in intArrayOf(9, 7, 6)) {
+            if (hex.length >= len && byHex.containsKey(hex.substring(0, len))) return hex.substring(0, len)
+        }
+        return null
     }
 
-    fun isPoliceExclusive(mac: String): Boolean {
-        val lower = mac.lowercase()
-        if (lower.length < 8) return false
-        return lower.substring(0, 8) in POLICE_EXCLUSIVE
-    }
+    /** Vendor label for a MAC/BSSID, or null if it isn't in one of these blocks. */
+    fun label(mac: String): String? = block(mac)?.let { byHex[it] }
+
+    fun matches(mac: String): Boolean = block(mac) != null
+
+    fun isPoliceExclusive(mac: String): Boolean = block(mac)?.let { it in policeHex } == true
 }

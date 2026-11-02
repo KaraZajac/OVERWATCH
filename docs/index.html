@@ -4,9 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>OVERWATCH — surveillance detection for Android</title>
-<meta name="description" content="A native Android app that flags nearby Flock Safety ALPRs, Axon body cameras, police presence and surveillance aircraft. It watches BLE/WiFi radio scans, the DeFlock camera map, live Waze police reports and ADS-B, and shows the strongest signal as a green→red threat tier. Never connects to, pairs with, or jams anything it detects.">
+<meta name="description" content="A native Android app that flags nearby Flock Safety ALPRs, Axon body cameras, police presence, surveillance aircraft and drones, attack tools and item trackers. It watches BLE/WiFi radio scans, drone Remote ID, the DeFlock camera map, live Waze police reports and ADS-B, and shows the strongest signal as a green→red threat tier. Never connects to, pairs with, or jams anything it detects.">
 <meta property="og:title" content="OVERWATCH — surveillance detection">
-<meta property="og:description" content="Android app that flags nearby Flock ALPRs, Axon body cams, police and surveillance aircraft from BLE/WiFi scans, the DeFlock map, Waze police reports and ADS-B. It never connects to, pairs with, or jams anything it detects.">
+<meta property="og:description" content="Android app that flags nearby Flock ALPRs, Axon body cams, police aircraft and drones, attack tools and item trackers from BLE/WiFi scans, drone Remote ID, the DeFlock map, Waze police reports and ADS-B. It never connects to, pairs with, or jams anything it detects.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://overwatch.netslum.io/">
 <meta property="og:image" content="https://overwatch.netslum.io/og.png">
@@ -53,7 +53,7 @@
   <div class="container hero-inner">
     <div class="hero-eyebrow">
       <span class="dot dot-pulse"></span>
-      v0.5.20 · Android · defensive
+      v0.6.0 · Android · defensive
     </div>
     <h1 class="hero-title">
       <span class="display-wordmark">OVERWATCH</span>
@@ -72,10 +72,10 @@
     </div>
 
     <div class="stats-row" id="stats-row">
-      <div class="stat-chip"><span class="num" data-target="6">0</span><span>sources</span></div>
+      <div class="stat-chip"><span class="num" data-target="8">0</span><span>sources</span></div>
       <div class="stat-chip stat-vfy"><span class="num" data-target="4">0</span><span>threat tiers</span></div>
       <div class="stat-chip"><span class="num" data-target="0">0</span><span>devices paired</span></div>
-      <div class="stat-chip"><span class="num" data-target="34">0</span><span>releases</span></div>
+      <div class="stat-chip"><span class="num" data-target="35">0</span><span>releases</span></div>
     </div>
 
     <div class="cta-row">
@@ -103,6 +103,7 @@
         <li>DeFlock ALPR map</li>
         <li>Waze police alerts</li>
         <li>ADS-B aircraft</li>
+        <li>Drone Remote ID</li>
         <li>OpenStreetMap · Overpass</li>
       </ul>
     </div>
@@ -150,7 +151,7 @@
             <span class="legend-dot" style="background:#FF9800"></span> speed cameras amber ·
             <span class="legend-dot" style="background:#9E9E9E"></span> other cameras gray ·
             <span class="legend-dot blue"></span> Waze police blue ·
-            <span class="legend-dot" style="background:#7C4DFF"></span> aircraft violet ·
+            <span class="legend-dot" style="background:#7C4DFF"></span> aircraft and drones violet ·
             user position as a ⌖ crosshair.
             Rows with a location carry a pin that opens it in Google Maps.</p>
           </div>
@@ -183,7 +184,7 @@
   <div class="container">
     <div class="section-head">
       <span class="section-tag">detection sources</span>
-      <h2>Six sensors, one score.</h2>
+      <h2>Eight sensors, one score.</h2>
       <p class="lead">Every observation is scored 0–100 by the confidence
       engine; the on-screen tier is the <strong>max live score across all
       sources</strong>. Sources are not added together: a BLE hit and a
@@ -195,15 +196,18 @@
         <div class="bento-icon">📶</div>
         <h3>BLE — Bluetooth-LE</h3>
         <p>
-          MAC OUI prefixes (Axon's own, and the radio-module makers' prefixes
-          seen on Flock Penguin / Raven hardware), XUNTONG mfg id
-          <code>0x09C8</code>, "TN" serial pattern, Raven service UUIDs, and
-          device-name patterns — plus 19 IEEE-verified vendor OUIs: Flock
-          Safety's own, ShotSpotter,
-          WatchGuard, Verkada, Avigilon Alta readers, Axis body cams, FLIR and
-          more, with police-exclusive vendors scoring ORANGE on sight. Iterates
-          <em>every</em> manufacturer-data entry per advert — not just the
-          first — so it doesn't miss a buried match.
+          <strong>Axon body cams by the tag they broadcast</strong>
+          (<code>AXJANUSBWCDEVICE</code>, from public field captures), which
+          works even when the camera randomises its address, plus Axon's own
+          Bluetooth IDs, its two MAC blocks and Utility's BodyWorn remotes.
+          Raven service UUIDs, the Penguin battery pack's maker id
+          <code>0x09C8</code> with its "TN" serial, Flock name patterns, and 37
+          IEEE-verified vendor blocks: Flock Safety's own, ShotSpotter,
+          WatchGuard, Digital Ally, Kustom Signals radar, Motorola Solutions,
+          ELSAG and Genetec ALPR, Verkada, Axis body cams and more, with
+          police-exclusive vendors scoring ORANGE on sight. The radio-module
+          makers' prefixes seen on Flock hardware count only alongside another
+          signal, since those chips are in everything.
         </p>
       </article>
 
@@ -220,7 +224,10 @@
           and scored by distance, altitude and <em>orbit behaviour</em> — because
           surveillance aircraft circle, and airliners don't. An unlisted aircraft
           loitering low and slow overhead still registers. The feeds are told
-          only the centre of your 1 km grid square.
+          only the centre of your 1 km grid square. <strong>Drones</strong> are
+          heard directly: their FAA Remote ID broadcast (Bluetooth and Wi-Fi
+          beacon) gives the serial, which names the maker and often the model —
+          BRINC, Skydio X10, DJI dock drones — and the drone's position.
         </p>
       </article>
 
@@ -228,12 +235,12 @@
         <div class="bento-icon">📡</div>
         <h3>WiFi</h3>
         <p>
-          BSSID prefixes seen on Flock hardware (flock-you's 31, all
-          radio-module makers' rather than Flock's own), the
-          same 19 surveillance-vendor OUIs (Flock Safety's own, WatchGuard in-car
-          APs, Alta readers,
-          WiFi cameras), and <code>Flock-XXXX</code> SSID patterns, polled every
-          35 s — just under the Android 9+ scan throttle.
+          Flock's hotspot form, <code>Flock-</code> plus the BSSID's last six
+          hex digits (all 803 in flock-you's WiGLE data), Flock's
+          "Flock Camera" hotspot, the same 37 surveillance-vendor blocks and
+          Axon's, polled every 35 s — just under the Android 9+ scan throttle.
+          Flock turned the hotspot off around December 2025, so it mostly
+          finds older cameras.
         </p>
       </article>
 
@@ -277,14 +284,40 @@
         <div class="bento-icon">🏠</div>
         <h3>Commercial</h3>
         <p>
-          Nearby consumer smart-home gear (Nest, Ring, Echo, Sonos, hidden cams)
-          and <strong>camera-bearing smart glasses</strong> — Meta Ray-Ban /
-          Oakley, Snap Spectacles, Vuzix, and HeyCyan-SDK frames like the Nilox
-          Smart AI Glasses — as a secondary situational signal riding the BLE +
-          WiFi scans. Glasses identifiers credit
+          Nearby consumer smart-home gear (Nest, Ring, Blink, Echo, Sonos, hidden
+          cams) and <strong>camera-bearing smart glasses</strong> — Meta Ray-Ban /
+          Oakley (by their own Bluetooth ID), Snap Spectacles, Vuzix, and
+          HeyCyan-SDK frames like the Nilox Smart AI Glasses — as a secondary
+          situational signal riding the BLE + WiFi scans. Glasses identifiers credit
           <a href="https://github.com/yjeanrenaud/yj_nearbyglasses">Nearby
           Glasses</a> by Yves Jeanrenaud. Score-capped at ORANGE so a cluster of
           doorbells never reads as ALPR-grade certainty.
+        </p>
+      </article>
+
+      <article class="bento-card">
+        <div class="bento-icon">🛠️</div>
+        <h3>Hacker</h3>
+        <p>
+          Gear that transmits <em>at</em> radios: Flipper Zero by its own
+          Bluetooth service, nyanBOX, Bluetooth pop-up spam floods and the iOS
+          crash advert, Wi-Fi beacon spam, default hotspots of the WiFi
+          Pineapple, ESP deauther, Bruce, GhostESP and O.MG, rogue-AP
+          frameworks, and AxonCadabra's fake Axon trigger. Optional card-skimmer
+          check (Classic Bluetooth, off by default). Every identifier comes from
+          the tool's own source. Capped at ORANGE.
+        </p>
+      </article>
+
+      <article class="bento-card">
+        <div class="bento-icon">🏷️</div>
+        <h3>Tracker</h3>
+        <p>
+          AirTags, Find My and Find Hub tags, Samsung SmartTags, Chipolo and
+          DULT tags that say they are <strong>away from their owner</strong>,
+          following AirGuard's rules, and Tile or Pebblebee tags, which don't
+          say, once they have stayed near you for ten minutes. Somebody's keys
+          beside their phone never count. Capped at ORANGE.
         </p>
       </article>
     </div>
@@ -460,7 +493,7 @@
           <ul>
             <li>Grab the latest debug-signed APK from
               <a href="https://github.com/KaraZajac/OVERWATCH/releases/latest">Releases</a>
-              (currently <strong>v0.5.20</strong>).</li>
+              (currently <strong>v0.6.0</strong>).</li>
           </ul>
         </div>
         <div class="tl-col tl-active">
@@ -532,7 +565,7 @@
       with, jams, or interferes with any device or network it detects.
     </p>
     <p class="footer-meta">
-      v0.5.20 · <a href="https://github.com/KaraZajac/OVERWATCH">github.com/KaraZajac/OVERWATCH</a> · <a href="https://github.com/KaraZajac/OVERWATCH/blob/main/LICENSE">BSD-3-Clause</a>
+      v0.6.0 · <a href="https://github.com/KaraZajac/OVERWATCH">github.com/KaraZajac/OVERWATCH</a> · <a href="https://github.com/KaraZajac/OVERWATCH/blob/main/LICENSE">BSD-3-Clause</a>
     </p>
     <div class="onion-line">
       <span class="onion-label">Also on Tor</span>

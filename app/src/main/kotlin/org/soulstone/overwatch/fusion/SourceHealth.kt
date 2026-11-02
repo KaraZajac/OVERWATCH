@@ -23,39 +23,25 @@ object SourceHealth {
         val message: String? = null
     )
 
-    private val _ble = MutableStateFlow(Health())
-    private val _wifi = MutableStateFlow(Health())
-    private val _deflock = MutableStateFlow(Health())
-    private val _waze = MutableStateFlow(Health())
-    private val _aircraft = MutableStateFlow(Health())
-    private val _mic = MutableStateFlow(Health())
+    private val flows: Map<DetectionSource, MutableStateFlow<Health>> =
+        DetectionSource.values().associateWith { MutableStateFlow(Health()) }
 
-    val ble: StateFlow<Health> = _ble.asStateFlow()
-    val wifi: StateFlow<Health> = _wifi.asStateFlow()
-    val deflock: StateFlow<Health> = _deflock.asStateFlow()
-    val waze: StateFlow<Health> = _waze.asStateFlow()
-    val aircraft: StateFlow<Health> = _aircraft.asStateFlow()
-    val mic: StateFlow<Health> = _mic.asStateFlow()
+    // One read-only view per source, so the UI gets the same instance on every
+    // recomposition (a fresh wrapper would restart collectAsState each time).
+    private val views: Map<DetectionSource, StateFlow<Health>> =
+        flows.mapValues { it.value.asStateFlow() }
 
-    fun flowFor(source: DetectionSource): StateFlow<Health> = when (source) {
-        DetectionSource.BLE -> ble
-        DetectionSource.WIFI -> wifi
-        DetectionSource.DEFLOCK -> deflock
-        DetectionSource.WAZE -> waze
-        DetectionSource.AIRCRAFT -> aircraft
-        DetectionSource.MIC -> mic
-    }
+    val ble: StateFlow<Health> = flowFor(DetectionSource.BLE)
+    val wifi: StateFlow<Health> = flowFor(DetectionSource.WIFI)
+    val deflock: StateFlow<Health> = flowFor(DetectionSource.DEFLOCK)
+    val waze: StateFlow<Health> = flowFor(DetectionSource.WAZE)
+    val aircraft: StateFlow<Health> = flowFor(DetectionSource.AIRCRAFT)
+    val mic: StateFlow<Health> = flowFor(DetectionSource.MIC)
+
+    fun flowFor(source: DetectionSource): StateFlow<Health> = views.getValue(source)
 
     fun record(source: DetectionSource, ok: Boolean, message: String? = null) {
-        val target = when (source) {
-            DetectionSource.BLE -> _ble
-            DetectionSource.WIFI -> _wifi
-            DetectionSource.DEFLOCK -> _deflock
-            DetectionSource.WAZE -> _waze
-            DetectionSource.AIRCRAFT -> _aircraft
-            DetectionSource.MIC -> _mic
-        }
-        target.value = Health(
+        flows.getValue(source).value = Health(
             status = if (ok) Status.OK else Status.FAILED,
             lastFetchMs = System.currentTimeMillis(),
             message = message
@@ -63,11 +49,6 @@ object SourceHealth {
     }
 
     fun reset() {
-        _ble.value = Health()
-        _wifi.value = Health()
-        _deflock.value = Health()
-        _waze.value = Health()
-        _aircraft.value = Health()
-        _mic.value = Health()
+        flows.values.forEach { it.value = Health() }
     }
 }

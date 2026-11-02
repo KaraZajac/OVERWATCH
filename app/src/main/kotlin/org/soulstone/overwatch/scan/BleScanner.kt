@@ -18,16 +18,23 @@ import android.os.ParcelUuid
 import android.os.Build
 import android.util.Log
 import androidx.core.content.ContextCompat
+import org.soulstone.overwatch.data.targets.AxonSignatures
 import org.soulstone.overwatch.data.targets.BleOuis
+import org.soulstone.overwatch.data.targets.HackerTargets
 import org.soulstone.overwatch.data.targets.MicTargets
 import org.soulstone.overwatch.data.targets.Patterns
 import org.soulstone.overwatch.data.targets.RavenUuids
+import org.soulstone.overwatch.data.targets.RemoteId
+import org.soulstone.overwatch.data.targets.TrackerTargets
+import org.soulstone.overwatch.fusion.BleSpamDetector
 import org.soulstone.overwatch.fusion.ConfidenceEngine
 import org.soulstone.overwatch.fusion.DetectionEvent
 import org.soulstone.overwatch.fusion.DetectionSource
 import org.soulstone.overwatch.fusion.DetectionStore
+import org.soulstone.overwatch.fusion.DroneTracker
 import org.soulstone.overwatch.fusion.RssiTracker
 import org.soulstone.overwatch.fusion.SourceHealth
+import org.soulstone.overwatch.fusion.TrackerDwell
 
 /**
  * BLE scanner — ported from AxonCadabra (scan side only; no advertise/fuzz).
@@ -35,7 +42,10 @@ import org.soulstone.overwatch.fusion.SourceHealth
  * Strategy:
  *  - Run a low-latency unfiltered scan (cheap on modern Android).
  *  - In the callback, first reject anything that doesn't look like a candidate
- *    (no OUI hit, no name hit, no Raven UUID, no XUNTONG mfg) — saves CPU.
+ *    (no OUI hit, no name hit, no Raven UUID, no XUNTONG mfg, no Axon tag) — saves CPU.
+ *  - The same advert is also checked, when those sources are on, for COMMERCIAL
+ *    gear, HACKER gear (Flipper Zero, nyanBOX, AxonCadabra, pop-up spam), TRACKER
+ *    tags away from their owner, and drone Remote ID (filed under AIRCRAFT).
  *  - For candidates, build a [ConfidenceEngine.BleObservation] and score it.
  *  - Push to [DetectionStore] if score crosses ALARM_THRESHOLD (40).
  *
@@ -52,9 +62,10 @@ import org.soulstone.overwatch.fusion.SourceHealth
  *    express an exact address, an exact name, a service UUID or manufacturer
  *    data; there is no way to express an **OUI prefix**, so MAC-prefix and
  *    name-substring matching genuinely cannot run with the screen off. What
- *    survives is what can be named precisely: Raven's service UUIDs and the
- *    XUNTONG manufacturer id, plus the mic-target company ids when that source
- *    is on.
+ *    survives is what can be named precisely: Axon's body-cam tag, service UUID
+ *    and company id, drone Remote ID, Raven's service UUIDs and the XUNTONG
+ *    manufacturer id, plus the mic-target UUIDs and company ids when that source
+ *    is on. HACKER and TRACKER matching waits for the screen.
  *
  * The gap is real and deliberate rather than hidden — [SourceHealth] says so on
  * the BLE row while the screen is off. Flock ALPR cameras stay covered in that
@@ -67,15 +78,14 @@ class BleScanner(
     private val store: DetectionStore,
     private val rssi: RssiTracker = RssiTracker(),
     /** When true, also evaluate each scan against MicTargets and submit MIC events. */
-    private val micEnabled: () -> Boolean = { false }
+    private val micEnabled: () -> Boolean = { false },
+    /** When true, also look for attack and pentest gear (HACKER events). */
+    private val hackerEnabled: () -> Boolean = { false },
+    /** When true, also look for item trackers away from their owner (TRACKER events). */
+    private val trackerEnabled: () -> Boolean = { false },
+    /** When true, also decode drone Remote ID (AIRCRAFT events). */
+    private val dronesEnabled: () -> Boolean = { false }
 ) {
-
-    companion object {
-        private const val TAG = "BleScanner"
-        private const val ALARM_THRESHOLD = 40
-        /** Conservative ceiling on hardware scan-filter slots. */
-        private const val MAX_SCAN_FILTERS = 16
-    }
 
     private val bluetoothAdapter: BluetoothAdapter? by lazy {
         val mgr = context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
@@ -88,6 +98,10 @@ class BleScanner(
     /** True while the current scan is the filtered, screen-off variant. */
     @Volatile private var filteredMode = false
 
+    private val spam = BleSpamDetector()
+    private val drones = DroneTracker()
+    private val trackerDwell = TrackerDwell()
+
     /**
      * Filters that keep results flowing with the screen off. Only signatures a
      * ScanFilter can actually express — see the class KDoc for what this
@@ -95,22 +109,46 @@ class BleScanner(
      */
     private fun screenOffFilters(): List<ScanFilter> {
         val out = ArrayList<ScanFilter>()
-        // Surveillance signatures first: if the list has to be trimmed below,
-        // consumer gear is what should fall off the end, not a Raven detector.
+        // Ordered by what most deserves a pocket alert, because the list is trimmed
+        // from the end: Axon body cams and police drones first, then Flock's Penguin
+        // pack and Raven, then consumer gear.
+        // An empty data + empty mask matches any payload for that UUID / company.
+        out.add(
+            ScanFilter.Builder()
+                .setServiceData(ParcelUuid(AxonSignatures.BWC_TAG_UUID), ByteArray(0)).build()
+        )
+        out.add(
+            ScanFilter.Builder()
+                .setServiceData(ParcelUuid(AxonSignatures.SVC_FE6B), ByteArray(0)).build()
+        )
+        out.add(
+            ScanFilter.Builder()
+                .setManufacturerData(AxonSignatures.TASER_COMPANY_ID, ByteArray(0), ByteArray(0)).build()
+        )
+        if (dronesEnabled()) {
+            out.add(
+                ScanFilter.Builder()
+                    .setServiceData(ParcelUuid(RemoteId.BLE_SERVICE_UUID), byteArrayOf(RemoteId.APP_CODE.toByte()))
+                    .build()
+            )
+        }
         out.add(
             ScanFilter.Builder()
                 .setManufacturerData(
                     org.soulstone.overwatch.data.targets.Manufacturers.XUNTONG_COMPANY_ID,
-                    // Empty data + empty mask matches any payload for that id.
                     ByteArray(0), ByteArray(0)
                 ).build()
         )
-        for (uuid in RavenUuids.ALL) {
+        // Raven: its five own UUIDs, plus 0x1819 for FW 1.1.x. A filter only decides
+        // delivery and FW 1.1.x sends 0x180A + 0x1809 + 0x1819 together, so one of
+        // the three wakes the scan for the full set the scorer requires.
+        for (uuid in RavenUuids.SPECIFIC) {
             out.add(ScanFilter.Builder().setServiceUuid(ParcelUuid(uuid)).build())
         }
+        out.add(ScanFilter.Builder().setServiceUuid(ParcelUuid(RavenUuids.FW_1_1_FILTER)).build())
         if (micEnabled()) {
-            // Precise service UUIDs first (HeyCyan glasses, Echo AVS): they are
-            // exact signatures, so they outrank the broad company ids that
+            // Precise service UUIDs first (Ray-Ban Meta, HeyCyan glasses, Echo AVS):
+            // they are exact signatures, so they outrank the broad company ids that
             // follow and are what should survive if the list is trimmed.
             for (uuid in MicTargets.SERVICE_UUIDS) {
                 out.add(ScanFilter.Builder().setServiceUuid(ParcelUuid(uuid)).build())
@@ -162,16 +200,31 @@ class BleScanner(
             } else {
                 Log.i(TAG, "screen on — unfiltered scan")
                 SourceHealth.record(DetectionSource.BLE, ok = true)
+                // Addresses rotated while the screen was off all look new now.
+                spam.restartWarmUp()
             }
         } catch (e: SecurityException) {
             Log.e(TAG, "SecurityException switching scan mode", e)
         }
     }
 
-    private val scanSettings: ScanSettings = ScanSettings.Builder()
-        .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
-        .setCallbackType(ScanSettings.CALLBACK_TYPE_ALL_MATCHES)
-        .build()
+    /**
+     * Low-latency, every match. Where the controller can, the scan also reports
+     * extended advertisements on every PHY, Coded (long range) included: drones'
+     * Bluetooth 5 Remote ID is sent that way, as OpenDroneID's receiver scans for it.
+     * Legacy advertisements are still delivered alongside.
+     */
+    private val scanSettings: ScanSettings by lazy {
+        val b = ScanSettings.Builder()
+            .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+            .setCallbackType(ScanSettings.CALLBACK_TYPE_ALL_MATCHES)
+        val adapter = bluetoothAdapter
+        if (adapter != null && adapter.isLeExtendedAdvertisingSupported) {
+            b.setLegacy(false)
+            if (adapter.isLeCodedPhySupported) b.setPhy(ScanSettings.PHY_LE_ALL_SUPPORTED)
+        }
+        b.build()
+    }
 
     /** True if the device supports BLE and the adapter is on. */
     val isAvailable: Boolean
@@ -224,6 +277,7 @@ class BleScanner(
                 scanCallback
             )
             running = true
+            spam.restartWarmUp()
             registerScreenReceiver()
             SourceHealth.record(
                 DetectionSource.BLE, ok = true,
@@ -251,6 +305,8 @@ class BleScanner(
         running = false
         filteredMode = false
         unregisterScreenReceiver()
+        drones.clear()
+        trackerDwell.clear()
         Log.i(TAG, "BLE scan stopped")
     }
 
@@ -304,18 +360,20 @@ class BleScanner(
         val name = try { device.name } catch (e: SecurityException) { null }
         val record = result.scanRecord
 
+        val serviceUuidList: List<java.util.UUID>? = record?.serviceUuids?.map { it.uuid }
+        val serviceData: Map<java.util.UUID, ByteArray>? =
+            record?.serviceData?.entries?.associate { it.key.uuid to it.value }
         // A service UUID can ride in the advertised service list OR as a
         // service-data key — HeyCyan-SDK glasses (Nilox etc.) show up both
         // ways (per Nearby Glasses' scanner), so merge the two before matching.
-        val advertisedUuids: List<java.util.UUID>? = run {
-            val fromList = record?.serviceUuids?.map { it.uuid }.orEmpty()
-            val fromData = record?.serviceData?.keys?.map { it.uuid }.orEmpty()
-            (fromList + fromData).distinct().ifEmpty { null }
-        }
+        val advertisedUuids: List<java.util.UUID>? =
+            (serviceUuidList.orEmpty() + serviceData?.keys.orEmpty()).distinct().ifEmpty { null }
         val mfgSpecific = record?.manufacturerSpecificData
-        // Iterate ALL manufacturer-data entries; some devices advertise several,
-        // and only one company id rides in the observation. Rank them: XUNTONG
-        // (Flock/Raven) first, then any COMMERCIAL company id, then whichever came
+        val manufacturerData: Map<Int, ByteArray>? = mfgSpecific?.let { arr ->
+            if (arr.size() == 0) null else (0 until arr.size()).associate { arr.keyAt(it) to arr.valueAt(it) }
+        }
+        // Only one company id rides in the observation. Rank them: XUNTONG (the
+        // Penguin pack) first, then any COMMERCIAL company id, then whichever came
         // first, so we still surface *some* mfg signal. Without the middle rank a
         // glasses or Echo id behind a lower-numbered entry was never seen
         // (SparseArray iterates in key order).
@@ -338,19 +396,29 @@ class BleScanner(
                 if (rank == 2) break
             }
         }
+        val raw = record?.bytes
+
+        // AxonCadabra replays a captured Axon trigger, from 00:25:DF on the Flipper
+        // ports. That is a spoof to report, never an Axon device to alarm on.
+        val axonSpoof = HackerTargets.isAxonCadabra(serviceData)
 
         // Cheap pre-filter — drop devices that have zero target signals.
-        val isSurveillance = BleOuis.matches(mac) ||
-            Patterns.bleNameMatch(name) ||
-            Patterns.isPenguinNumeric(name) ||
-            RavenUuids.countMatches(advertisedUuids) > 0 ||
-            companyId == org.soulstone.overwatch.data.targets.Manufacturers.XUNTONG_COMPANY_ID
+        val isSurveillance = !axonSpoof && (
+            BleOuis.matches(mac) ||
+                Patterns.bleNameMatch(name) ||
+                Patterns.isPenguinNumeric(name) ||
+                RavenUuids.countMatches(advertisedUuids) > 0 ||
+                companyId == org.soulstone.overwatch.data.targets.Manufacturers.XUNTONG_COMPANY_ID ||
+                AxonSignatures.match(raw, name, serviceUuidList, serviceData, manufacturerData) != null
+            )
         val isMic = micEnabled() &&
             MicTargets.couldBeMicBle(mac, name, advertisedUuids, companyId)
-        if (!isSurveillance && !isMic) return
 
-        rssi.update(mac, result.rssi)
-        val stationary = rssi.isStationary(mac)
+        var tracked = false
+        fun stationary(): Boolean {
+            if (!tracked) { rssi.update(mac, result.rssi); tracked = true }
+            return rssi.isStationary(mac)
+        }
 
         if (isSurveillance) {
             val obs = ConfidenceEngine.BleObservation(
@@ -360,7 +428,11 @@ class BleScanner(
                 advertisedUuids = advertisedUuids,
                 manufacturerCompanyId = companyId,
                 manufacturerPayload = payload,
-                isStationary = stationary
+                isStationary = stationary(),
+                serviceUuidList = serviceUuidList,
+                serviceData = serviceData,
+                manufacturerData = manufacturerData,
+                rawBytes = raw
             )
             val scored = ConfidenceEngine.scoreBle(obs)
             if (scored.score >= ALARM_THRESHOLD) {
@@ -383,7 +455,7 @@ class BleScanner(
                 deviceName = name,
                 advertisedUuids = advertisedUuids,
                 manufacturerCompanyId = companyId,
-                isStationary = stationary
+                isStationary = stationary()
             )
             val scored = ConfidenceEngine.scoreMicBle(obs)
             if (scored.score >= ALARM_THRESHOLD) {
@@ -400,6 +472,148 @@ class BleScanner(
                     )
                 )
             }
+        }
+        if (hackerEnabled()) {
+            checkHacker(mac, name, result.rssi, advertisedUuids, serviceData, manufacturerData, axonSpoof)
+        }
+        if (trackerEnabled()) {
+            checkTracker(mac, result.rssi, serviceUuidList, serviceData, manufacturerData)
+        }
+        if (dronesEnabled()) {
+            checkDrone(mac, result.rssi, serviceData)
+        }
+    }
+
+    /** Flipper Zero, nyanBOX, AxonCadabra and BLE pop-up spam. */
+    private fun checkHacker(
+        mac: String,
+        name: String?,
+        rssi: Int,
+        uuids: List<java.util.UUID>?,
+        serviceData: Map<java.util.UUID, ByteArray>?,
+        manufacturerData: Map<Int, ByteArray>?,
+        axonSpoof: Boolean
+    ) {
+        val hit: Triple<String, String, Int>? = when {
+            axonSpoof -> Triple(
+                "AxonCadabra — spoofed Axon Signal trigger ($mac)", "axoncadabra",
+                ConfidenceEngine.scoreHacker(ConfidenceEngine.W_HACK_AXONCADABRA, 0, rssi)
+            )
+            HackerTargets.isFlipperHid(mac, name, uuids) -> Triple(
+                "Flipper Zero in BLE remote / BadUSB mode — $name ($mac)", "flipper_hid",
+                ConfidenceEngine.scoreHacker(ConfidenceEngine.W_HACK_FLIPPER_HID, 0, rssi)
+            )
+            HackerTargets.isFlipperUuid(uuids) -> {
+                var extra = 0
+                val methods = StringBuilder("flipper_uuid")
+                if (HackerTargets.isFlipperName(name)) {
+                    extra += ConfidenceEngine.B_HACK_FLIPPER_NAME; methods.append(" flipper_name")
+                }
+                if (HackerTargets.isFlipperAddress(mac)) {
+                    extra += ConfidenceEngine.B_HACK_FLIPPER_ADDR; methods.append(" flipper_addr")
+                }
+                val who = if (!name.isNullOrBlank()) " — $name" else ""
+                Triple(
+                    "Flipper Zero$who ($mac)", methods.toString(),
+                    ConfidenceEngine.scoreHacker(ConfidenceEngine.W_HACK_FLIPPER, extra, rssi)
+                )
+            }
+            HackerTargets.isNyanBox(name, uuids) -> Triple(
+                "nyanBOX${if (!name.isNullOrBlank()) " — $name" else ""} ($mac)", "nyanbox",
+                ConfidenceEngine.scoreHacker(ConfidenceEngine.W_HACK_NYANBOX, 0, rssi)
+            )
+            else -> null
+        }
+        if (hit != null) {
+            submitHacker("hack:$mac", hit.first, hit.second, hit.third, rssi)
+        }
+        val apple = manufacturerData?.get(TrackerTargets.APPLE_COMPANY_ID)
+        spam.observe(mac, apple, manufacturerData, serviceData)?.let { f ->
+            submitHacker(f.key, f.label, f.method, ConfidenceEngine.W_HACK_BLE_SPAM, null)
+        }
+    }
+
+    private fun submitHacker(key: String, label: String, methods: String, score: Int, rssi: Int?) {
+        if (score < ALARM_THRESHOLD) return
+        store.submit(
+            DetectionEvent(
+                source = DetectionSource.HACKER,
+                key = key,
+                label = label,
+                score = score,
+                matchedMethods = methods,
+                rssi = rssi
+            )
+        )
+    }
+
+    /** Item trackers that say they are away from their owner, or that stay. */
+    private fun checkTracker(
+        mac: String,
+        rssi: Int,
+        serviceUuidList: List<java.util.UUID>?,
+        serviceData: Map<java.util.UUID, ByteArray>?,
+        manufacturerData: Map<Int, ByteArray>?
+    ) {
+        val m = TrackerTargets.classify(mac, serviceUuidList, serviceData, manufacturerData) ?: return
+        val dwellMs = trackerDwell.seen(mac)
+        val scored = ConfidenceEngine.scoreTracker(m.separated, dwellMs)
+        if (scored.score < ALARM_THRESHOLD) return
+        val minutes = dwellMs / 60_000L
+        val state = when {
+            m.separated == true && minutes >= 10 -> "away from its owner, near you $minutes min"
+            m.separated == true -> "away from its owner"
+            else -> "near you $minutes min"
+        }
+        store.submit(
+            DetectionEvent(
+                source = DetectionSource.TRACKER,
+                key = "trk:$mac",
+                label = "${m.kind.label} $state ($mac)",
+                score = scored.score,
+                matchedMethods = scored.methods,
+                rssi = rssi
+            )
+        )
+    }
+
+    /** Drone Remote ID over Bluetooth (legacy and long-range). */
+    private fun checkDrone(mac: String, rssi: Int, serviceData: Map<java.util.UUID, ByteArray>?) {
+        val msgs = RemoteId.messagesFromBle(serviceData?.get(RemoteId.BLE_SERVICE_UUID))
+        if (msgs.isEmpty()) return
+        val drone = drones.update(mac, msgs)
+        submitDrone(store, drone, "ble:$mac", rssi)
+    }
+
+    companion object {
+        private const val TAG = "BleScanner"
+        private const val ALARM_THRESHOLD = 40
+        /** Conservative ceiling on hardware scan-filter slots. */
+        private const val MAX_SCAN_FILTERS = 16
+
+        /**
+         * One drone, from whichever radio heard it. Keyed by its serial when it has
+         * sent one, so the same drone heard over Bluetooth and Wi-Fi is one row.
+         * The position is the drone's own broadcast; nothing about it is logged.
+         */
+        fun submitDrone(store: DetectionStore, drone: RemoteId.Drone, transmitter: String, rssi: Int?) {
+            val c = RemoteId.classify(drone.serial)
+            val score = ConfidenceEngine.scoreDrone(c.tier)
+            val id = drone.id
+            val alt = drone.altitudeM?.let { " · ${it.toInt()} m up" } ?: ""
+            val label = if (id != null) "${c.name} ($id)$alt" else "${c.name} (Remote ID)$alt"
+            store.submit(
+                DetectionEvent(
+                    source = DetectionSource.AIRCRAFT,
+                    key = "rid:${id ?: transmitter}",
+                    label = label,
+                    score = score,
+                    matchedMethods = "remote_id ${c.tier.name.lowercase()}",
+                    rssi = rssi,
+                    lat = drone.latitude,
+                    lon = drone.longitude
+                )
+            )
         }
     }
 }

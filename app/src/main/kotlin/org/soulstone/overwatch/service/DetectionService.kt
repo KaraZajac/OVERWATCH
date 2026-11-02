@@ -37,6 +37,7 @@ import org.soulstone.overwatch.fusion.SourceHealth
 import org.soulstone.overwatch.fusion.ThreatLevel
 import org.soulstone.overwatch.scan.AircraftScanner
 import org.soulstone.overwatch.scan.BleScanner
+import org.soulstone.overwatch.scan.ClassicScanner
 import org.soulstone.overwatch.scan.DeflockClient
 import org.soulstone.overwatch.scan.DeflockScanner
 import org.soulstone.overwatch.scan.DeflockClient.SurveillancePoint
@@ -108,6 +109,7 @@ class DetectionService : LifecycleService() {
     private lateinit var settings: Settings
     private lateinit var bleScanner: BleScanner
     private lateinit var wifiScanner: WifiScanner
+    private lateinit var classicScanner: ClassicScanner
     private lateinit var locationProvider: LocationProvider
     private lateinit var deflockScanner: DeflockScanner
     /** Built per scan, in [beginScanning]: see the note there. */
@@ -124,14 +126,33 @@ class DetectionService : LifecycleService() {
     private var deflockStarted = false
     private var wazeStarted = false
     private var aircraftStarted = false
+    private var classicStarted = false
     /** Last threat tier the notification displayed; tracks upward transitions for vibration. */
     private var lastNotifiedTier: ThreatLevel = ThreatLevel.GREEN
 
     override fun onCreate() {
         super.onCreate()
         settings = Settings.get(this)
-        bleScanner = BleScanner(this, store, micEnabled = { settings.micEnabled.value })
-        wifiScanner = WifiScanner(this, store, micEnabled = { settings.micEnabled.value })
+        // COMMERCIAL, HACKER, TRACKER and drone Remote ID ride the two radio
+        // scanners; each is read per advert, so the switch is whatever Settings
+        // says when the scan (re)starts.
+        bleScanner = BleScanner(
+            this, store,
+            micEnabled = { settings.micEnabled.value },
+            hackerEnabled = { settings.hackerEnabled.value },
+            trackerEnabled = { settings.trackerEnabled.value },
+            dronesEnabled = { settings.aircraftEnabled.value }
+        )
+        wifiScanner = WifiScanner(
+            this, store,
+            micEnabled = { settings.micEnabled.value },
+            hackerEnabled = { settings.hackerEnabled.value },
+            dronesEnabled = { settings.aircraftEnabled.value }
+        )
+        classicScanner = ClassicScanner(
+            this, store,
+            enabled = { settings.hackerEnabled.value && settings.skimmerScanEnabled.value }
+        )
         locationProvider = LocationProvider(this)
         // Scanners use their own fixed evaluation radii. The user's
         // "show within" setting is a view control and must never decide what
@@ -187,6 +208,9 @@ class DetectionService : LifecycleService() {
             wifiStarted = wifiScanner.start(lifecycleScope)
             if (!wifiStarted) Log.w(TAG, "WifiScanner.start() returned false (permission/adapter)")
         }
+        if (bleStarted && settings.hackerEnabled.value && settings.skimmerScanEnabled.value) {
+            classicStarted = classicScanner.start(lifecycleScope)
+        }
         val needsLocation = settings.deflockEnabled.value || settings.wazeEnabled.value ||
             settings.aircraftEnabled.value
         if (needsLocation) {
@@ -222,17 +246,21 @@ class DetectionService : LifecycleService() {
             return
         }
 
-        // MIC piggybacks on the BLE/WiFi scanners. Surface its health so the
-        // user sees an explicit status row rather than a silent UNKNOWN.
-        if (settings.micEnabled.value) {
-            if (bleStarted || wifiStarted) {
-                SourceHealth.record(DetectionSource.MIC, ok = true)
+        // MIC, HACKER and TRACKER piggyback on the BLE/WiFi scanners. Surface their
+        // health so the user sees an explicit status row rather than a silent UNKNOWN.
+        val radioUp = bleStarted || wifiStarted
+        for ((source, on) in listOf(
+            DetectionSource.MIC to settings.micEnabled.value,
+            DetectionSource.HACKER to settings.hackerEnabled.value,
+            DetectionSource.TRACKER to settings.trackerEnabled.value
+        )) {
+            if (!on) continue
+            if (source == DetectionSource.TRACKER && !bleStarted) {
+                SourceHealth.record(source, ok = false, message = "Needs the BLE scanner enabled")
+            } else if (radioUp) {
+                SourceHealth.record(source, ok = true)
             } else {
-                SourceHealth.record(
-                    DetectionSource.MIC,
-                    ok = false,
-                    message = "Needs BLE or WiFi scanner enabled"
-                )
+                SourceHealth.record(source, ok = false, message = "Needs BLE or WiFi scanner enabled")
             }
         }
 
@@ -296,11 +324,12 @@ class DetectionService : LifecycleService() {
 
     private fun endScanning() {
         if (!_running.value && !bleStarted && !wifiStarted && !deflockStarted && !wazeStarted &&
-            !aircraftStarted
+            !aircraftStarted && !classicStarted
         ) {
             return
         }
         _running.value = false
+        if (classicStarted) { classicScanner.stop(); classicStarted = false }
         if (bleStarted) { bleScanner.stop(); bleStarted = false }
         if (wifiStarted) { wifiScanner.stop(); wifiStarted = false }
         if (deflockStarted) { deflockScanner.stop(); deflockStarted = false }

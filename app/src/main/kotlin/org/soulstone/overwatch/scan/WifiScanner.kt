@@ -17,13 +17,16 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import org.soulstone.overwatch.data.targets.HackerTargets
 import org.soulstone.overwatch.data.targets.MicTargets
 import org.soulstone.overwatch.data.targets.Patterns
+import org.soulstone.overwatch.data.targets.RemoteId
 import org.soulstone.overwatch.data.targets.WifiOuis
 import org.soulstone.overwatch.fusion.ConfidenceEngine
 import org.soulstone.overwatch.fusion.DetectionEvent
 import org.soulstone.overwatch.fusion.DetectionSource
 import org.soulstone.overwatch.fusion.DetectionStore
+import org.soulstone.overwatch.fusion.DroneTracker
 import org.soulstone.overwatch.fusion.RssiTracker
 import org.soulstone.overwatch.fusion.SourceHealth
 
@@ -37,13 +40,20 @@ import org.soulstone.overwatch.fusion.SourceHealth
  *
  * The flock-you promiscuous-mode addr1 / wildcard-probe trick from the reference repo
  * is **not portable to Android** — userspace can only see results WifiManager surfaces.
+ * What it surfaces is enough for more than BSSIDs and names, though: the capabilities
+ * string gives away beacon spam, and from API 30 the information elements carry
+ * drones' Wi-Fi Remote ID.
  */
 class WifiScanner(
     private val context: Context,
     private val store: DetectionStore,
     private val rssi: RssiTracker = RssiTracker(),
     /** When true, also evaluate each scan against MicTargets and submit MIC events. */
-    private val micEnabled: () -> Boolean = { false }
+    private val micEnabled: () -> Boolean = { false },
+    /** When true, also look for pentest access points and beacon spam (HACKER events). */
+    private val hackerEnabled: () -> Boolean = { false },
+    /** When true, also decode drone Remote ID beacons (AIRCRAFT events). */
+    private val dronesEnabled: () -> Boolean = { false }
 ) {
 
     companion object {
@@ -59,6 +69,7 @@ class WifiScanner(
     private var running = false
     private var scanJob: Job? = null
     private var receiverRegistered = false
+    private val drones = DroneTracker()
 
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context?, intent: Intent?) {
@@ -132,6 +143,7 @@ class WifiScanner(
         scanJob = null
         unregisterReceiver()
         running = false
+        drones.clear()
         Log.i(TAG, "WiFi scan stopped")
     }
 
@@ -165,56 +177,130 @@ class WifiScanner(
             Log.e(TAG, "SecurityException reading scanResults", e)
             return
         }
+        val hacker = hackerEnabled()
+        val dronesOn = dronesEnabled()
 
         for (r in results) {
             val bssid = r.BSSID ?: continue
             val ssid = readSsid(r)
 
-            val isSurveillance = WifiOuis.matches(bssid) ||
-                Patterns.ssidGenericMatch(ssid) ||
-                Patterns.ssidFlockFormat(ssid)
+            // ESP32 Marauder's wardrive decoy is a fake "Flock" network: report the
+            // tool, never the camera it imitates.
+            val marauderDecoy = HackerTargets.isMarauderFlockDecoy(ssid, bssid)
+            val isSurveillance = !marauderDecoy && (
+                WifiOuis.matches(bssid) ||
+                    Patterns.ssidGenericMatch(ssid) ||
+                    Patterns.ssidFlockFormat(ssid) ||
+                    Patterns.ssidFlockHotspot(ssid)
+                )
             val isMic = micEnabled() && MicTargets.couldBeMicWifi(bssid, ssid)
-            if (!isSurveillance && !isMic) continue
 
-            rssi.update(bssid, r.level)
-            val stationary = rssi.isStationary(bssid)
+            if (isSurveillance || isMic) {
+                rssi.update(bssid, r.level)
+                val stationary = rssi.isStationary(bssid)
 
-            if (isSurveillance) {
-                val obs = ConfidenceEngine.WifiObservation(
-                    bssid = bssid, ssid = ssid, rssi = r.level, isStationary = stationary
-                )
-                val scored = ConfidenceEngine.scoreWifi(obs)
-                if (scored.score >= ALARM_THRESHOLD) {
-                    store.submit(
-                        DetectionEvent(
-                            source = DetectionSource.WIFI,
-                            key = bssid,
-                            label = scored.label,
-                            score = scored.score,
-                            matchedMethods = scored.methods,
-                            rssi = r.level
-                        )
+                if (isSurveillance) {
+                    val obs = ConfidenceEngine.WifiObservation(
+                        bssid = bssid, ssid = ssid, rssi = r.level, isStationary = stationary
                     )
+                    val scored = ConfidenceEngine.scoreWifi(obs)
+                    if (scored.score >= ALARM_THRESHOLD) {
+                        store.submit(
+                            DetectionEvent(
+                                source = DetectionSource.WIFI,
+                                key = bssid,
+                                label = scored.label,
+                                score = scored.score,
+                                matchedMethods = scored.methods,
+                                rssi = r.level
+                            )
+                        )
+                    }
+                }
+                if (isMic) {
+                    val obs = ConfidenceEngine.MicWifiObservation(
+                        bssid = bssid, ssid = ssid, rssi = r.level, isStationary = stationary
+                    )
+                    val scored = ConfidenceEngine.scoreMicWifi(obs)
+                    if (scored.score >= ALARM_THRESHOLD) {
+                        store.submit(
+                            DetectionEvent(
+                                source = DetectionSource.MIC,
+                                key = "mic:$bssid",
+                                label = scored.label,
+                                score = scored.score,
+                                matchedMethods = scored.methods,
+                                rssi = r.level
+                            )
+                        )
+                    }
                 }
             }
-            if (isMic) {
-                val obs = ConfidenceEngine.MicWifiObservation(
-                    bssid = bssid, ssid = ssid, rssi = r.level, isStationary = stationary
-                )
-                val scored = ConfidenceEngine.scoreMicWifi(obs)
-                if (scored.score >= ALARM_THRESHOLD) {
-                    store.submit(
-                        DetectionEvent(
-                            source = DetectionSource.MIC,
-                            key = "mic:$bssid",
-                            label = scored.label,
-                            score = scored.score,
-                            matchedMethods = scored.methods,
-                            rssi = r.level
-                        )
-                    )
-                }
-            }
+            if (hacker) checkHacker(bssid, ssid, r.level, marauderDecoy)
+            if (dronesOn) checkDrone(r, bssid)
+        }
+        if (hacker) checkBeaconSpam(results)
+    }
+
+    /** Pentest access points by their default names and rogue-AP frameworks by
+     *  their default addresses. */
+    private fun checkHacker(bssid: String, ssid: String?, level: Int, marauderDecoy: Boolean) {
+        val m = when {
+            marauderDecoy -> HackerTargets.Match(
+                HackerTargets.Kind.MARAUDER_DECOY,
+                "ESP32 Marauder wardrive decoy — fake \"Flock\" network", "marauder_decoy"
+            )
+            else -> HackerTargets.matchRogueBssid(bssid) ?: HackerTargets.matchSsid(ssid)
+        } ?: return
+        val score = ConfidenceEngine.scoreHacker(ConfidenceEngine.hackerWeight(m.kind), 0, level)
+        submitHacker("hack:$bssid", "${m.label} ($bssid)", m.method, score, level)
+    }
+
+    /** Whole-scan checks: beacon floods and one BSSID wearing many names. */
+    private fun checkBeaconSpam(results: List<ScanResult>) {
+        val aps = results.mapNotNull { r ->
+            val b = r.BSSID ?: return@mapNotNull null
+            HackerTargets.ApBrief(b, readSsid(r), r.capabilities)
+        }
+        HackerTargets.beaconSpam(aps)?.let { f ->
+            submitHacker("hack:beacon_spam", f.label, f.method, ConfidenceEngine.W_HACK_BEACON_SPAM, null)
+        }
+        HackerTargets.manyNamesOneBssid(aps)?.let { (bssid, n) ->
+            submitHacker(
+                "hack:names:$bssid", "Rogue AP broadcasting $n network names ($bssid)", "many_names",
+                ConfidenceEngine.W_HACK_MANY_NAMES, null
+            )
+        }
+    }
+
+    private fun submitHacker(key: String, label: String, methods: String, score: Int, level: Int?) {
+        if (score < ALARM_THRESHOLD) return
+        store.submit(
+            DetectionEvent(
+                source = DetectionSource.HACKER,
+                key = key,
+                label = label,
+                score = score,
+                matchedMethods = methods,
+                rssi = level
+            )
+        )
+    }
+
+    /** Drone Remote ID in a beacon's vendor-specific element (API 30+). */
+    private fun checkDrone(r: ScanResult, bssid: String) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
+        val elements = try { r.informationElements } catch (e: Exception) { return }
+        for (ie in elements) {
+            if (ie.id != 221) continue
+            val buf = ie.bytes
+            val bytes = ByteArray(buf.remaining())
+            buf.duplicate().get(bytes)
+            val msgs = RemoteId.messagesFromWifiIe(bytes)
+            if (msgs.isEmpty()) continue
+            val drone = drones.update(bssid, msgs)
+            BleScanner.submitDrone(store, drone, "wifi:$bssid", r.level)
+            return
         }
     }
 

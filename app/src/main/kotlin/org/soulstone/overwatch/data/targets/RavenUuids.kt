@@ -33,9 +33,14 @@ object RavenUuids {
         uuid16("1819")  // Location & Navigation (1.1.x)
     )
 
-    /** All eight, for the screen-off scan filters: a filter only decides what gets
-     *  delivered; [countMatches] decides what counts. */
+    /** All eight. A filter only decides what gets delivered; [countMatches]
+     *  decides what counts. */
     val ALL: Set<UUID> = SPECIFIC + GENERIC_FW_1_1
+
+    /** The one generic UUID the screen-off filters list for FW 1.1.x: the firmware
+     *  sends all three together, so one wakes the scan, and the two saved slots go
+     *  to Axon and Remote ID (v0.6.0). */
+    val FW_1_1_FILTER: UUID = uuid16("1819")
 
     /**
      * How many advertised UUIDs count as Raven evidence: each Raven-specific one,

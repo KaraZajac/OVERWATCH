@@ -20,5 +20,6 @@ enum class ThreatLevel(val minScore: Int) {
     }
 }
 
-/** Logical signal channel — used in the drill-down UI. */
-enum class DetectionSource { BLE, WIFI, DEFLOCK, WAZE, AIRCRAFT, MIC }
+/** Logical signal channel — used in the drill-down UI. HACKER and TRACKER ride the
+ *  BLE and WiFi scanners, like MIC; drones' Remote ID is filed under AIRCRAFT. */
+enum class DetectionSource { BLE, WIFI, DEFLOCK, WAZE, AIRCRAFT, MIC, HACKER, TRACKER }

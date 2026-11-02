@@ -23,7 +23,7 @@ import java.util.UUID
  */
 object MicTargets {
 
-    enum class Family { ECHO, RING, GOOGLE, SONOS, HIDDEN_CAM, GLASSES }
+    enum class Family { ECHO, RING, BLINK, GOOGLE, SONOS, HIDDEN_CAM, GLASSES }
 
     /** Bluetooth SIG company identifiers for "voice/smart-home" device families. */
     private val MFG_GOOGLE = 0x00E0
@@ -43,10 +43,12 @@ object MicTargets {
      * Nearby Glasses project, which this mirrors). Reliable to identify, but weak
      * to alert on: alone it scores 30, under the 40 a hit needs to be shown, so a
      * frame carrying only the company id shows only very close (above −50 dBm)
-     * with a rise-peak-fall signal: 30 + 5 + 8. A name token or the HeyCyan
-     * service UUID shows on its own. Caveat: these ids are
-     * manufacturer-wide, so Meta's also match Quest VR headsets (still a
-     * camera/mic device, so an acceptable secondary signal). Luxottica in BLE
+     * with a rise-peak-fall signal: 30 + 5 + 8. A name token, the HeyCyan
+     * service UUID or Ray-Ban Meta's own 0xFD5F shows on its own. Caveat: these
+     * ids are manufacturer-wide, so Meta's 0x01AB also matches other Meta radios.
+     * 0x058E (Meta Platforms Technologies) was here until v0.6.0: it is what Quest
+     * headsets send, and SquachWatch's two captures of real Ray-Ban Meta glasses
+     * (2026-07 and 2026-10) sent 0x01AB with 0xFD5F instead. Luxottica in BLE
      * mfg data is essentially only their *smart* eyewear — plain sunglasses
      * have no radio. Brands without a dedicated SIG company id (RayNeo — which
      * rides under TCL's 0x0BC6, too broad to use — plus XREAL, Rokid) advertise
@@ -63,7 +65,6 @@ object MicTargets {
      * is collecting them), they belong in the name hints, not here.
      */
     private val MFG_META = 0x01AB          // Meta Platforms, Inc. (ex-Facebook)
-    private val MFG_META_TECH = 0x058E     // Meta Platforms Technologies (Reality Labs; also Quest)
     private val MFG_LUXOTTICA = 0x0D53     // Luxottica — Ray-Ban / Oakley Meta frames
     private val MFG_SNAP = 0x03C2          // Snap Inc. — Spectacles
     private val MFG_VUZIX = 0x060C         // Vuzix — enterprise / AR smart glasses
@@ -82,16 +83,28 @@ object MicTargets {
      */
     private val UUID_HEYCYAN = UUID.fromString("7905fff0-b5ce-4e99-a40f-4b1e122d00d0")
 
-    /** Every advertised-service UUID this object recognises, for screen-off ScanFilters. */
-    val SERVICE_UUIDS: Set<UUID> = setOf(UUID_AVS, UUID_HEYCYAN)
+    /** Ray-Ban Meta's own service UUID, 16-bit 0xFD5F (SIG: Meta Platforms
+     *  Technologies). SquachWatch: the one signature specific to the glasses. */
+    private val UUID_RAYBAN_META = UUID.fromString("0000fd5f-0000-1000-8000-00805f9b34fb")
+
+    /** Meta Platforms' other two SIG member UUIDs (FEB7, FEB8) and Snap's (FE45).
+     *  Company-wide rather than product-specific, so they weigh like a company id. */
+    private val UUIDS_GLASSES_WEAK: Set<UUID> = setOf(
+        UUID.fromString("0000feb7-0000-1000-8000-00805f9b34fb"),
+        UUID.fromString("0000feb8-0000-1000-8000-00805f9b34fb"),
+        UUID.fromString("0000fe45-0000-1000-8000-00805f9b34fb")
+    )
+
+    /** Every exact service UUID this object recognises, for screen-off ScanFilters. */
+    val SERVICE_UUIDS: Set<UUID> = setOf(UUID_RAYBAN_META, UUID_HEYCYAN, UUID_AVS)
 
     /** Lab126 (Amazon — Echo, Ring, Fire TV) WiFi/BLE OUIs. All registered to
-     *  Amazon or Ring except a8:51:5b, which is Samsung's; it is kept, so a Samsung
+     *  Amazon except a8:51:5b, which is Samsung's; it is kept, so a Samsung
      *  device with it can be labelled Amazon gear. A lone OUI hit (30) shows only
      *  very close with a rise-peak-fall signal. */
     private val OUIS_AMAZON: Set<String> = setOf(
         "0c:47:c9", "38:f7:3d", "44:65:0d", "50:dc:e7", "78:e1:03",
-        "a8:51:5b", "b0:09:da", "f0:27:2d", "f0:81:73", "f0:d2:f1",
+        "a8:51:5b", "f0:27:2d", "f0:81:73", "f0:d2:f1",
         "fc:65:de", "fc:a1:83", "ac:63:be", "00:bb:3a"
     )
 
@@ -119,7 +132,26 @@ object MicTargets {
         "8c:ce:4e"    // Espressif
     )
 
-    private val ALL_OUIS: Set<String> = OUIS_AMAZON + OUIS_GOOGLE + OUIS_HIDDEN_CAM
+    /** Ring's own blocks: the 13 MA-L registrations of Ring LLC, plus "Ring
+     *  Solutions" b0:09:da, which sat in the Amazon set until v0.6.0 (IEEE CSV,
+     *  2026-11-01). Ring doorbells and cameras carry microphones. */
+    private val OUIS_RING: Set<String> = setOf(
+        "00:b4:63", "18:7f:88", "24:2b:d6", "34:3e:a4", "50:e4:67",
+        "54:e0:19", "5c:47:5e", "64:9a:63", "90:48:6c", "9c:76:13",
+        "ac:9f:c3", "c4:db:ad", "cc:3b:fb", "b0:09:da"
+    )
+
+    /** "Blink by Amazon" — all six of its MA-L registrations. */
+    private val OUIS_BLINK: Set<String> = setOf(
+        "3c:a0:70", "70:ad:43", "74:13:48", "74:ab:93", "c8:19:d8", "f0:74:c1"
+    )
+
+    /** Glasses makers' own Wi-Fi blocks: Luxottica Group (Ray-Ban / Oakley Meta)
+     *  and Snap, Inc. (Spectacles). */
+    private val OUIS_GLASSES: Set<String> = setOf("98:59:49", "98:a4:0e")
+
+    private val ALL_OUIS: Set<String> =
+        OUIS_AMAZON + OUIS_GOOGLE + OUIS_HIDDEN_CAM + OUIS_RING + OUIS_BLINK + OUIS_GLASSES
 
     /** Case-sensitive substrings — distinct enough to avoid false positives. */
     private val BLE_NAME_HINTS: List<Pair<String, Family>> = listOf(
@@ -168,6 +200,9 @@ object MicTargets {
         if (mac.isNullOrBlank() || mac.length < 8) return null
         val prefix = mac.lowercase().substring(0, 8)
         return when (prefix) {
+            in OUIS_RING -> Family.RING
+            in OUIS_BLINK -> Family.BLINK
+            in OUIS_GLASSES -> Family.GLASSES
             in OUIS_AMAZON -> Family.ECHO    // Amazon OUIs cover both Echo and Ring
             in OUIS_GOOGLE -> Family.GOOGLE
             in OUIS_HIDDEN_CAM -> Family.HIDDEN_CAM
@@ -211,7 +246,7 @@ object MicTargets {
      * for; a fixed Echo or Sonos in your own home is not.
      */
     val COMPANY_IDS: Set<Int> = setOf(
-        MFG_META, MFG_META_TECH, MFG_LUXOTTICA, MFG_SNAP, MFG_VUZIX,
+        MFG_META, MFG_LUXOTTICA, MFG_SNAP, MFG_VUZIX,
         MFG_AMAZON, MFG_GOOGLE, MFG_SONOS
     )
 
@@ -219,7 +254,7 @@ object MicTargets {
         MFG_AMAZON -> Family.ECHO
         MFG_GOOGLE -> Family.GOOGLE
         MFG_SONOS -> Family.SONOS
-        MFG_META, MFG_META_TECH, MFG_LUXOTTICA, MFG_SNAP, MFG_VUZIX -> Family.GLASSES
+        MFG_META, MFG_LUXOTTICA, MFG_SNAP, MFG_VUZIX -> Family.GLASSES
         else -> null
     }
 
@@ -227,10 +262,18 @@ object MicTargets {
     fun matchService(advertisedUuids: List<UUID>?): Family? {
         if (advertisedUuids.isNullOrEmpty()) return null
         return when {
+            advertisedUuids.contains(UUID_RAYBAN_META) -> Family.GLASSES
             advertisedUuids.contains(UUID_HEYCYAN) -> Family.GLASSES
             advertisedUuids.contains(UUID_AVS) -> Family.ECHO
             else -> null
         }
+    }
+
+    /** Family implied by a company-wide glasses-maker UUID (Meta FEB7/FEB8, Snap
+     *  FE45), or null. Weighs like a company id, not like [matchService]. */
+    fun matchWeakService(advertisedUuids: List<UUID>?): Family? {
+        if (advertisedUuids.isNullOrEmpty()) return null
+        return if (advertisedUuids.any { it in UUIDS_GLASSES_WEAK }) Family.GLASSES else null
     }
 
     /** Cheap pre-filter for the BLE scanner — true if any mic signal could match. */
@@ -244,6 +287,7 @@ object MicTargets {
         if (matchBleName(name) != null) return true
         if (matchManufacturer(companyId) != null) return true
         if (matchService(advertisedUuids) != null) return true
+        if (matchWeakService(advertisedUuids) != null) return true
         return false
     }
 
@@ -259,6 +303,7 @@ object MicTargets {
         Family.RING -> "Ring"
         Family.GOOGLE -> "Google Nest / Home"
         Family.SONOS -> "Sonos speaker"
+        Family.BLINK -> "Blink camera"
         Family.HIDDEN_CAM -> "Possible hidden mic / cam"
         Family.GLASSES -> "Smart glasses"
     }

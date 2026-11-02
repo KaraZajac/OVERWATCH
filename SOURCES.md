@@ -18,14 +18,19 @@ network-facing rots; re-verify before quoting it.
 | **WIFI** | BSSIDs + SSIDs of surveillance infrastructure | Local radio | free | 2026-09 |
 | **DEFLOCK** | Mapped fixed surveillance: ALPR, speed cameras, CCTV | Overpass / OSM | free | 2026-09-17 |
 | **WAZE** | Live crowd-sourced police reports | OpenWeb Ninja *or* Waze's own protocol | ~7.5¢ per scanning hour *or* free | 2026-09-21 |
-| **AIRCRAFT** | Police / surveillance aircraft overhead | ADS-B community feeds | free | 2026-09-17 |
-| **COMMERCIAL** | Consumer cameras, voice assistants, smart glasses | Rides BLE + WiFi | free | 2026-09 |
+| **AIRCRAFT** | Police / surveillance aircraft overhead, and drones by their Remote ID broadcast | ADS-B community feeds; drones by local radio | free | 2026-09-17 / 2026-11-01 |
+| **COMMERCIAL** | Consumer cameras, voice assistants, smart glasses | Rides BLE + WiFi | free | 2026-11-01 |
+| **HACKER** | Attack and pentest gear: Flipper Zero, BLE spam, rogue APs, beacon spam, card skimmers (opt-in) | Rides BLE + WiFi (+ opt-in Bluetooth Classic) | free | 2026-11-01 |
+| **TRACKER** | Item trackers that are away from their owner, or that stay | Rides BLE | free | 2026-11-01 |
 
-Two radio sources (local) and three network sources (position-driven). The app
-**never connects to, pairs with, or jams** anything it detects. It is not
-radio-silent, though: Android's scans transmit — Wi-Fi scanning sends probe
-requests and Bluetooth scanning sends scan requests to advertisers — and the
-network sources have to say where to look. Since v0.5.18 none of them is given
+Two radio sources (local), three network sources (position-driven), and three
+that ride the radio scans; drones' Remote ID is heard by the radio scans and
+filed under AIRCRAFT. The app **never connects to, pairs with, or jams**
+anything it detects. It is not radio-silent, though: Android's scans transmit —
+Wi-Fi scanning sends probe requests and Bluetooth scanning sends scan requests
+to advertisers; the opt-in card-skimmer check (§3.10) also sends Bluetooth
+Classic inquiries and name requests — and the network sources have to say where
+to look. Since v0.5.18 none of them is given
 the phone's position: the ADS-B feeds, OpenWeb Ninja and Waze direct get the
 centre of the 1 km grid square it is in, Overpass its ~5.5 km cache cell, and the
 map's tiles come from OpenStreetMap. §5.4 lists every destination.
@@ -447,45 +452,63 @@ exact string, leaked into the app's UI, is how the shutdown was first noticed.)*
 
 `data/targets/BleOuis.kt`. Matched on the lowercased `xx:xx:xx` MAC prefix.
 
-**Axon** (flagged separately, scores 80): `00:25:df`
+**Axon** (flagged separately, scores 80): `00:25:df`, and since v0.6.0
+`d8:1f:65`, which the IEEE lists as Private and field captures attribute to Axon
+(§3.8). Both are also checked on Wi-Fi.
 
-**Seen on Flock hardware** (24, from flock-detection). None is registered to
+**Seen on Flock hardware** (21, from flock-detection's 24). None is registered to
 Flock Safety. The IEEE registry (hwdata 0.411, checked 2026-10-11) gives ten to
-Silicon Labs, nine to Liteon, three to Espressif and one to USI, all radio-module
-makers, and `d8:a0:d8` is unassigned. A hit is a module those makers also sell
-for everything else, which is why an OUI alone scores 40, the bottom of YELLOW.
-Flock Safety's own registration, `b4:1e:52`, sits with the vendor OUIs (§3.3).
+Silicon Labs, nine to Liteon and one to USI, all radio-module makers, and
+`d8:a0:d8` is unassigned. A hit is a module those makers also sell for
+everything else, so **since v0.6.0 a module prefix alone scores 25, under the
+display floor**: it shows only with a second signal, such as a Flock name, the
+Penguin pack's maker id or a rise-peak-fall. Until then it scored 40 and showed on
+its own. v0.6.0 also dropped the three Espressif blocks (`48:e7:29`, `c8:c9:a3`,
+`a4:cf:12`), which every ESP32 gadget carries; SquachWatch and
+all-cameras-are-beacons retired them for the same reason. Flock Safety's own
+registration, `b4:1e:52`, sits with the vendor blocks (§3.3).
 ```
 58:8e:81  cc:cc:cc  ec:1b:bd  90:35:ea  f0:82:c0  1c:34:f1  38:5b:44  94:34:69
 b4:e3:f9  3c:91:80  d8:f3:bc  80:30:49  14:5a:fc  9c:2f:9d  94:08:53  e4:aa:ea
-48:e7:29  c8:c9:a3  74:4c:a1  70:c9:4e  04:0d:84  08:3a:88  a4:cf:12  d8:a0:d8
+74:4c:a1  70:c9:4e  04:0d:84  08:3a:88  d8:a0:d8
 ```
 
 ### 3.2 WiFi OUIs — seen on Flock hardware
 
 `data/targets/WifiOuis.kt`. flock-you's 31 prefixes (research by NitekryDPaul +
-DeFlockJoplin). Despite the "superset" label upstream, only 14 of
+DeFlockJoplin), 28 since v0.6.0. Despite the "superset" label upstream, only 14 of
 flock-detection's 24 BLE prefixes are among them, and `82:6b:f2` has the
 locally-administered bit set, so it is not an IEEE OUI; it is kept because
 flock-you observed it. None is registered to Flock Safety: by the IEEE registry
-they are 21 Liteon, 3 Silicon Labs, 2 Espressif, 2 USI and 1 Samsung, and
-`b8:35:32` is unassigned.
+they are 21 Liteon, 3 Silicon Labs and 2 USI, and `b8:35:32` is unassigned.
+v0.6.0 removed Samsung's `48:27:ea`, which would name a Samsung TV's Wi-Fi Direct
+network a Flock camera (SquachWatch left it out for that reason), and Espressif's
+`3c:71:bf` and `a4:cf:12`. As on BLE, a module prefix alone now scores 25; a real
+Flock hotspot also carries its `Flock-XXXXXX` SSID (§3.6), which lifts it to 100.
 ```
 70:c9:4e  3c:91:80  d8:f3:bc  80:30:49  b8:35:32  14:5a:fc  74:4c:a1  08:3a:88
 9c:2f:9d  c0:35:32  94:08:53  e4:aa:ea  f4:6a:dd  f8:a2:d6  24:b2:b9  00:f4:8d
-d0:39:57  e8:d0:fc  e0:4f:43  b8:1e:a4  70:08:94  58:8e:81  ec:1b:bd  3c:71:bf
-58:00:e3  90:35:ea  5c:93:a2  64:6e:69  48:27:ea  a4:cf:12  82:6b:f2
+d0:39:57  e8:d0:fc  e0:4f:43  b8:1e:a4  70:08:94  58:8e:81  ec:1b:bd  58:00:e3
+90:35:ea  5c:93:a2  64:6e:69  82:6b:f2
 ```
+
+**Flock turned that hotspot off around December 2025** (flock-you's README):
+cameras moved from AP to station mode and now only send probe requests, which no
+Android app can see. So this list, which can only match access points, mostly
+finds older cameras.
 
 Android exposes only the BSSID — flock-you's promiscuous-mode `addr1` and
 wildcard-probe tricks are not portable to a userspace Android app.
 
 ### 3.3 Vendor OUIs — enterprise / municipal surveillance
 
-`data/targets/VendorOuis.kt`. All 19 verified against the IEEE registry (18
+`data/targets/VendorOuis.kt`. All 37 verified against the IEEE registry (18
 against the Wireshark `manuf` snapshot of 2026-08-28, Flock Safety's against
-hwdata 0.411 on 2026-10-11), so a hit names the manufacturer directly. Merged
-into **both** the BLE and WiFi match sets.
+hwdata 0.411 on 2026-10-11, the 18 added in v0.6.0 against the IEEE MA-L, MA-M and
+MA-S CSVs of 2026-11-01), so a hit names the manufacturer directly. Checked by
+**both** the BLE and WiFi scanners. Since v0.6.0 a block can be 24 bits (MA-L), 28
+(MA-M) or 36 (MA-S), written `58:e8:76:c` and `70:b3:d5:52:1`; the longest match
+wins, so a small block inside a shared MA-L range names only its own holder.
 
 | OUI | Vendor | Radio reality |
 |---|---|---|
@@ -501,9 +524,21 @@ into **both** the BLE and WiFi match sets.
 | `00:13:e2` | GeoVision | Predominantly wired. |
 | `00:03:c5` | Mobotix | Predominantly wired. |
 | `00:1c:27` | Sunell Electronics | Predominantly wired. |
+| `00:23:bd` | Digital Ally | In-car and body video. **Police-exclusive.** |
+| `00:09:bc` `00:16:ed` | Utility, Inc. (BodyWorn) | Body cams, in-car video and their activation remotes; `00:09:bc` carried the 10 captured BodyWorn remotes (§3.8). **Police-exclusive.** |
+| `58:e8:76:c` (MA-M) | Kustom Signals | Police radar, lidar and in-car video. **Police-exclusive.** |
+| `1c:82:59:d` (MA-M) | Applied Concepts (Stalker) | Police radar and lidar; also sports radar guns, so not police-exclusive. The Stalker DSR 2X+ has Wi-Fi. |
+| `6c:18:11` | Decatur Electronics | Police radar; also sports radar. |
+| `00:04:7d` `00:18:85` `00:1f:92` `4c:cc:34` `10:74:6f` `9c:86:2b` `b8:e2:8c` | Motorola Solutions (the last three its Malaysian arm) | Radios, Avigilon cameras, Vigilant ALPR. In all-cameras-are-beacons' logs 27 of 27 indoor hits were fixed building hardware and 6 road hits were at law-enforcement scenes, so not police-exclusive. |
+| `08:3c:03:0` (MA-M) | Federal Signal SSG | Lightbars and sirens (police, fire, EMS). No field sighting. |
+| `7c:83:34:4` `84:b3:86:5` (MA-M) | Fusus (Axon) | Camera hubs that share private cameras with police real-time crime centers. No field sighting. |
+| `70:b3:d5:52:1` `70:b3:d5:f5:e` `70:b3:d5:1c:5` (MA-S) | Selex ES Inc. / ELSAG (Leonardo) | ALPR maker. No field sighting. |
+| `00:17:3d` | Neology | ALPR and tolling. No field sighting. |
+| `00:bf:15` `0c:bf:15` | Genetec | AutoVu ALPR and video management. No field sighting. |
 
-**Police-exclusive subset** (`ShotSpotter`, `WatchGuard`) scores 75 on sight —
-same rationale as the Axon OUI: these prefixes appear on nothing consumer.
+**Police-exclusive subset** (ShotSpotter, WatchGuard, Digital Ally, Utility,
+Kustom Signals) scores 75 on sight — same rationale as the Axon OUI: these
+blocks appear on nothing consumer. The rest score 40.
 
 ### 3.4 BLE service UUIDs — Flock Raven (gunshot detection)
 
@@ -527,13 +562,20 @@ Bluetooth thermometer sends `1809`. Before v0.5.17 any single one of the eight
 scored 70, ORANGE, labelled "Raven gunshot detector". Since then they count only
 as the full set of three, which is FW 1.1.x's signature. Every documented
 firmware still scores 90: FW 1.1.x counts its three generics, FW 1.2.x its three
-own UUIDs, and FW 1.3.x its five. The screen-off scan filters still list all
-eight, because a filter only decides which advertisements get delivered.
+own UUIDs, and FW 1.3.x its five. The screen-off scan filters list the five
+own UUIDs and `1819`: a filter only decides which advertisements get delivered,
+FW 1.1.x sends its three generics together, so one wakes the scan, and since
+v0.6.0 the two saved slots go to Axon and Remote ID (§5.1).
 
 ### 3.5 Manufacturer-specific data
 
 `data/targets/Manufacturers.kt`. Company ID **`0x09C8` (XUNTONG)** scores 60; a
-`"TN"`-prefixed serial in the payload adds 20.
+`"TN"`-prefixed serial in the payload adds 20. It is the **Penguin battery
+pack's** ID: it rides on 7,575 of the 17,410 `Penguin-` records in flock-you's
+WiGLE set and on none of its 4,907 `FS Ext Battery` ones, and the camera and
+Raven radios are LiteOn/Qualcomm and ESP32. Until v0.6.0 the code called it
+Raven's maker. XUNTONG (a Shenzhen BLE-module maker by name) is probably the
+pack's module supplier. A hit with no name is labelled "Flock Penguin battery".
 
 The BLE scanner iterates **every** manufacturer-data entry in an advertisement,
 not just the first — devices advertise several and the target is often not
@@ -546,14 +588,33 @@ lower-numbered entry went unseen.
 
 `data/targets/Patterns.kt`.
 
-- **BLE local names** (case-sensitive substring): `FS Ext Battery`, `Penguin`,
-  `Flock`, `Pigvision`, `FlockCam`, `FS-`
-- **Penguin numeric**: post-March-2025 firmware advertises a bare 8–12 digit
-  decimal ID and nothing else — matched as its own weak signal (15).
-- **Generic SSID** (case-insensitive): `flock`, `FS_`, `Penguin`, `Pigvision`,
-  `FlockOS`, `flocksafety`, `FS Ext Battery`
-- **Flock SSID format**: `^Flock-[0-9A-Fa-f]{4}$` — the specific form, scored
-  higher (65) than a generic substring hit (50).
+Since v0.6.0 every Flock pattern is anchored to the form real devices were seen
+to use; the loose substrings before it matched home networks and missed real
+hotspots.
+
+- **BLE local names**: exactly `FS Ext Battery`; `^Penguin-\d{10}$` (all 17,410
+  Penguin records in flock-you's WiGLE set have this form); `^FS-[0-9A-Fa-f]{4,12}$`
+  (field capture at Flock sites; the bare `FS-` substring matched any name
+  containing it); and `Flock` as a case-sensitive substring, which is how Raven
+  units are discovered (GainSec BirdShot). `Pigvision` is gone: no capture
+  anywhere shows a device using it, and flock-you's "Pigvision" file lists camera
+  locations, not radio sightings. `FlockCam` is covered by `Flock`.
+- **Penguin numeric**: a bare ten-digit name (narrowed from 8–12). Any gadget can
+  carry one (a phone advertising `0102000000` matched in all-cameras-are-beacons'
+  logs), so it stays a weak signal (15).
+- **Flock hotspot**: `^flock-[0-9a-f]{6}$`, case-insensitive, 65, and +15 when the
+  hex is the BSSID's last three bytes. flock-you's WiGLE set has 803 Flock SSIDs,
+  every one in this form, 780 ending in the BSSID. The old `^Flock-[0-9A-Fa-f]{4}$`
+  matched none of them, so until v0.6.0 they were caught only by the generic
+  substring, at 50.
+- **Flock Camera hotspot**: SSID starting `Flock Camera` (a camera's own hotspot,
+  "Flock Camera net.", flock-you issue #43), 65.
+- **Generic SSID** (50): exactly `Flock` (the network Raven units join, per
+  GainSec's white paper — unless the BSSID is Espressif's, which is ESP32
+  Marauder's decoy, §3.10); `^Penguin-\d{10}$`; the prefixes `flock-`, `flock_`
+  and `FS_`; and the tokens `flocksafety`, `flockos`, `fs ext battery`. The old
+  substrings `flock`, `Penguin` and `FS_` also matched "Flockhart Family WiFi",
+  "PenguinNet" and anything containing "FS_".
 
 ### 3.7 COMMERCIAL / consumer gear
 
@@ -569,10 +630,14 @@ assigned-numbers registry (4,035 entries) on 2026-09-21:
 | `0x0171` | Amazon.com Services | ECHO |
 | `0x05A7` | **Sonos Inc** | SONOS |
 | `0x01AB` | Meta Platforms, Inc. | GLASSES |
-| `0x058E` | Meta Platforms Technologies (Reality Labs / Quest) | GLASSES |
 | `0x0D53` | Luxottica Group — Ray-Ban / Oakley Meta frames | GLASSES |
 | `0x03C2` | Snapchat Inc — Spectacles | GLASSES |
 | `0x060C` | Vuzix | GLASSES |
+
+`0x058E` (Meta Platforms Technologies) was a GLASSES id until v0.6.0. It is what
+Quest headsets send, and SquachWatch's two captures of real Ray-Ban Meta glasses
+(2026-07 and 2026-10) sent `0x01AB` with the service UUID `0xFD5F` instead, so it
+only ever labelled headsets "Smart glasses".
 
 `0x05A7` was previously labelled "Yingxin / cheap-spy-cam" and mapped to
 HIDDEN_CAM; the registry says Sonos. That would have tagged a Sonos speaker as
@@ -598,14 +663,20 @@ service-data keys — HeyCyan frames have been seen carrying it either way):
 | UUID | Meaning | Family |
 |---|---|---|
 | `0000FE03-…` (16-bit `FE03`) | Alexa Voice Service (Amazon Lab126) | ECHO |
+| `0000FD5F-…` (16-bit `FD5F`) | Meta Platforms Technologies — the one signature specific to Ray-Ban Meta glasses (SquachWatch's captures). Added in v0.6.0 | GLASSES |
 | `7905FFF0-B5CE-4E99-A40F-4B1E122D00D0` | HeyCyan smart-glasses SDK primary service — Nilox Smart AI Glasses (sold by ALDI/Hofer) and other HeyCyan-based frames. Fixed on the software side, so it survives the randomised MACs and unstable names that defeat most glasses detection. | GLASSES |
 
-Both service UUIDs are also added to the screen-off `ScanFilter` set (§5.1),
-ahead of the company ids, because they are exact signatures and are what
-should survive if the 16-slot list is trimmed. With COMMERCIAL on it always is:
-1 XUNTONG + 8 Raven + 2 service UUIDs + 8 company ids makes 19, so the last
-three company ids (Amazon, Google, Sonos) never get a slot, while the five
-glasses ids do.
+Meta's other member UUIDs `0xFEB7` and `0xFEB8` and Snap's `0xFE45` (all SIG
+registered) count as GLASSES too, but weigh like a company id (30), and only when
+no company id matched: they are company-wide, not product-specific.
+
+The three exact service UUIDs are also in the screen-off `ScanFilter` set (§5.1),
+ahead of the company ids, because they are exact signatures and are what should
+survive if the 16-slot list is trimmed. With COMMERCIAL and AIRCRAFT on it always
+is: 3 Axon + 1 Remote ID + 1 XUNTONG + 6 Raven + 3 service UUIDs + 7 company ids
+makes 21, so only Meta's `0x01AB` and Luxottica's `0x0D53` get a slot; Snap,
+Vuzix, Amazon, Google and Sonos wait for the screen. Until v0.6.0 the five
+glasses ids got slots and Axon none.
 
 Name tokens: the case-sensitive hints (`Spectacles`, `Ray-Ban`, `RayNeo`,
 `Vuzix`, `XREAL`, `Rokid`, plus the Echo/Ring/Nest set) and, matched
@@ -624,6 +695,14 @@ project's own README and code have Snap correctly as `0x03C2`), and its
 scanner reads only the first manufacturer-data entry (`keyAt(0)`), whereas
 some devices advertise several. (OVERWATCH had the same gap for COMMERCIAL ids
 until v0.5.18; see §3.5.)
+
+Ring's own blocks (v0.6.0, IEEE CSV 2026-11-01): the 13 MA-L registrations of
+Ring LLC (`00:b4:63`, `18:7f:88`, `24:2b:d6`, `34:3e:a4`, `50:e4:67`, `54:e0:19`,
+`5c:47:5e`, `64:9a:63`, `90:48:6c`, `9c:76:13`, `ac:9f:c3`, `c4:db:ad`,
+`cc:3b:fb`) plus "Ring Solutions" `b0:09:da`, which sat in the Amazon set before;
+all six "Blink by Amazon" blocks (`3c:a0:70`, `70:ad:43`, `74:13:48`, `74:ab:93`,
+`c8:19:d8`, `f0:74:c1`) as a new BLINK family; and the glasses makers' Wi-Fi blocks,
+Luxottica Group `98:59:49` and Snap, Inc. `98:a4:0e`.
 
 Hidden-camera OUIs, all radio-module makers' and so high-noise: `fc:b4:67`,
 `dc:4f:22` and `8c:ce:4e` (Espressif), `00:e0:4c` (Realtek, in many cheap cams)
@@ -644,13 +723,183 @@ Scores are **capped at 84** so a cluster of doorbells — or a passing pair of
 Ray-Bans — can never read as ALPR-grade certainty. RED is reserved for
 ALPR/Axon-grade evidence.
 
+### 3.8 Axon and Utility — identifiers that survive a random MAC
+
+`data/targets/AxonSignatures.kt`. From **all-cameras-are-beacons** ("ACAB",
+github.com/soyboi1312/all-cameras-are-beacons, Apache-2.0): one observer's
+field captures in Southern California, June–October 2026, counted in its
+`firmware/lib/acab_core/axon_signatures.h` and `docs/signatures.md`; the
+Utility remote from **nite-oui-collection** (nitekry, MIT). OVERWATCH takes
+the identifiers, not the code. Checked in this order; the first that matches
+names the device.
+
+| Signature | Value | Evidence | Score |
+|---|---|---|---|
+| Body-cam tag | 128-bit service data (AD `0x21`) whose UUID reads `AXJANUSBWCDEVICE` once its little-endian bytes are reversed. Matched, as ACAB does, as ASCII `BWCDEVICE` in either byte order anywhere in the raw advert | ≥13 tagged MACs; five confirmed as body cams by eye at a San Diego street fair (2026-09-19). Blue2thprinting (Dark Mentor) logged the same advert by 2024-12-04, independently. Never seen on anything that isn't Axon | 90 |
+| In-car tag | `METROPOLISDEVICE`, same scheme | 2 captures, leaning in-car | 80 |
+| `0xFE6B` service data with a serial | TASER International's SIG member UUID, carrying ASCII serials (`D01A…` on body cams) | 7 devices, one confirmed by eye | 80 |
+| `0xFE6C` service data with a serial | TASER International's other member UUID, the Axon Signal trigger layout | AxonCadabra's replay of a captured trigger; no real trigger has been captured. Serial `X87002FP4` is that tool and goes to HACKER (§3.10) | 80 |
+| `0x034D` manufacturer data | TASER International's company ID, counted only as `0x02` + nine uppercase letters/digits (`X870054FW`). `X87…` is the Axon Signal Vehicle per Blue2thprinting's serial map, `X85…` the Fleet power unit | 1 capture, on `00:25:DF`. ACAB's off-block `0x034D` advert without that shape is why the shape is required | 80 |
+| `0xFC81` / `0xFE6B` / `0xFE6C` listed, no payload | Axon Enterprise's / TASER International's member UUIDs | SIG registry (OUI-SPY AXEOFF keys on them) | 75 |
+| `BodyWorn Remote XXXX` name | Utility's body-cam activation remote; XXXX is the last two bytes of its MAC | 10 MACs on Utility's `00:09:BC`, one observer, 2025-08 | 80 |
+| MAC `00:25:df` | Axon Enterprise (IEEE) | 13 MACs in ACAB's serial logs | 80 |
+| MAC `d8:1f:65` | IEEE lists the holder as **Private** | 10 MACs field-attributed to Axon, five confirmed by eye, and no non-Axon device among ~21,000 scanned. If one ever appears, this entry must come out | 80 |
+
+The tag, `0xFE6B` and `0x034D` are in the screen-off filter set (§5.1), first,
+so an Axon body cam is caught with the phone in a pocket. Until v0.6.0
+OVERWATCH matched Axon only by `00:25:df`, which only works while the camera
+uses its public address.
+
+**Left out:** the SSID prefixes `AB2-` / `AB3-` / `AB4-` / `AXON-` that
+SquachWatch lists (its README credits Gemini for them, and Axon's own docs say
+its cameras' Wi-Fi is client-only); `E4:05:40` (unassigned) and `28:24:FF` (WNC,
+a module maker), which SquachWatch files as Axon; the "Axon Networks" IEEE blocks,
+an unrelated company.
+
+### 3.9 Drones — Remote ID
+
+`data/targets/RemoteId.kt`, `fusion/DroneTracker.kt`; filed under **AIRCRAFT**.
+Layout from **opendroneid-core-c** and **receiver-android** (Apache-2.0), the
+reference receiver for Android, which needs no root.
+
+| Transport | Identifier | Android API |
+|---|---|---|
+| Bluetooth legacy | Service data for 16-bit `0xFFFA` ("ASTM Remote ID"): app code `0x0D`, a message counter, one 25-byte message. One message type per advert, so `DroneTracker` joins a transmitter's adverts | `ScanRecord.getServiceData()` |
+| Bluetooth 5 long range | The same service data carrying a message pack (header `0xF_`, size `0x19`, up to 9 messages) | `ScanSettings.setLegacy(false)` and `setPhy(PHY_LE_ALL_SUPPORTED)`, set when the adapter reports extended advertising and the Coded PHY. Many phones receive long range unreliably |
+| Wi-Fi beacon | Vendor-specific element 221, OUI `FA:0B:BC`, type `0x0D`, then a counter and a message pack | `ScanResult.getInformationElements()`, API 30+. Subject to the 4-scans-per-2-minutes throttle (§5.2) |
+
+US drones comply under ASTM F3586, which accepts only Bluetooth (4 and 5
+together) or Wi-Fi beacon; Wi-Fi NaN is not a US means, so it is not scanned.
+**Police drones broadcast too:** state and local government aircraft register,
+so Part 89 applies unless the FAA authorises a deviation (14 CFR 89.101, 89.105;
+86 FR 4404), and the FAA's public-safety waiver FAQ (v9, 2025-09-02, Q25) says
+drone-as-first-responder flights beyond line of sight need standard (built-in)
+Remote ID, because add-on modules require line of sight (89.115).
+
+Decoded: the Basic ID (serial when its ID type is 1, ANSI/CTA-2063-A) and the
+Location message (latitude/longitude int32 × 10⁻⁷, altitude uint16 ÷ 2 − 1000 m,
+status). The System message also carries the operator's or take-off position;
+OVERWATCH ignores it. The drone's position is its own broadcast, put on the map
+as a violet dot; it is never logged and never leaves the phone.
+
+**Telling police from hobby drones: only the serial prefix works.** The first
+four characters are the ICAO-assigned manufacturer code; the next is a length
+character. Model prefixes were read off serials in the FAA's public Remote ID
+Declarations of Compliance (`uasdoc.faa.gov`, November 2026):
+
+| Prefix | Model | Tier | Score |
+|---|---|---|---|
+| `1914CR1D` / `1914CL2D` / any `1914` | BRINC Responder / LEMUR 2 / BRINC | police maker | 75 |
+| `1668BR40`, `1668BR70` | Skydio X10, R10 | drone-as-first-responder | 65 |
+| `1581F5BL`, `1581F5BM`, `1581F6QA`, `1581F6Q8`, `1581F8HH`, `1581F8HG` | DJI M30 / M30T Dock, M3D / M3TD Dock, Matrice 4D / 4TD Dock | drone-as-first-responder | 65 |
+| `1668BE10`, `1581F5BK`, `1581F5FJ`, `1581F7K3`, `1748FEV3`, `1748FEV4`, `1588…`, `1839…`, `1867…`, `1898…`, `1701…` | Skydio X2E, DJI M30T / Mavic 3T / Matrice 4T, Autel EVO Max / Alpha, Parrot ANAFI, Teal, Hoverfly, Fotokite, Percepto | public safety / enterprise | 55 |
+| anything else, or no serial | — | any drone | 45 |
+
+A model is not an owner: utilities and security firms fly dock drones, which is
+why the scores stop at 75 and the source is capped at 84. Remote ID is
+unauthenticated, and ESP32 transmitters can broadcast any serial.
+
+### 3.10 HACKER — attack and pentest gear
+
+`data/targets/HackerTargets.kt`, `fusion/BleSpamDetector.kt`,
+`scan/ClassicScanner.kt`. Gear that transmits *at* other radios. Every
+identifier is from the tool's own source or vendor documentation (repo@commit
+read 2026-11-01); several of those projects are GPL, so OVERWATCH uses the facts,
+never the code. Scores add +5 above −50 dBm and are capped at **84**, like
+COMMERCIAL.
+
+| Signature | Value | Source | Score |
+|---|---|---|---|
+| Flipper Zero | Service UUID `0x3080` + case colour, i.e. `0x3080`–`0x3083` (0 = colour unknown, which SquachWatch misses) | flipperzero-firmware@9981d9d `serial_profile.c:54`, `furi_hal_version.h:34-39` | 60 |
+| …its name | `Flipper <name>` (stock and Unleashed; Momentum drops the prefix) | `furi_hal_version.c:93-105`; Momentum `furi_hal_version.c:103-109` | +15 |
+| …its address | `80:E1:26`, ST's company ID + the WB55 chip ID; public address, no manufacturer data. Not an IEEE block, so supporting evidence only. Wall of Flippers also checks `80:E1:27`, which nothing in the firmware explains | `furi_hal_version.c:107-116` | +10 |
+| Flipper remote / BadUSB mode | HID service `0x1812` + `Control <name>` or `BadUSB <name>` + a `80:E1:26` address (all three: `0x1812` alone is any keyboard) | `hid_profile.c:409-426`, `bad_usb_hid.c:129-153` | 70 |
+| nyanBOX | UUID `6e79616e-424f-582d-7365-727669636521` ("nyanBOX-service!") or name `nyanBOX-XXXX` | nyanBOX legacy source `nyanbox_advertiser.cpp:27-89` (MIT) | 60 |
+| AxonCadabra | `0xFE6C` service data carrying serial `X87002FP4`: its replay of one captured Axon Signal trigger. Reported here and **not** as Axon, even from `00:25:DF` (the Flipper ports spoof that too) | AxonCadabra `MainActivity.kt:38-46` | 75 |
+| iOS crash advert | Apple `0F 05 <flags> <action> <tag×3> 00 00 10 <len>` with `len` past the end of the payload. No real device sends a record that overruns its own advert | Momentum-Apps `ble_spam/protocols/continuity.c:406-425`; ESP32-Sour-Apple `sour-apple-esp32.ino:20-40` | 84 |
+| AppleJuice templates | `0F 05 C1 <action> 60 4C 95 00 00 10 …` (a fixed authentication tag) or AirPods `07 19 07 <model> 20 75 AA 30 01 00 00 45 12 12 12` (fixed bytes in the encrypted field) | AppleJuice `applejuice.ino:36-65` | 84 |
+| Pop-up spam flood | 40+ new addresses carrying pop-up adverts (Apple Proximity Pairing / Nearby Action, discoverable Fast Pair `0xFE2C`, Samsung `0x0075` buds/watch, Microsoft Swift Pair `0x0006`) within 10 s, after a 15 s warm-up at every scan (re)start | Momentum-Apps `ble_spam`; Bruce `ble_spam.cpp`; Mayhem `ui_blespam.cpp` | 84 |
+| One transmitter cycling devices | 4+ different Proximity Pairing models or Nearby Actions from one address within 10 s. Flipper's Apple modes keep one address per run; real AirPods have one model | `ble_spam.c:43-69, 232` | 84 |
+| Default access points | `Pineapple_…` (WiFi Pineapple setup network; it disappears after setup), `pwned…` (ESP deauther), `BruceNet` / `BruceShell` / `BRUCE-UDP` (Bruce), `GhostNet` (GhostESP), `blackmagic` (Flipper Wi-Fi dev board), `O.MG`, `Nugget AP`, `wifiduck`, `Exploit` (ESPloitV2 / WHID Cactus), `Evil Crow RF v2`, P4wnP1's emoji SSID. All renamable | Hak5 docs; esp8266_deauther; Bruce `config.h:64`; GhostESP `settings_manager.c:220-221`; blackmagic-esp32-s2 `nvs-config.c:14-15`; o.mg.lol; USB-Nugget; WiFiDuck; ESPloitV2; EvilCrowRF-V2; P4wnP1 `defaults.go:19-38` | 55 |
+| Evil-portal defaults | `Evil Portal`, `EvilPortal`, `EvilAP`, `NEMO Free WiFi`, `Evil-…` (Evil-M5Project, including `Evil‑NanoC6` with U+2011) | flipper-zero-evil-portal; GhostESP; m5stick-nemo; Evil-M5Project | 50 |
+| Rogue-AP default BSSIDs | `00:00:00:xx:xx:xx` (wifiphisher without `-iNM`/`-iAM`), `00:11:22:33:44:00` (eaphammer), `BC:F6:85:03:36:5B` (WiFi Pumpkin 3) | wifiphisher `interfaces.py:932-943`; eaphammer `hostapd.ini:25-27`; wifipumpkin3 `config.ini:59-61` | 70 |
+| Beacon spam | In one scan, 3+ of: Rick-roll SSIDs, an RSN element listing one cipher twice (Android shows `[WPA2-PSK-CCMP+CCMP]`), or BSSIDs with the multicast bit set | esp8266_deauther `Attack.h:194-208`; Marauder `WiFiScan.cpp:9666-9714`; AOSP `InformationElementUtil` | 75 |
+| Many names, one BSSID | One BSSID advertising 5+ network names in one scan (Known Beacons, Karma). Untested on Android, so it may never fire | wifiphisher `knownbeacons.py` | 70 |
+| ESP32 Marauder wardrive decoy | A network named exactly `Flock` from an Espressif address (`EspressifOuis.kt`: all 374 Espressif MA-L blocks, IEEE CSV 2026-11-01). Marauder beacons it with camera-style elements; before v0.6.0 OVERWATCH would have scored it about 100 as a Flock camera | Marauder `WiFiScan.cpp` ~6459 | 55 |
+| Card skimmer | Bluetooth Classic name `HC-03`, `HC-05`, `HC-06`, `RN42`, `BT04-A` or `RNBT-…`, the serial modules gas-pump skimmers are built from. **Opt-in** (Settings → Look for card skimmers): a Classic discovery every 3 minutes, which pages modules that answer without a name | SparkFun Skimmer Scanner (MIT); ESP32 Marauder's skimmer detector | 65 |
+
+**Not detectable on a phone:** the Pwnagotchi (its peer beacons carry no SSID
+element, and Android's `wificond` drops such networks before any app sees them,
+AOSP `scan_utils.cpp:155-160`), and deauth floods and the Pwnagotchi's spoofers,
+which need monitor mode. **Deliberately not matched:** Flipper Devices' IEEE block
+`0C:FA:22`, company ID `0x0E29` and UUID `0x308A`, which are all the BUSY Bar desk
+sign (SquachWatch's bench test, 2026-10-14); Hak5 "OUIs" (Hak5 holds no IEEE
+registration); bare Espressif addresses, which every ESP32 gadget carries;
+generic portal names such as `Free Wifi`; the receive-only and wired tools
+(HackRF, Ubertooth, Proxmark, Bash Bunny, Key Croc, Shark Jack, Packet
+Squirrel); and the Pineapple Pager, which has no published signature.
+
+### 3.11 TRACKER — item trackers away from their owner
+
+`data/targets/TrackerTargets.kt`, `fusion/TrackerDwell.kt`. Rules from **AirGuard**
+(seemoo-lab, Apache-2.0, v3.1.3), the open-source Android tracker detector, and
+the IETF DULT draft. A tag beside its owner's phone is somebody's keys; one
+separated from its owner and near you is the case that matters.
+
+| Tracker | Rule | State |
+|---|---|---|
+| AirTag / Find My accessory | Apple `0x004C`, type `0x12` length `0x19` (separated; `0x02` is near the owner); status bits 4–5 = 1 AirTag, 2 Find My accessory (second-generation AirTags report this). 0 (an Apple device) and 3 (AirPods) are skipped | separated |
+| Samsung SmartTag | Service data `0xFD5A`, first byte & `0xF8` = `0x10`; low three bits 1 just separated, 2 lost, 3 lost over 24 h | separated |
+| DULT | Service data `0xFCB2` (Apple's member UUID, used for the cross-vendor standard): network-ID byte, then a byte whose low bit is 0 when separated (draft-ietf-dult-accessory-protocol-01 §3.4.2, §3.9) | separated |
+| Google Find Hub | Service data `0xFEAA` with frame type `0x41` (unwanted-tracking-protection mode) or `0x40` (doesn't say). Eddystone's own frames (`0x00`–`0x30`) never count | separated / unknown |
+| Chipolo | `0xFE33`; bit 0 of the second service-data byte is 1 after 30 minutes away from the owner, on firmware whose address starts `D8` or lower; newer firmware doesn't say | separated / unknown |
+| Tile, Pebblebee | `0xFEED` / `0xFEEC` / `0xFD84`; `0xFA25`. No state field | unknown |
+
+Scores: separated 45, unknown 30, +25 once in range without a break (gaps under
+2 minutes) for 10 minutes; capped at 84. So a separated tag shows YELLOW at once
+and ORANGE after 10 minutes, and a Tile shows only after 10 minutes. A tag that
+rotates its address starts its 10 minutes again, which can delay an alert but
+never invent one. **Not matched:** Samsung `0xFD69` (Galaxy phones and earbuds in
+lost mode) and `0xFD59` (unregistered-tag onboarding).
+
+Android withholds iBeacon and Eddystone adverts from apps that declare
+`neverForLocation` on `BLUETOOTH_SCAN`, as OVERWATCH does, but its default
+deny-list exempts exactly Find Hub's frame types (AOSP `AdapterService`
+`DEFAULT_LOCATION_DENYLIST_ADVERTISING_DATA` =
+`⊈0016AAFE40/00FFFFFFF0,⊆0016AAFE/00FFFFFF,⊆00FF4C0002/00FFFFFFFF`), so they
+arrive. Android's own unknown-tracker alerts (Play services) already cover AirTags
+and Find Hub tags; SmartTag, Tile, older Chipolo and Pebblebee are what this adds
+there, and on a phone without Play services it is the only check.
+
+### 3.12 Considered and left out (v0.6.0 research)
+
+Checked against the IEEE and Bluetooth SIG registries and the projects' own
+field evidence, and rejected:
+
+- **Motorola Solutions `0xFE04`** — its only field sightings were seven Openpath
+  door readers (`oprpx…`, ACAB). **`0xFD8E`, `0x04EC`** (Motorola), **`0x0D5B`**
+  (Axis), **`0x0AE9`** (FLIR), **`0xFC2C`** (Verkada): registered, never captured.
+- **Verkada `0xFD3A`** — sent by phones running the Verkada Pass app.
+- **Cradlepoint and Sierra Wireless routers** — in police cars, but ACAB logged
+  154 Cradlepoint BSSIDs in four hours of ordinary driving. Agency-renamed SSIDs
+  (`OPD 3484`) admit no rule.
+- **Eye Spy's prefixes** — "Vigilant" `00:0E:58` is Sonos, "Flock" `D4:BB:E6` is
+  Huawei and `3C:61:05` is Espressif.
+- **nite-oui-collection's law-enforcement CSV** — 11 of its 15 OUIs belong to
+  Honeywell, Nisca, Nintendo, Apple, Dell, Xiaomi, Samsung, GM or Axis.
+- **`Pigvision`** (§3.6), **`Flock_Setup`** (no source anywhere) and the
+  Samsung and Espressif blocks in the Flock lists (§3.1, §3.2).
+- **Cellebrite `00:16:00`** — the same company's phone-transfer kiosks sit in
+  carrier stores. **Harris Corporation's** old blocks predate its radio line.
+- **LiveView Technologies surveillance trailers** emitted nothing at 2 m.
+
 ---
 
 ## 4. Scoring
 
 Score 0–100 per observation; the on-screen tier is the **maximum live score**
-across all sources. Radio events (BLE, WiFi, Commercial) and aircraft expire 5
-minutes after they were last seen. The camera map and Waze reports sit at fixed,
+across all sources. Radio events (BLE, WiFi, Commercial, Hacker, Tracker, drones)
+and aircraft expire 5 minutes after they were last seen. The camera map and Waze reports sit at fixed,
 known positions, so they are re-scored at every fix and drop out as soon as they
 are out of range (§2.1, §2.2); until v0.5.20 they too stayed up to 5 minutes,
 with the distance they had when last in range.
@@ -738,10 +987,15 @@ orbiting 5 km away is still watching you.
 - **Unidentified aircraft cap** — 69, the top of YELLOW. Behaviour-only evidence
   never reaches ORANGE, let alone RED; circling could still be news or survey
   work.
-- **Radio base weights.** BLE: OUI 40 (Axon 80, police-exclusive vendor 75), name
-  45 (Penguin numeric 15), XUNTONG maker id 60 (+20 with a `TN` serial), Raven 70
-  (90 for three or more counted UUIDs). WiFi: OUI 40 (police-exclusive 75), Flock
-  SSID format 65, generic SSID 50. Methods on one device add up, capped at 100.
+- **Radio base weights.** BLE: vendor block 40 (Axon 80, police-exclusive vendor
+  75), Flock module prefix 25, Axon body-cam tag 90, Axon SIG number with a serial,
+  METROPOLIS or BodyWorn name 80, an Axon SIG UUID listed alone 75, name 45
+  (Penguin numeric 15), XUNTONG maker id 60 (+20 with a `TN` serial), Raven 70 (90
+  for three or more counted UUIDs). WiFi: vendor block 40 (Axon 80,
+  police-exclusive 75), module prefix 25, Flock hotspot format 65 (+15 when it ends
+  in the BSSID), Flock Camera hotspot 65, generic SSID 50. Methods on one device add
+  up, capped at 100. HACKER (§3.10), TRACKER (§3.11) and drones (§3.9) have their
+  own tables and are capped at 84.
 - **Multi-method bonus** — +20 when two independent BLE/WiFi methods agree.
 - **Strong RSSI** (> −50 dBm) +10; **stationary** (rise-peak-fall) +15. COMMERCIAL
   uses +10, +5 and +8 (§3.7).
@@ -785,8 +1039,8 @@ arrives.
 
 The catch is that **a `ScanFilter` cannot express an OUI prefix.** It can match
 an exact address, an exact name, a service UUID, or manufacturer data — and
-OUI-prefix matching is OVERWATCH's primary BLE method (Axon `00:25:df`, the 24
-Flock prefixes, the 19 vendor prefixes). There is no filter that means "any MAC
+OUI-prefix matching is one of OVERWATCH's main BLE methods (Axon's two blocks,
+the 21 Flock module prefixes, the 37 vendor blocks). There is no filter that means "any MAC
 starting with these three octets", and no filter that means "any device".
 
 So the scanner switches strategy on `ACTION_SCREEN_ON` / `ACTION_SCREEN_OFF`:
@@ -794,7 +1048,7 @@ So the scanner switches strategy on `ACTION_SCREEN_ON` / `ACTION_SCREEN_OFF`:
 | Screen | Scan | Covers | Loses |
 |---|---|---|---|
 | on | unfiltered | everything — OUI, name, UUID, manufacturer | — |
-| off | filtered (≤16) | Raven service UUIDs, XUNTONG manufacturer id, the Echo and HeyCyan service UUIDs, the glasses company ids (Amazon, Google and Sonos are trimmed when COMMERCIAL is on, §3.7) | OUI prefixes, name substrings |
+| off | filtered (≤16) | In order: Axon's body-cam tag, `0xFE6B` service data and `0x034D`; drone Remote ID (`0xFFFA` + `0x0D`, when AIRCRAFT is on); XUNTONG; Raven's five UUIDs and `1819`; then the Ray-Ban Meta, HeyCyan and Echo service UUIDs and the COMMERCIAL company ids as slots allow (§3.7) | OUI prefixes, name substrings, HACKER and TRACKER matching |
 
 Filter slots are a hardware resource and chipsets differ; a common allocation is
 16. Overflow is meant to fall back to software filtering, but since a scan that
@@ -821,6 +1075,20 @@ source does not depend on the radio.
 - **Promiscuous-mode tricks are not portable.** flock-you's `addr1` and
   wildcard-probe techniques need monitor mode; a userspace Android app sees only
   what `WifiManager` surfaces, which is BSSID and SSID.
+- **Extended and long-range advertising** is delivered only to a scan built with
+  `setLegacy(false)`; since v0.6.0 the BLE scan sets it, and `PHY_LE_ALL_SUPPORTED`,
+  when the adapter reports extended advertising and the Coded PHY, so drones'
+  Bluetooth 5 Remote ID can arrive. Legacy adverts are still delivered.
+- **Wi-Fi information elements** (`ScanResult.getInformationElements()`) are public
+  from API 30. Drones' Wi-Fi Remote ID rides in one; on Android 8–10 it is not read.
+- **`neverForLocation` has a price.** OVERWATCH declares it on `BLUETOOTH_SCAN`, so
+  Android withholds adverts matching its location deny-list: iBeacons and Eddystone
+  beacons. The default list exempts Eddystone frame types `0x40`–`0x4F`, which is
+  what lets Find Hub trackers through (§3.11).
+- **Bluetooth Classic discovery** (the opt-in skimmer check) runs about 12 s every 3
+  minutes; on many phones it pauses BLE results while it runs. Classic has no
+  address randomisation, and devices that answer without their name get a name
+  request, which shows them the phone's Bluetooth address.
 - **Android 14+ foreground-service types** are mandatory:
   `connectedDevice` for the radio scanners and `location` for the map/feed
   sources. Both are declared and both are passed at `startForeground` time.
@@ -858,6 +1126,10 @@ Every online destination, and the most each one learns:
 | Overpass (`overpass.deflock.org`, `overpass-api.de`) | which 0.05° (~5.5 km) cell you are in | at start, then when your 1.2 km circle reaches past the loaded box, for a cell not yet fetched this scan; a failure is retried after 60 s |
 | OpenStreetMap tile servers | the tiles the map loads, i.e. roughly the area on screen | while the map or bubble is visible, for tiles not already cached |
 | Google Maps (a row's map pin) | the exact position of that detection: a mapped camera within 1.2 km of you, a police report within 2 km, or an aircraft | only when you tap the pin |
+
+None of the radio sources sends anything online: drones' positions, tracker
+states and hacker-gear names stay on the phone. The one radio action that shows
+nearby devices more than a scan request does is the opt-in skimmer check (§5.2).
 
 Before v0.5.18 the ADS-B feeds got the fix itself (~11 m), and the Overpass and
 OpenWeb Ninja boxes were centred exactly on it; before v0.5.16 Waze direct got it
@@ -914,6 +1186,22 @@ Reference projects studied while building (kept under a gitignored `REFERENCES/`
 - **Waze 2.x client source** (`github.com/mkoloberdin/waze`, the mirror the Waze
   wiki points to) — consulted, not used, for what the `SeeMe` visibility values
   mean. Nothing from it is in OVERWATCH.
+- **v0.6.0's signature research** (identifiers only; none of this code is in
+  OVERWATCH): **all-cameras-are-beacons** (soyboi1312, Apache-2.0) — Axon and
+  Flock field captures, and the false-positive work behind dropping Espressif;
+  **nite-oui-collection** (nitekry, MIT) — the BodyWorn remote;
+  **Blue2thprinting** (Dark Mentor, proprietary; facts only) — independent Axon
+  sighting and the X85/X87 serial map; **flock-you** (MIT) — its WiGLE datasets
+  and README; **opendroneid-core-c** and **receiver-android** (Apache-2.0) — Remote
+  ID; the FAA's public Remote ID declarations — drone serial prefixes;
+  **AirGuard** (seemoo-lab, Apache-2.0) and the IETF DULT draft — trackers;
+  **flipperzero-firmware**, **Momentum** (GPL-3.0), **Wall of Flippers** (MIT),
+  **nyanBOX** (MIT), **ESP32 Marauder** (MIT), **AppleJuice** (Apache-2.0),
+  **ESP32-Sour-Apple**, **Momentum-Apps ble_spam**, **Bruce** (AGPL-3.0),
+  **esp8266_deauther** and **WiFiDuck** (MIT), **wifiphisher**, **eaphammer**,
+  **wifipumpkin3** and the other tools in §3.10 — HACKER; **SquachWatch-CYD**
+  (GPL-3.0) — the comparison that started it; the IEEE MA-L/MA-M/MA-S CSVs and
+  the Bluetooth SIG assigned numbers (2026-11-01) for every block and number.
 - **highway-radar-sabre-plus** (MIT) — the Waze RT protocol layer. The only
   reference that is *vendored* rather than studied: `scan/wazert/*.java` (apart
   from `WazeRtFetcher.java`, OVERWATCH's own driver modelled on upstream's) and

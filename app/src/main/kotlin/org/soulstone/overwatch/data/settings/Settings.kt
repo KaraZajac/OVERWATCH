@@ -56,6 +56,17 @@ class Settings private constructor(
     private val _micEnabled = MutableStateFlow(prefs.getBoolean(KEY_MIC, true))
     val micEnabled: StateFlow<Boolean> = _micEnabled.asStateFlow()
 
+    private val _hackerEnabled = MutableStateFlow(prefs.getBoolean(KEY_HACKER, true))
+    val hackerEnabled: StateFlow<Boolean> = _hackerEnabled.asStateFlow()
+
+    private val _trackerEnabled = MutableStateFlow(prefs.getBoolean(KEY_TRACKER, true))
+    val trackerEnabled: StateFlow<Boolean> = _trackerEnabled.asStateFlow()
+
+    // Off by default: the skimmer check runs a Bluetooth Classic discovery, the one
+    // radio action here that pages devices (see ClassicScanner), so it is opt-in.
+    private val _skimmerScanEnabled = MutableStateFlow(prefs.getBoolean(KEY_SKIMMER, false))
+    val skimmerScanEnabled: StateFlow<Boolean> = _skimmerScanEnabled.asStateFlow()
+
     // One radius for every location-driven source (DeFlock + Waze). Two
     // separate sliders meant the map had to visualise the larger of them, so
     // the circle rarely matched what either source was actually using.
@@ -98,6 +109,9 @@ class Settings private constructor(
     fun setWazeEnabled(v: Boolean) { prefs.edit { putBoolean(KEY_WAZE, v) }; _wazeEnabled.value = v }
     fun setAircraftEnabled(v: Boolean) { prefs.edit { putBoolean(KEY_AIRCRAFT, v) }; _aircraftEnabled.value = v }
     fun setMicEnabled(v: Boolean) { prefs.edit { putBoolean(KEY_MIC, v) }; _micEnabled.value = v }
+    fun setHackerEnabled(v: Boolean) { prefs.edit { putBoolean(KEY_HACKER, v) }; _hackerEnabled.value = v }
+    fun setTrackerEnabled(v: Boolean) { prefs.edit { putBoolean(KEY_TRACKER, v) }; _trackerEnabled.value = v }
+    fun setSkimmerScanEnabled(v: Boolean) { prefs.edit { putBoolean(KEY_SKIMMER, v) }; _skimmerScanEnabled.value = v }
 
     fun setDetectionRadiusM(v: Int) {
         val clamped = v.coerceIn(RADIUS_MIN, RADIUS_MAX)
@@ -152,6 +166,9 @@ class Settings private constructor(
         private const val KEY_WAZE = "src_waze"
         private const val KEY_AIRCRAFT = "src_aircraft"
         private const val KEY_MIC = "src_mic"
+        private const val KEY_HACKER = "src_hacker"
+        private const val KEY_TRACKER = "src_tracker"
+        private const val KEY_SKIMMER = "skimmer_scan"
         private const val KEY_DETECTION_RADIUS = "detection_radius_m"
         private const val KEY_WAZE_API_KEY = "waze_api_key"
         private const val KEY_WAZE_BACKEND = "waze_backend"

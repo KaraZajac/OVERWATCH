@@ -26,12 +26,58 @@ object ConfidenceEngine {
     const val W_BLE_TN_SERIAL_BONUS = 20  // added on top of mfg
     const val W_BLE_RAVEN_UUID = 70
     const val W_BLE_RAVEN_UUID_MULTI = 90 // 3+ UUIDs
+    // Radio-module makers' prefixes seen on Flock hardware (Liteon, Silicon Labs,
+    // USI): below the display floor alone, since v0.6.0. Those chips are in
+    // laptops, TVs and smart plugs; a real Flock radio also sends a name, an SSID
+    // or a maker id, and that is what lifts it.
+    const val W_BLE_OUI_MODULE = 25
+    // Axon / Utility identifiers that survive a random MAC (AxonSignatures).
+    const val W_BLE_AXON_TAG = 90         // "BWCDEVICE" body-cam tag
+    const val W_BLE_AXON_SIG = 80         // SIG number with a serial, METROPOLIS, BodyWorn
+    const val W_BLE_AXON_UUID = 75        // an Axon SIG UUID listed, no payload
 
     // Single-method base weights (WiFi — wired in Phase 2)
     const val W_WIFI_OUI = 40
     const val W_WIFI_OUI_POLICE = 75  // WatchGuard 4RE cruiser APs, ShotSpotter backhaul
+    const val W_WIFI_OUI_AXON = 80
+    const val W_WIFI_OUI_MODULE = 25
     const val W_WIFI_SSID_GENERIC = 50
     const val W_WIFI_SSID_FLOCK_FMT = 65
+    const val W_WIFI_SSID_FLOCK_HOTSPOT = 65
+    const val B_WIFI_SSID_FLOCK_TAIL = 15   // the hex is the BSSID's last 3 bytes
+
+    // HACKER — attack and pentest gear. Capped at ORANGE like COMMERCIAL: RED stays
+    // reserved for ALPR/Axon-grade evidence of being watched.
+    const val HACKER_SCORE_CAP = 84
+    const val W_HACK_FLIPPER = 60           // Flipper serial-profile UUID 0x3080–0x3083
+    const val B_HACK_FLIPPER_NAME = 15      // "Flipper <name>"
+    const val B_HACK_FLIPPER_ADDR = 10      // 80:E1:26 / 80:E1:27
+    const val W_HACK_FLIPPER_HID = 70       // BLE remote / BadUSB mode
+    const val W_HACK_NYANBOX = 60
+    const val W_HACK_AXONCADABRA = 75       // spoofed Axon Signal trigger
+    const val W_HACK_BLE_SPAM = 84          // crash advert, AppleJuice, flood, cycling
+    const val W_HACK_TOOL_SSID = 55
+    const val W_HACK_PORTAL_SSID = 50
+    const val W_HACK_ROGUE_BSSID = 70
+    const val W_HACK_BEACON_SPAM = 75
+    const val W_HACK_MANY_NAMES = 70        // one BSSID, 5+ network names
+    const val W_HACK_MARAUDER_DECOY = 55
+    const val W_HACK_SKIMMER = 65           // HC-05-family module (Bluetooth Classic)
+    const val B_HACK_STRONG_RSSI = 5
+
+    // TRACKER — tags away from their owner. Capped at ORANGE.
+    const val TRACKER_SCORE_CAP = 84
+    const val W_TRACKER_SEPARATED = 45      // the tag says it is away from its owner
+    const val W_TRACKER_UNKNOWN = 30        // the format doesn't say (Tile, Pebblebee)
+    const val B_TRACKER_FOLLOWING = 25      // in range without a break for 10+ min
+    const val TRACKER_FOLLOWING_MS = 10L * 60L * 1000L
+
+    // Drones (Remote ID), filed under AIRCRAFT. Capped at ORANGE: a model is not an owner.
+    const val DRONE_SCORE_CAP = 84
+    const val W_DRONE_ANY = 45
+    const val W_DRONE_PUBLIC_SAFETY = 55    // enterprise / public-safety models
+    const val W_DRONE_FIRST_RESPONDER = 65  // DJI dock aircraft, Skydio X10 / R10
+    const val W_DRONE_POLICE_MAKER = 75     // BRINC
 
     // DeFlock + Waze are scored by a continuous distance falloff — see the
     // FALLOFF tables below. A flat "inside the radius" score made the tier
@@ -69,7 +115,13 @@ object ConfidenceEngine {
         val advertisedUuids: List<java.util.UUID>?,
         val manufacturerCompanyId: Int?,
         val manufacturerPayload: ByteArray?,
-        val isStationary: Boolean = false
+        val isStationary: Boolean = false,
+        /** The advertised service-UUID list alone, without service-data keys. */
+        val serviceUuidList: List<java.util.UUID>? = null,
+        val serviceData: Map<java.util.UUID, ByteArray>? = null,
+        /** Every manufacturer payload by company ID (company ID not included). */
+        val manufacturerData: Map<Int, ByteArray>? = null,
+        val rawBytes: ByteArray? = null
     )
 
     /** What we observed about one WiFi AP on a single scan result. */
@@ -125,29 +177,44 @@ object ConfidenceEngine {
         var score = 0
         val methods = StringBuilder()
         var methodCount = 0
-        var ouiHit = false
-        var nameHit = false
-        var mfgHit = false
-        var ravenHit = false
         var isAxon = false
 
-        // OUI prefix
-        if (org.soulstone.overwatch.data.targets.BleOuis.isAxon(obs.mac)) {
-            score += W_BLE_OUI_AXON
-            methods.append("axon_oui ")
-            ouiHit = true; isAxon = true
-        } else if (org.soulstone.overwatch.data.targets.VendorOuis.isPoliceExclusive(obs.mac)) {
-            score += W_BLE_OUI_POLICE
-            methods.append("police_oui ")
-            ouiHit = true
-        } else if (org.soulstone.overwatch.data.targets.BleOuis.matches(obs.mac)) {
-            score += W_BLE_OUI
-            methods.append("oui ")
-            ouiHit = true
+        // OUI prefix: Axon, then a vendor's own block, then a module maker's.
+        val mac = obs.mac
+        val ouiHit = when {
+            org.soulstone.overwatch.data.targets.BleOuis.isAxon(mac) -> {
+                score += W_BLE_OUI_AXON; methods.append("axon_oui "); isAxon = true; true
+            }
+            org.soulstone.overwatch.data.targets.VendorOuis.isPoliceExclusive(mac) -> {
+                score += W_BLE_OUI_POLICE; methods.append("police_oui "); true
+            }
+            org.soulstone.overwatch.data.targets.VendorOuis.matches(mac) -> {
+                score += W_BLE_OUI; methods.append("vendor_oui "); true
+            }
+            org.soulstone.overwatch.data.targets.BleOuis.isModule(mac) -> {
+                score += W_BLE_OUI_MODULE; methods.append("module_oui "); true
+            }
+            else -> false
         }
         if (ouiHit) methodCount++
 
+        // Axon / Utility identifiers that survive a randomised MAC.
+        val axon = org.soulstone.overwatch.data.targets.AxonSignatures.match(
+            obs.rawBytes, obs.deviceName, obs.serviceUuidList, obs.serviceData, obs.manufacturerData
+        )
+        if (axon != null) {
+            score += when (axon.kind) {
+                org.soulstone.overwatch.data.targets.AxonSignatures.Kind.BWC_TAG -> W_BLE_AXON_TAG
+                org.soulstone.overwatch.data.targets.AxonSignatures.Kind.SIG_UUID -> W_BLE_AXON_UUID
+                else -> W_BLE_AXON_SIG
+            }
+            methods.append(axon.method).append(' ')
+            methodCount++
+            if (axon.kind != org.soulstone.overwatch.data.targets.AxonSignatures.Kind.BODYWORN) isAxon = true
+        }
+
         // Device name patterns
+        var nameHit = false
         if (org.soulstone.overwatch.data.targets.Patterns.bleNameMatch(obs.deviceName)) {
             score += W_BLE_NAME
             methods.append("name ")
@@ -159,7 +226,8 @@ object ConfidenceEngine {
         }
         if (nameHit) methodCount++
 
-        // Manufacturer-data signature
+        // Manufacturer-data signature: XUNTONG, the Penguin battery pack's ID
+        var mfgHit = false
         if (obs.manufacturerCompanyId == org.soulstone.overwatch.data.targets.Manufacturers.XUNTONG_COMPANY_ID) {
             score += W_BLE_MFG_XUNTONG
             methods.append("mfg_0x09C8 ")
@@ -172,6 +240,7 @@ object ConfidenceEngine {
         if (mfgHit) methodCount++
 
         // Raven service UUIDs
+        var ravenHit = false
         val ravenCount = org.soulstone.overwatch.data.targets.RavenUuids.countMatches(obs.advertisedUuids)
         if (ravenCount > 0) {
             if (ravenCount >= 3) {
@@ -205,15 +274,17 @@ object ConfidenceEngine {
 
         score = score.coerceAtMost(100)
 
-        val vendor = org.soulstone.overwatch.data.targets.VendorOuis.label(obs.mac)
+        val vendor = org.soulstone.overwatch.data.targets.VendorOuis.label(mac)
         val label = when {
-            isAxon -> "Axon body cam (${obs.mac})"
-            ravenHit -> "Raven gunshot detector (${obs.mac})"
+            axon != null -> "${axon.label} ($mac)"
+            isAxon -> "Axon device ($mac)"
+            ravenHit -> "Raven gunshot detector ($mac)"
             vendor != null && !obs.deviceName.isNullOrBlank() ->
-                "$vendor — ${obs.deviceName} (${obs.mac})"
-            vendor != null -> "$vendor (${obs.mac})"
-            !obs.deviceName.isNullOrBlank() -> "${obs.deviceName} (${obs.mac})"
-            else -> "Surveillance BLE (${obs.mac})"
+                "$vendor — ${obs.deviceName} ($mac)"
+            vendor != null -> "$vendor ($mac)"
+            !obs.deviceName.isNullOrBlank() -> "${obs.deviceName} ($mac)"
+            mfgHit -> "Flock Penguin battery ($mac)"
+            else -> "Surveillance BLE ($mac)"
         }
 
         return Scored(score, methods.toString().trim(), label, isAxon)
@@ -431,6 +502,15 @@ object ConfidenceEngine {
             methods.append("mic_svc ")
             methodCount++
         }
+        // Meta's FEB7/FEB8 and Snap's FE45 are company-wide, so they weigh like a
+        // company id, and only count when the company id itself is absent.
+        val weakSvcFamily = if (svcFamily == null && mfgFamily == null)
+            org.soulstone.overwatch.data.targets.MicTargets.matchWeakService(obs.advertisedUuids) else null
+        if (weakSvcFamily != null) {
+            score += W_MIC_MFG
+            methods.append("mic_svc_maker ")
+            methodCount++
+        }
         if (methodCount >= 2) {
             score += B_MIC_MULTI
             methods.append("multi ")
@@ -446,7 +526,7 @@ object ConfidenceEngine {
         score = score.coerceAtMost(MIC_SCORE_CAP)
         // A service UUID is the most specific signal after a name, so it
         // outranks the OUI and company id when deciding what to call this.
-        val family = nameMatch?.family ?: svcFamily ?: ouiFamily ?: mfgFamily
+        val family = nameMatch?.family ?: svcFamily ?: ouiFamily ?: mfgFamily ?: weakSvcFamily
             ?: org.soulstone.overwatch.data.targets.MicTargets.Family.HIDDEN_CAM
         val familyLabel = org.soulstone.overwatch.data.targets.MicTargets.familyLabel(family)
         val nameSuffix = if (!obs.deviceName.isNullOrBlank()) " — ${obs.deviceName}" else ""
@@ -494,24 +574,38 @@ object ConfidenceEngine {
         val methods = StringBuilder()
         var methodCount = 0
 
-        val policeOui = org.soulstone.overwatch.data.targets.VendorOuis.isPoliceExclusive(obs.bssid)
-        val ouiHit = policeOui || org.soulstone.overwatch.data.targets.WifiOuis.matches(obs.bssid)
-        if (policeOui) {
-            score += W_WIFI_OUI_POLICE
-            methods.append("police_oui ")
-            methodCount++
-        } else if (ouiHit) {
-            score += W_WIFI_OUI
-            methods.append("oui ")
-            methodCount++
+        val bssid = obs.bssid
+        val axonOui = org.soulstone.overwatch.data.targets.BleOuis.isAxon(bssid)
+        val ouiHit = when {
+            axonOui -> { score += W_WIFI_OUI_AXON; methods.append("axon_oui "); true }
+            org.soulstone.overwatch.data.targets.VendorOuis.isPoliceExclusive(bssid) -> {
+                score += W_WIFI_OUI_POLICE; methods.append("police_oui "); true
+            }
+            org.soulstone.overwatch.data.targets.VendorOuis.matches(bssid) -> {
+                score += W_WIFI_OUI; methods.append("vendor_oui "); true
+            }
+            org.soulstone.overwatch.data.targets.WifiOuis.isModule(bssid) -> {
+                score += W_WIFI_OUI_MODULE; methods.append("module_oui "); true
+            }
+            else -> false
         }
+        if (ouiHit) methodCount++
 
         var ssidHit = false
-        if (org.soulstone.overwatch.data.targets.Patterns.ssidFlockFormat(obs.ssid)) {
+        val patterns = org.soulstone.overwatch.data.targets.Patterns
+        if (patterns.ssidFlockFormat(obs.ssid)) {
             score += W_WIFI_SSID_FLOCK_FMT
             methods.append("ssid_flock ")
+            if (patterns.ssidFlockMatchesBssid(obs.ssid, bssid)) {
+                score += B_WIFI_SSID_FLOCK_TAIL
+                methods.append("bssid_tail ")
+            }
             ssidHit = true
-        } else if (org.soulstone.overwatch.data.targets.Patterns.ssidGenericMatch(obs.ssid)) {
+        } else if (patterns.ssidFlockHotspot(obs.ssid)) {
+            score += W_WIFI_SSID_FLOCK_HOTSPOT
+            methods.append("ssid_flock_hotspot ")
+            ssidHit = true
+        } else if (patterns.ssidGenericMatch(obs.ssid)) {
             score += W_WIFI_SSID_GENERIC
             methods.append("ssid_generic ")
             ssidHit = true
@@ -533,14 +627,61 @@ object ConfidenceEngine {
 
         score = score.coerceAtMost(100)
 
-        val vendor = org.soulstone.overwatch.data.targets.VendorOuis.label(obs.bssid)
+        val vendor = if (axonOui) "Axon device"
+            else org.soulstone.overwatch.data.targets.VendorOuis.label(bssid)
         val label = when {
-            vendor != null && !obs.ssid.isNullOrBlank() -> "$vendor — ${obs.ssid} (${obs.bssid})"
-            vendor != null -> "$vendor (${obs.bssid})"
-            !obs.ssid.isNullOrBlank() -> "${obs.ssid} (${obs.bssid})"
-            else -> "Surveillance WiFi (${obs.bssid})"
+            vendor != null && !obs.ssid.isNullOrBlank() -> "$vendor — ${obs.ssid} ($bssid)"
+            vendor != null -> "$vendor ($bssid)"
+            !obs.ssid.isNullOrBlank() -> "${obs.ssid} ($bssid)"
+            else -> "Surveillance WiFi ($bssid)"
         }
 
-        return Scored(score, methods.toString().trim(), label, isAxon = false)
+        return Scored(score, methods.toString().trim(), label, isAxon = axonOui)
     }
+
+    // ---- HACKER ---------------------------------------------------------------
+
+    /** Base weight of a single-advert hacker-gear match. */
+    fun hackerWeight(kind: org.soulstone.overwatch.data.targets.HackerTargets.Kind): Int = when (kind) {
+        org.soulstone.overwatch.data.targets.HackerTargets.Kind.FLIPPER -> W_HACK_FLIPPER
+        org.soulstone.overwatch.data.targets.HackerTargets.Kind.FLIPPER_HID -> W_HACK_FLIPPER_HID
+        org.soulstone.overwatch.data.targets.HackerTargets.Kind.NYANBOX -> W_HACK_NYANBOX
+        org.soulstone.overwatch.data.targets.HackerTargets.Kind.AXONCADABRA -> W_HACK_AXONCADABRA
+        org.soulstone.overwatch.data.targets.HackerTargets.Kind.TOOL_AP -> W_HACK_TOOL_SSID
+        org.soulstone.overwatch.data.targets.HackerTargets.Kind.PORTAL_AP -> W_HACK_PORTAL_SSID
+        org.soulstone.overwatch.data.targets.HackerTargets.Kind.ROGUE_AP -> W_HACK_ROGUE_BSSID
+        org.soulstone.overwatch.data.targets.HackerTargets.Kind.MARAUDER_DECOY -> W_HACK_MARAUDER_DECOY
+        org.soulstone.overwatch.data.targets.HackerTargets.Kind.SKIMMER -> W_HACK_SKIMMER
+    }
+
+    /** A hacker-gear score: [base] plus [extra] corroboration plus +5 when very close,
+     *  capped at ORANGE. */
+    fun scoreHacker(base: Int, extra: Int, rssi: Int?): Int {
+        val close = if (rssi != null && rssi > -50) B_HACK_STRONG_RSSI else 0
+        return (base + extra + close).coerceAtMost(HACKER_SCORE_CAP)
+    }
+
+    // ---- TRACKER --------------------------------------------------------------
+
+    /** A tracker's score from whether it says it is separated and how long it has
+     *  stayed in range. A tag on its own is somebody's keys; one that stays is the case
+     *  that matters, so only staying lifts an unknown-state tag over the floor. */
+    fun scoreTracker(separated: Boolean?, dwellMs: Long): Scored {
+        var score = if (separated == true) W_TRACKER_SEPARATED else W_TRACKER_UNKNOWN
+        val methods = StringBuilder(if (separated == true) "separated" else "tracker")
+        if (dwellMs >= TRACKER_FOLLOWING_MS) {
+            score += B_TRACKER_FOLLOWING
+            methods.append(" following")
+        }
+        return Scored(score.coerceAtMost(TRACKER_SCORE_CAP), methods.toString(), "", isAxon = false)
+    }
+
+    // ---- Drones (Remote ID) ---------------------------------------------------
+
+    fun scoreDrone(tier: org.soulstone.overwatch.data.targets.RemoteId.Tier): Int = when (tier) {
+        org.soulstone.overwatch.data.targets.RemoteId.Tier.POLICE_MAKER -> W_DRONE_POLICE_MAKER
+        org.soulstone.overwatch.data.targets.RemoteId.Tier.FIRST_RESPONDER -> W_DRONE_FIRST_RESPONDER
+        org.soulstone.overwatch.data.targets.RemoteId.Tier.PUBLIC_SAFETY -> W_DRONE_PUBLIC_SAFETY
+        org.soulstone.overwatch.data.targets.RemoteId.Tier.ANY -> W_DRONE_ANY
+    }.coerceAtMost(DRONE_SCORE_CAP)
 }

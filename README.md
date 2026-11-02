@@ -3,12 +3,14 @@
 A native Android (Kotlin) **surveillance-detection** app. Open it, hit
 **START**, and a circle turns **green / yellow / orange / red** depending on
 how confident the engine is that there's a Flock Safety ALPR, an Axon body
-camera, or active police presence near you. With the screen locked, the
+camera, or active police presence near you — and, since v0.6.0, a police drone
+overhead, attack gear such as a Flipper Zero, or an item tracker that has left
+its owner. With the screen locked, the
 foreground notification updates with the current tier and the phone vibrates
 on upward escalations — you don't have to be looking at the screen. With the
 screen off, Android allows only filtered Bluetooth scans, so MAC-prefix and name
-matches (Axon among them) wait until it wakes; Raven, XUNTONG's maker ID and the
-online sources carry on.
+matches wait until it wakes; Axon's body-cam tag and Bluetooth IDs, drone Remote
+ID, Raven, the Penguin pack's maker ID and the online sources carry on.
 
 > **Defensive only.** OVERWATCH never connects to, pairs with, or jams anything
 > it detects. Its radio scans are the ordinary ones every Android phone makes —
@@ -20,7 +22,7 @@ online sources carry on.
 > [SOURCES.md §5.4](SOURCES.md)). The Axon advertise/fuzz code from one of
 > the reference projects is intentionally excluded.
 
-Website: **[overwatch.netslum.io](https://overwatch.netslum.io)**  ·  Latest release: [v0.5.20](https://github.com/KaraZajac/OVERWATCH/releases) (debug-signed APK, sideload).
+Website: **[overwatch.netslum.io](https://overwatch.netslum.io)**  ·  Latest release: [v0.6.0](https://github.com/KaraZajac/OVERWATCH/releases) (debug-signed APK, sideload).
 
 ---
 
@@ -34,7 +36,7 @@ Website: **[overwatch.netslum.io](https://overwatch.netslum.io)**  ·  Latest re
   <img src="docs/img/overwatch-settings.png" width="240" alt="Settings" />
 </p>
 
-<p align="center"><sub>Live threat-map circle · source drill-down · settings — taken on v0.5.5 or earlier, so they still show the retired Citizen source and Waze proxy-token field, and no Aircraft source; new screenshots are coming.</sub></p>
+<p align="center"><sub>Live threat-map circle · source drill-down · settings — taken on v0.5.20 on an Android 16 emulator, so they don't show v0.6.0's Hacker and Tracker rows and toggles.</sub></p>
 
 ---
 
@@ -42,12 +44,14 @@ Website: **[overwatch.netslum.io](https://overwatch.netslum.io)**  ·  Latest re
 
 | Source | What it looks at | Where it comes from |
 |---|---|---|
-| **BLE** | Bluetooth-LE advertisements: MAC OUI prefixes (Axon's own, and the radio-module makers' prefixes seen on Flock Penguin / Raven hardware, none of them registered to Flock), XUNTONG mfg id `0x09C8`, "TN" serial pattern, Raven service UUIDs, device-name patterns — plus 19 IEEE-verified surveillance-vendor OUIs (Flock Safety's own `b4:1e:52`, ShotSpotter, WatchGuard/Motorola, Verkada, Avigilon Alta, Axis body cams, FLIR, Hanwha, March Networks, GeoVision, Mobotix, Sunell) with vendor-named labels | Local radio scan (BLE callback API). Iterates every manufacturer-specific data entry to find XUNTONG (then any COMMERCIAL company id), not just the first. **Screen off:** Android suspends unfiltered scans, so the scanner switches to a filtered scan (Raven UUIDs, XUNTONG, the Echo and HeyCyan service UUIDs and the glasses company ids — 16 filters at most, so Amazon, Google and Sonos drop out); OUI-prefix and name matching resume when the screen is on — see [SOURCES.md §5.1](SOURCES.md). Police-exclusive OUIs (WatchGuard, ShotSpotter) score ORANGE on sight, same rationale as Axon. |
-| **WiFi** | BSSID prefixes seen on Flock hardware (flock-you's list of 31, all radio-module makers' prefixes, none registered to Flock) + the same 19 vendor OUIs, Flock Safety's own among them (WatchGuard 4RE in-car APs, Openpath/Alta readers, WiFi-capable cameras), `Flock-XXXX` and other generic SSID patterns | `WifiManager.getScanResults()` polled every 35 s (just under the Android 9+ 4-scans/2-min throttle) |
+| **BLE** | Bluetooth-LE advertisements: **Axon body cams by the `AXJANUSBWCDEVICE` tag they broadcast** (from public field captures; works on a randomised address), Axon's Bluetooth SIG IDs with their serials, its two MAC blocks and Utility's BodyWorn remotes; Raven service UUIDs; the Penguin battery pack's maker id `0x09C8` (XUNTONG) and "TN" serial; Flock name patterns anchored to the forms real devices use; 37 IEEE-verified surveillance-vendor blocks (Flock Safety's own `b4:1e:52`, ShotSpotter, WatchGuard, Digital Ally, Utility, Kustom Signals radar, Motorola Solutions, ELSAG, Genetec, Verkada, Avigilon Alta, Axis body cams, FLIR, Hanwha and more; 28- and 36-bit blocks included) with vendor-named labels. The radio-module makers' prefixes seen on Flock hardware count only alongside another signal. | Local radio scan (BLE callback API), legacy and, where the phone supports it, extended / long-range advertising. Iterates every manufacturer-specific data entry. **Screen off:** Android suspends unfiltered scans, so the scanner switches to a filtered scan (Axon's tag, `0xFE6B` and `0x034D`, drone Remote ID, XUNTONG, Raven, then the COMMERCIAL UUIDs and company ids — 16 filters at most); OUI-prefix and name matching resume when the screen is on — see [SOURCES.md §5.1](SOURCES.md). Police-exclusive vendors score ORANGE on sight, same rationale as Axon. |
+| **WiFi** | Flock's hotspot SSID, `Flock-` plus the BSSID's last six hex digits (all 803 in flock-you's WiGLE data; the old four-hex pattern matched none), Flock's "Flock Camera" hotspot and other Flock tokens; the same 37 vendor blocks and Axon's; the radio-module prefixes seen on Flock hardware (flock-you's list, less Samsung's and Espressif's) as supporting evidence only. Flock turned its hotspot off around December 2025, so this mostly finds older cameras. | `WifiManager.getScanResults()` polled every 35 s (just under the Android 9+ 4-scans/2-min throttle) |
 | **DEFLOCK** | Mapped ALPRs, speed cameras and other surveillance cameras within 1.2 km, each scored on its own curve by how close it actually is | POST to Overpass API (`overpass.deflock.org` → fallback `overpass-api.de`) for every `man_made=surveillance` node plus `highway=speed_camera`, in a box ±0.05° around the centre of your 0.05° grid cell (never around your position), so Overpass learns only which ~5.5 km cell you are in; cached per cell for the current scan only, and deleted when scanning stops. Fetches the next cell as soon as your 1.2 km circle would reach past the loaded box, so every position is checked against a box that covers it (below about 64° latitude), and retries a failed fetch after 60 s. Treats `{"remark": "...timed out..."}` 200-responses as failure so timeouts don't poison the cache. |
 | **WAZE** | User-reported `POLICE` alerts still active in the feed within 2 km, up to ~45 min old, scored by distance and age | **Two selectable backends.** *OpenWeb Ninja* (default): `api.openwebninja.com/waze/alerts-and-jams` called with **your own API key** (`X-API-Key`, entered in Settings, stored encrypted on-device), polled every ~4 min with `alert_types=POLICE&max_jams=0` (~1.5 KB/poll). Metered, lags live Waze by ~20 min, and Waze never sees you — the request is made by OpenWeb Ninja's servers, which are told the centre of your 1 km grid square, under your key. *Direct* (opt-in, off by default): speaks the Waze app's own protocol over an anonymous account OVERWATCH registers, polled every 60 s. Free, keyless and live, but it reports which 1 km grid square you are in to a Google service on every poll. Waze never gets the exact fix. Both re-filter to POLICE client-side so an upstream change can't let other types through. Alerts carry crowd-trust signals that nudge the score up. |
-| **AIRCRAFT** | Police / surveillance aircraft overhead — identified from a bundled registry of 1,971 law-enforcement airframes, all but 36 of them American, plus loiter detection for unlisted ones | `opendata.adsb.fi` → fallback `api.adsb.lol`, polled every 60 s and told the centre of your 1 km grid square, not your position. **No API key.** Community ADS-B networks are used specifically because the commercial trackers filter law-enforcement flights at government request. Matched on the ICAO 24-bit address; scored by ground distance, altitude and orbit behaviour. |
-| **COMMERCIAL** | Nearby consumer smart-home / voice gear (Nest, Ring, Echo, Sonos, hidden cams) and camera-bearing smart glasses (Meta Ray-Ban / Oakley, Snap Spectacles, Vuzix, and HeyCyan-SDK frames such as the Nilox Smart AI Glasses) as a secondary situational signal | Rides the BLE + WiFi scans — OUI / device-name / service-UUID / SSID matches plus Bluetooth SIG company IDs from `MicTargets`. Score-capped at ORANGE so a cluster of doorbells (or a passing pair of Ray-Bans) never reads as ALPR-grade certainty. |
+| **AIRCRAFT** | Police / surveillance aircraft overhead — identified from a bundled registry of 1,971 law-enforcement airframes, all but 36 of them American, plus loiter detection for unlisted ones — and **drones**, by their FAA Remote ID broadcast: the serial names the maker and often the model (BRINC, Skydio X10 / R10, DJI dock drones score highest), and the drone's own position puts it on the map | Aircraft: `opendata.adsb.fi` → fallback `api.adsb.lol`, polled every 60 s and told the centre of your 1 km grid square, not your position. **No API key.** Community ADS-B networks are used specifically because the commercial trackers filter law-enforcement flights at government request. Matched on the ICAO 24-bit address; scored by ground distance, altitude and orbit behaviour. Drones: heard directly over Bluetooth (service data `0xFFFA`) and Wi-Fi beacons (vendor element `FA:0B:BC`, Android 11+); nothing is sent. |
+| **COMMERCIAL** | Nearby consumer smart-home / voice gear (Nest, Ring, Blink, Echo, Sonos, hidden cams) and camera-bearing smart glasses (Meta Ray-Ban / Oakley — by their own service UUID `0xFD5F` — Snap Spectacles, Vuzix, and HeyCyan-SDK frames such as the Nilox Smart AI Glasses) as a secondary situational signal | Rides the BLE + WiFi scans — OUI / device-name / service-UUID / SSID matches plus Bluetooth SIG company IDs from `MicTargets`. Score-capped at ORANGE so a cluster of doorbells (or a passing pair of Ray-Bans) never reads as ALPR-grade certainty. |
+| **HACKER** | Gear that transmits *at* radios: Flipper Zero (its own Bluetooth service, `0x3080`–`0x3083`, and its remote / BadUSB mode), nyanBOX, Bluetooth pop-up spam floods (fake AirPods / Apple TV / Fast Pair / Samsung / Windows prompts) and the iOS crash advert, Wi-Fi beacon spam, the default hotspots of the WiFi Pineapple, ESP deauther, Bruce, GhostESP, O.MG and other tools, rogue-AP frameworks' default BSSIDs, ESP32 Marauder's fake "Flock" network, and AxonCadabra's spoofed Axon trigger. Optional card-skimmer check (HC-05-type modules). | Rides the BLE + WiFi scans; identifiers come from each tool's own source. The skimmer check is a Bluetooth Classic discovery every 3 minutes, **off by default** (Settings → Look for card skimmers) because a module that answers gets a name request. Capped at ORANGE. |
+| **TRACKER** | AirTags, Find My accessories, Google Find Hub tags, Samsung SmartTags, Chipolo and DULT tags that say they are **away from their owner**; Tile and Pebblebee tags, which never say, once they have stayed near you 10 minutes | Rides the BLE scan, following AirGuard's rules (seemoo-lab) and the IETF DULT draft. A tag beside its owner's phone never counts. Capped at ORANGE. |
 
 > **Citizen was removed (v0.5.8).** Citizen ended the police-dispatch data
 > partnership behind its public feed in June 2026. It first degraded to silent
@@ -126,7 +130,7 @@ While scanning, the circle becomes a live OpenStreetMap centered on you, wrapped
 in a **threat-color ring** (the current tier at a glance) and marked with a ⌖
 crosshair for your position. Map geodata is color-coded by source — **Flock /
 DeFlock ALPR red, speed cameras amber, other cameras gray, Waze police blue,
-aircraft violet** — so each dot
+aircraft and drones violet** — so each dot
 is self-explanatory. The same map renders in a smaller floating overlay bubble
 (Settings → Display over other apps) so it works over other apps.
 
@@ -136,7 +140,7 @@ is self-explanatory. The same map renders in a smaller floating overlay bubble
 
 - **In-app**: the threat circle shows a live map with a threat-color ring and
   source-color dots while scanning, with a legend beneath it — **ALPR red,
-  speed camera amber, generic camera gray, Waze police blue, aircraft violet**,
+  speed camera amber, generic camera gray, Waze police blue, aircraft and drones violet**,
   and a ⌖ crosshair for your own position; tap it to open the bottom-sheet drill-down
   with per-source rows. DeFlock, Waze and aircraft rows carry coordinates
   and a tap-to-open Maps icon.
@@ -162,8 +166,9 @@ ui/SettingsScreen.kt               source toggles, Waze backend + key/account, p
 ui/theme/Theme.kt                  Material 3 dark/light + threat colors
 service/DetectionService.kt        foreground service — owns scanners, notification, vibration
 service/OverlayManager.kt          WindowManager host for the floating overlay bubble
-scan/BleScanner.kt                 BLE callback scanner
-scan/WifiScanner.kt                WifiManager poller + SCAN_RESULTS receiver
+scan/BleScanner.kt                 BLE callback scanner (also HACKER, TRACKER and drone Remote ID)
+scan/WifiScanner.kt                WifiManager poller + SCAN_RESULTS receiver (beacon spam, Wi-Fi Remote ID)
+scan/ClassicScanner.kt             opt-in Bluetooth Classic discovery for card skimmers
 scan/DeflockClient.kt              Overpass POST (deflock.org → overpass-api.de) + per-scan cell cache
 scan/DeflockScanner.kt             location-driven proximity check + failure backoff
 scan/WazeSource.kt                 the two-backend interface (alert + result types)
@@ -175,8 +180,11 @@ scan/WazeScanner.kt                polls whichever backend is selected, client-s
 scan/wazert/WazeRtClient.kt        backend 2 — Waze's own app protocol, anonymous account
 scan/wazert/WazeRtFetcher.java     session + account + rate limits for backend 2
 scan/wazert/*.java, proto/         vendored protocol layer + waze.proto (MIT, see credits)
-fusion/ConfidenceEngine.kt         scoring (BLE / WiFi / DeFlock / Waze / aircraft / Commercial)
+fusion/ConfidenceEngine.kt         scoring (BLE / WiFi / DeFlock / Waze / aircraft / drones / Commercial / Hacker / Tracker)
 fusion/RssiTracker.kt              rise-peak-fall stationary-signal detector
+fusion/BleSpamDetector.kt          Bluetooth pop-up spam: fixed templates, floods, one transmitter cycling devices
+fusion/DroneTracker.kt             joins one drone's Remote ID messages across adverts
+fusion/TrackerDwell.kt             how long each tracker has stayed in range
 fusion/DetectionStore.kt           in-memory dedup, 5-min retention, max-tier flow
 fusion/SourceHealth.kt             per-source OK/FAILED registry for the drill-down
 fusion/ThreatLevel.kt              4-tier enum + DetectionSource enum
@@ -185,7 +193,8 @@ data/location/PositionCloak.java   the 1 km grid square that is all ADS-B, OpenW
 data/cache/LocationTraces.kt       deletes the camera cache (and, if asked, map tiles) at stop and start
 data/settings/Settings.kt          SharedPreferences-backed StateFlow settings
 data/settings/SecureStore.kt       Keystore AES/GCM store for the Waze key + anonymous account
-data/targets/                      BleOuis, WifiOuis, VendorOuis, RavenUuids, Patterns, Manufacturers, MicTargets
+data/targets/                      BleOuis, WifiOuis, VendorOuis, RavenUuids, Patterns, Manufacturers, MicTargets,
+                                   AxonSignatures, HackerTargets, EspressifOuis, TrackerTargets, RemoteId
 ```
 
 No detection-history database: detections live in memory and clear on stop,
@@ -353,7 +362,7 @@ without an uninstall.
 | Permission | Why |
 |---|---|
 | `BLUETOOTH_SCAN`, `BLUETOOTH_CONNECT` (API 31+) | BLE scanning; `CONNECT` is needed only to read advertised device names — the app never connects |
-| `BLUETOOTH`, `BLUETOOTH_ADMIN` (≤ API 30) | BLE scanning, legacy |
+| `BLUETOOTH`, `BLUETOOTH_ADMIN` (≤ API 30) | BLE scanning, and the opt-in skimmer check's Classic discovery, legacy |
 | `ACCESS_FINE_LOCATION`, `ACCESS_COARSE_LOCATION` | Required for BLE pre-S, WiFi pre-T, and the distances DeFlock, Waze and aircraft are scored by |
 | `NEARBY_WIFI_DEVICES` (API 33+) | WiFi scan results without using location |
 | `ACCESS_WIFI_STATE`, `CHANGE_WIFI_STATE` | Trigger and read scan results |
@@ -374,8 +383,10 @@ you can grant it manually.
 
 Tap the gear icon in the top-right.
 
-- **Detection sources**: toggle BLE / WiFi / DeFlock / Waze / Aircraft / Commercial independently.
-  Changes take effect on the next Start (COMMERCIAL applies right away). While
+- **Detection sources**: toggle BLE / WiFi / DeFlock / Waze / Aircraft (planes and drones) /
+  Commercial / Hacker / Tracker independently, plus **Look for card skimmers** under Hacker
+  (off by default). Changes take effect on the next Start (Commercial, Hacker, Tracker and
+  drones apply right away). While
   scanning, a **Restart scan to apply** button appears that does `stop()` +
   `start()` in one tap; it applies the Waze backend choice too. (v0.5.18's
   restart kept the backend the scan had started with.)
@@ -418,6 +429,21 @@ These live under `REFERENCES/` (gitignored):
 - **flock-you** — its 31-prefix Flock WiFi list (promiscuous-mode tricks not portable to Android)
 - **deflock** + **deflock-app** — Overpass query format + proximity-alert pattern (the Flutter app uses Overpass directly, not the CDN tiles, which the OVERWATCH client mirrors)
 - **wazepolice** — original live-map/api/georss recipe; that endpoint now 403s at Google's edge, so OVERWATCH reads either OpenWeb Ninja's hosted feed or Waze's own app protocol instead
+- **Studied for v0.6.0, identifiers only** (none of their code is in OVERWATCH):
+  [all-cameras-are-beacons](https://github.com/soyboi1312/all-cameras-are-beacons) (Apache-2.0; Axon field captures),
+  [nite-oui-collection](https://github.com/nitekry/nite-oui-collection) (MIT; BodyWorn),
+  [flock-you](https://github.com/colonelpanichacks/flock-you)'s WiGLE datasets (MIT),
+  [OpenDroneID receiver-android](https://github.com/opendroneid/receiver-android) and
+  [opendroneid-core-c](https://github.com/opendroneid/opendroneid-core-c) (Apache-2.0; Remote ID),
+  [AirGuard](https://github.com/seemoo-lab/AirGuard) (Apache-2.0; trackers),
+  [flipperzero-firmware](https://github.com/flipperdevices/flipperzero-firmware), Momentum,
+  [Wall of Flippers](https://github.com/K3YOMI/Wall-of-Flippers) (MIT), [nyanBOX](https://github.com/jbohack/nyanBOX) (MIT),
+  [ESP32 Marauder](https://github.com/justcallmekoko/ESP32Marauder) (MIT), AppleJuice, ESP32-Sour-Apple,
+  [esp8266_deauther](https://github.com/SpacehuhnTech/esp8266_deauther) (MIT) and other tools' sources for HACKER,
+  and [SquachWatch-CYD](https://github.com/skizzophrenic/SquachWatch-CYD) (GPL-3.0) for comparison.
+  Every MAC block and Bluetooth number was checked against the IEEE and Bluetooth SIG registries;
+  drone serial prefixes against the FAA's public Remote ID declarations. Per-identifier sources are in
+  [SOURCES.md](SOURCES.md) §3.
 - **[Nearby Glasses](https://github.com/yjeanrenaud/yj_nearbyglasses)** by [Yves Jeanrenaud](https://yves.app) (AGPL-3.0) — the curated smart-glasses identifier set behind the GLASSES family in the COMMERCIAL source: the Bluetooth SIG company ids for Meta / Luxottica / Snap, the HeyCyan-SDK primary service UUID that identifies the Nilox Smart AI Glasses, and the `rayban` / `heycyan` name tokens. OVERWATCH uses the project's published *identifiers* (facts about the radio protocol), not its code, and re-verified every company id against the SIG registry. One deliberate divergence: Nearby Glasses also matches `0x05D6` (Zhuhai Jieli); OVERWATCH does not, because that is the id of a Bluetooth chipset found in a huge share of cheap earbuds and speakers, and this app's COMMERCIAL source is tuned against false positives rather than for recall.
 
 ---
@@ -427,7 +453,7 @@ These live under `REFERENCES/` (gitignored):
 ## Status
 
 Phases 1–5 (skeleton, BLE, WiFi, DeFlock, polish) complete and
-field-tested. Current release **v0.5.20**. Notable changes:
+field-tested. Current release **v0.6.0**. Notable changes:
 
 - v0.1.2 — Android 14+ foreground service type fix; NaN-coordinate filter on map data.
 - v0.1.3 — DeFlock CDN replaced by direct Overpass calls (Cloudflare-blocked).
@@ -459,6 +485,7 @@ field-tested. Current release **v0.5.20**. Notable changes:
 - v0.5.18 — **No online source learns your exact position any more, and four bugs fixed.** v0.5.16 stopped sending the exact fix to Waze, but the other online sources still had it: the ADS-B aircraft feeds got your position to about 11 m every minute, OpenWeb Ninja got a box centred exactly on you every 4 minutes, and Overpass got a box centred on you at each camera-map fetch. Now the aircraft feeds and OpenWeb Ninja are told only the centre of the 1 km grid square you are in (the same cloak, moved to `data/location/PositionCloak.java`), and Overpass only its ~5.5 km cache cell. Detection is unchanged: distances are still measured on the phone from the real fix; OpenWeb Ninja's box grows by the up to 919 m the square's centre can be from you, and the aircraft query's 30 nm radius already covers it. Fixes: the camera-map fetch no longer writes your exact position to Android's system log; the aircraft source failed with HTTP 400 on phones set to a comma-decimal language (German, French, Spanish and many more), because it formatted coordinates in the phone's locale; **Restart scan to apply** could leave scanning stopped, because its STOP ended the service without regard to the START right behind it; and the camera map could miss cameras near the edge of its cached area, because the box was centred on whichever position first filled the cell. Also: COMMERCIAL now finds a matching Bluetooth company id even when a device advertises it second, a rejected direct-Waze account now backs off all the way to the documented 10 minutes, and Settings, this README, SOURCES.md and the site now say all of this, drop a promised heads-up notification the app never shows, and fix wrong score-table cells. *(Correction: this entry originally said every query area grows to cover the difference, and that no log line carries a coordinate. Only OpenWeb Ninja's grows, and a malformed server reply was still logged whole, positions included. The release also had two gaps it didn't mention: for a while after you entered a new cell, the camera map still checked you against the old cell's box, and the Restart fix made Restart keep the Waze backend the scan had started with. All fixed in v0.5.19.)*
 - v0.5.19 — **Two Waze privacy fixes, a camera map that loads reliably, and no server replies in the log.** **Restart scan to apply** now applies a Waze backend switch: v0.5.18's restart fix kept the running service, which had picked its backend when it was created, so switching from Direct to OpenWeb Ninja and restarting kept sending your grid square to Waze until a full Stop. The backend is now built at every Start. **Forget** now reaches a running scan: it wiped the stored account, but the scan carried on logging in as that account until Stop; now its next poll registers a new one (verified against v0.5.18's fetcher, which logged in again as the forgotten account). The camera map could stay empty: a location fix arriving during a fetch cancelled it and threw the reply away, which at Start, when the phone's cached position and its first live fix land within a second, could lose the first fetch; and a failed fetch was retried only after you had moved 1.5 km. In a test with the v0.5.18 scanner, a parked phone was still without cameras after 70 s either way. Now a fetch always finishes and a failure is retried after 60 s. The map also no longer checks you against the previous cell's box for a while after you cross into a new cell (0.64% of fixes at 38°N and 11.7% at 60°N had part of their 1.2 km circle outside it on simulated drives; now none below about 64°): it fetches the new cell as soon as your circle would reach past the loaded box. Logs: a malformed reply from Overpass, the aircraft feeds or OpenWeb Ninja was written to Android's log whole, with the positions of the cameras, aircraft or police around you in it, because Android's JSON parser quotes its entire input in a syntax error; the direct Waze backend logged its anonymous account name, and an unreadable stored account would have been logged with its password. Those lines now carry the error's class only. Detection: Flock Safety's own IEEE-registered MAC prefix, `b4:1e:52`, which neither Flock list ever carried, is now matched over BLE and WiFi and labelled "Flock Safety device"; like the other vendor OUIs it scores 40, YELLOW. Docs: SOURCES.md now lists Google Maps as a destination, for when you tap a row's map pin; the "Flock" OUI lists are described as what they are, radio-module makers' prefixes seen on Flock hardware, none registered to Flock; the hidden-camera OUIs carry their real owners (three are Espressif), and the Amazon and Google sets are documented as holding six prefixes registered to other companies; the aircraft registry's agency counts add up every spelling (DHS 306, Arizona DPS 67); SOURCES.md states the score of 40 below which a radio hit is never shown, and the OpenWeb Ninja prices as of October 2026; and the screenshots are labelled as v0.5.5 or earlier.
 - v0.5.20 — **Map detections follow you, and two dark-theme fixes.** A mapped camera or a Waze police report now leaves the screen as soon as you are out of its range. Until now each stayed for up to 5 minutes after you left it, still showing the distance it had when last in range: after a jump in position (the phone's cached location from somewhere else at Start, a GPS glitch, the end of a tunnel) the screen kept reading "Flock Safety @ 66m" with an orange ring 12 km away. Cameras and reports don't move, so both sources now re-score everything at every fix; cameras left behind are dropped before the new area's map arrives, and after a failed Waze poll the last reports still stay for 5 minutes. BLE, WiFi, Commercial and aircraft detections keep their 5-minute memory, since the app can't re-measure those between sightings. **The status-bar icons follow the app's theme**, not the phone's: the app defaults to dark, so a phone in light mode drew dark icons on the dark background. **The Settings back arrow shows in the dark theme**; it had been black on near-black since v0.1.0. **New screenshots** here and on the site, from an Android 16 emulator parked at Tysons Galleria in Virginia, replacing ones from v0.5.5.
+- v0.6.0 — **Two new sources, police drones, Axon by its own broadcast, and Flock rules that match real Flock devices.** **HACKER** flags gear that transmits at radios: a Flipper Zero by its own Bluetooth service (`0x3080`–`0x3083`, and its remote/BadUSB mode), nyanBOX, Bluetooth pop-up spam floods and the iOS crash advert, Wi-Fi beacon spam, the default hotspots of the WiFi Pineapple, ESP deauther, Bruce, GhostESP, O.MG and others, rogue-AP frameworks' default BSSIDs, and AxonCadabra's fake Axon trigger. An optional card-skimmer check (Bluetooth Classic discovery for HC-05-type modules) is off by default because it pages the modules it finds. **TRACKER** flags AirTags, Find My and Find Hub tags, SmartTags, Chipolo and DULT tags that say they are away from their owner, and Tile or Pebblebee tags once they have stayed near you 10 minutes. **Drones** join AIRCRAFT through their FAA Remote ID broadcast, over Bluetooth (including long range, where the phone supports it) and Wi-Fi beacons; the serial names the maker and often the model, so a BRINC Responder, a Skydio X10 or a DJI dock drone scores higher than a hobby drone, and the drone's own position puts it on the map. **Axon body cams are found by the tag they broadcast** (`AXJANUSBWCDEVICE`, from all-cameras-are-beacons' field captures), even on a randomised address and with the screen off, along with Axon's Bluetooth IDs and serials, its second MAC block and Utility's BodyWorn remotes. **Flock fixes:** the hotspot rule expected `Flock-` + 4 hex and matched none of the 803 real ones in flock-you's WiGLE data, which are `Flock-` + 6 hex ending in the BSSID; `0x09C8` is labelled as the Penguin battery pack it is, not Raven's maker; `Pigvision`, which no device was ever seen to use, is gone; Penguin, `FS-` and numeric names are anchored to the forms real devices use. The radio-module makers' prefixes seen on Flock hardware no longer alert on their own (they score 25, under the display floor), and Samsung's and Espressif's blocks are out of the list, so a Samsung TV or an ESP32 smart plug is no longer a "Flock" detection. **More vendors:** 18 more IEEE-verified blocks, among them Digital Ally, Utility, Kustom Signals and Stalker radar, Motorola Solutions, Federal Signal, Fusus, ELSAG, Neology and Genetec, with 28- and 36-bit blocks now matched; Ring's 13 and Blink's 6 blocks in COMMERCIAL; Ray-Ban Meta's own `0xFD5F`, while `0x058E`, which Quest headsets send, no longer reads as glasses. The source sheet scrolls, and a source whose network half fails (ADS-B) still lists what its radio half found. Also fixed: the Penguin "TN" serial check could read one byte past the end of a payload.
 
 ## License
 
