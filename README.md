@@ -22,7 +22,7 @@ ID, Raven, the Penguin pack's maker ID and the online sources carry on.
 > [SOURCES.md §5.4](SOURCES.md)). The Axon advertise/fuzz code from one of
 > the reference projects is intentionally excluded.
 
-Website: **[overwatch.netslum.io](https://overwatch.netslum.io)**  ·  Latest release: [v0.6.0](https://github.com/KaraZajac/OVERWATCH/releases) (debug-signed APK, sideload).
+Website: **[overwatch.karazajac.io](https://overwatch.karazajac.io)**  ·  Latest release: [v0.6.0](https://github.com/KaraZajac/OVERWATCH/releases) (debug-signed APK, sideload).
 
 ---
 
