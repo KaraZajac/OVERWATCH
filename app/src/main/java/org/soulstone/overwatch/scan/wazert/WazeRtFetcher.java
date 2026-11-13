@@ -183,15 +183,21 @@ public final class WazeRtFetcher {
         }
 
         long sessionBefore = session.currentServerSessionId();
-        WazeProto.Batch handshake = prepareWithRetry(lat, lon);
-
-        // Credentials exist now: persist immediately so a failure in the box loop
-        // below cannot lose a freshly minted account and force a wasteful
-        // re-register on the next poll.
-        if (wasUnregistered) {
-            noteRegistration();
-            saveAccount(session.getCredentials(), session.getDevice());
-            Log.i(TAG, "Registered a new anonymous Waze account");
+        WazeProto.Batch handshake;
+        try {
+            handshake = prepareWithRetry(lat, lon);
+        } finally {
+            // Count and keep a new account the moment it exists, whatever became
+            // of the login and handshake that follow the registration. Through
+            // v0.6.0 this ran only after all three had worked: a login that
+            // failed left the account uncounted and unsaved, and a login that
+            // was rejected had it forgotten and replaced, so the loop the daily
+            // cap exists to stop (register, rejected, register) never met the cap.
+            if (wasUnregistered && session.getCredentials() != null) {
+                noteRegistration();
+                saveAccount(session.getCredentials(), session.getDevice());
+                Log.i(TAG, "Registered a new anonymous Waze account");
+            }
         }
 
         // A new server session re-sends every active alert but sends no removal for
@@ -229,7 +235,7 @@ public final class WazeRtFetcher {
                 return session.prepareForArea(lat, lon);
             } catch (WazeExceptions.WazeOperationException e) {
                 last = e;
-                Log.w(TAG, "Waze handshake attempt " + attempt + " failed: " + e.getMessage());
+                Log.w(TAG, "Waze handshake attempt " + attempt + " failed: " + logSafe(e));
                 if (attempt == HANDSHAKE_ATTEMPTS) break;
                 try {
                     Thread.sleep(2000L * attempt);
@@ -240,6 +246,23 @@ public final class WazeRtFetcher {
             }
         }
         throw last;
+    }
+
+    /**
+     * What a failure may say in logcat. The messages built in this package put
+     * the server's own words after a colon ("server error 504: ..."), so only
+     * the part before it is kept; any other exception gives its class alone.
+     * Nothing a server wrote, and nothing an exception quotes, reaches the log.
+     */
+    public static String logSafe(Throwable e) {
+        String kind = e.getClass().getSimpleName();
+        boolean ours = e instanceof WazeExceptions.WazeOperationException
+                || e instanceof WazeExceptions.SessionExpiredException
+                || e instanceof WazeExceptions.AccountRejectedException;
+        String message = e.getMessage();
+        if (!ours || message == null) return kind;
+        int colon = message.indexOf(':');
+        return kind + " (" + (colon < 0 ? message : message.substring(0, colon)) + ")";
     }
 
     /** POLICE only: OVERWATCH scores police presence, and nothing else the feed

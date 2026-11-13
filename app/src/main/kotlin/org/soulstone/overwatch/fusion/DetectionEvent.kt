@@ -14,6 +14,10 @@ package org.soulstone.overwatch.fusion
  *        have no position. The UI filters what it *shows* on this; it never filters what is
  *        *scored*, so the threat tier cannot move when the view range changes.
  * @param timestampMs wall-clock millis when this event was produced
+ * @param kind what sort of device this is, for the sources where a user can reasonably
+ *        ask to ignore every one of them (COMMERCIAL families and TRACKER makes, whose
+ *        Bluetooth addresses change, so a rule on one address does not last); null
+ *        everywhere else. See [IgnoreRule].
  */
 data class DetectionEvent(
     val source: DetectionSource,
@@ -25,7 +29,8 @@ data class DetectionEvent(
     val lat: Double? = null,
     val lon: Double? = null,
     val distanceMeters: Float? = null,
-    val timestampMs: Long = System.currentTimeMillis()
+    val timestampMs: Long = System.currentTimeMillis(),
+    val kind: DetectionKind? = null
 ) {
     val level: ThreatLevel get() = ThreatLevel.fromScore(score)
     val hasGeo: Boolean get() = lat != null && lon != null
@@ -43,3 +48,7 @@ data class DetectionEvent(
             distanceMeters == null ||
             distanceMeters <= viewRangeMeters
 }
+
+/** A named sort of device: [id] is what an ignore rule stores and must not change
+ *  between releases, [label] is what the user reads. */
+data class DetectionKind(val id: String, val label: String)

@@ -41,7 +41,11 @@ object RemoteId {
         var otherId: String? = null
         var latitude: Double? = null
         var longitude: Double? = null
+        /** Altitude above the WGS-84 ellipsoid (or the barometric one): what a
+         *  drone parked in Denver reports as 1609 m. Not a height. */
         var altitudeM: Float? = null
+        /** Height above the take-off point or the ground, when the drone sends it. */
+        var heightM: Float? = null
         var airborne: Boolean = false
         /** Best identifier for the store key and the label. */
         val id: String? get() = serial ?: otherId
@@ -106,6 +110,8 @@ object RemoteId {
                 val baro = le16(msg, 13)
                 val raw = if (geo != 0) geo else baro
                 drone.altitudeM = if (raw != 0) raw / 2f - 1000f else null
+                val height = le16(msg, 17)
+                drone.heightM = if (height != 0) height / 2f - 1000f else null
             }
         }
     }

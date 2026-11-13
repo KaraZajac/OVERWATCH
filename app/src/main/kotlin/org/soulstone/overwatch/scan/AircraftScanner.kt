@@ -72,6 +72,9 @@ class AircraftScanner(
         private const val LOITER_RADIUS_M = 5_000f
 
         private const val LOITER_MIN_SAMPLES = 3
+
+        /** Keys of the events this scanner owns within the AIRCRAFT source. */
+        private const val KEY_PREFIX = "air:"
     }
 
     private data class Sample(val lat: Double, val lon: Double, val atMs: Long)
@@ -118,6 +121,7 @@ class AircraftScanner(
         recordHistory(contacts, now)
 
         val out = FloatArray(1)
+        val events = ArrayList<DetectionEvent>()
         for (c in contacts) {
             Location.distanceBetween(fix.latitude, fix.longitude, c.lat, c.lon, out)
             val ground = out[0]
@@ -145,10 +149,10 @@ class AircraftScanner(
                 callsign = c.callsign
             )
             val scored = ConfidenceEngine.scoreAircraft(obs)
-            store.submit(
+            events.add(
                 DetectionEvent(
                     source = DetectionSource.AIRCRAFT,
-                    key = "air:${c.icaoHex}",
+                    key = "$KEY_PREFIX${c.icaoHex}",
                     label = scored.label,
                     score = scored.score,
                     matchedMethods = scored.methods,
@@ -159,6 +163,14 @@ class AircraftScanner(
                 )
             )
         }
+        // The whole ADS-B set in one replacement, so an aircraft that has flown
+        // out of range, landed or stopped circling goes now. Each one used to be
+        // submitted on its own and never withdrawn: a helicopter that had left
+        // kept its last distance, its map marker and the alert level for the
+        // store's 5 minutes. Drones (Remote ID, "rid:" keys) are not this
+        // scanner's and stay. A failed poll replaces nothing, so an outage still
+        // ends with the last set ageing out.
+        store.replaceKeyed(DetectionSource.AIRCRAFT, KEY_PREFIX, events)
     }
 
     private fun recordHistory(contacts: List<AircraftClient.Contact>, now: Long) {

@@ -7,11 +7,13 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.location.LocationManager
 import android.net.wifi.ScanResult
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.util.Log
 import androidx.core.content.ContextCompat
+import androidx.core.location.LocationManagerCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -27,7 +29,6 @@ import org.soulstone.overwatch.fusion.DetectionEvent
 import org.soulstone.overwatch.fusion.DetectionSource
 import org.soulstone.overwatch.fusion.DetectionStore
 import org.soulstone.overwatch.fusion.DroneTracker
-import org.soulstone.overwatch.fusion.RssiTracker
 import org.soulstone.overwatch.fusion.SourceHealth
 
 /**
@@ -43,11 +44,21 @@ import org.soulstone.overwatch.fusion.SourceHealth
  * What it surfaces is enough for more than BSSIDs and names, though: the capabilities
  * string gives away beacon spam, and from API 30 the information elements carry
  * drones' Wi-Fi Remote ID.
+ *
+ * **No pass bonus here.** The bonus for a signal that rises and falls as you go by
+ * (see RssiTracker) needs several readings across the pass. Bluetooth gives several
+ * a second; this gives one every 35 seconds, and a network heard three times in a
+ * minute and a half has not shown a pass, it has shown three numbers. So Wi-Fi
+ * hits are scored on what they are and how strong they are, and nothing more.
+ *
+ * **Health.** Android answers a scan it will not run with silence, so each round
+ * the WiFi row is told what can be known: Wi-Fi off with background scanning off
+ * too, system Location off (no results are handed over without it), or the system
+ * refusing scan after scan.
  */
 class WifiScanner(
     private val context: Context,
     private val store: DetectionStore,
-    private val rssi: RssiTracker = RssiTracker(),
     /** When true, also evaluate each scan against MicTargets and submit MIC events. */
     private val micEnabled: () -> Boolean = { false },
     /** When true, also look for pentest access points and beacon spam (HACKER events). */
@@ -60,6 +71,9 @@ class WifiScanner(
         private const val TAG = "WifiScanner"
         private const val ALARM_THRESHOLD = 40
         private const val SCAN_INTERVAL_MS = 35_000L
+        /** Refused scans in a row before the row says so. One or two is ordinary:
+         *  the radio was busy, or another app had just scanned. */
+        private const val REFUSALS_BEFORE_WARNING = 3
     }
 
     private val wifiManager: WifiManager? by lazy {
@@ -109,32 +123,46 @@ class WifiScanner(
             SourceHealth.record(DetectionSource.WIFI, ok = false, message = "WifiManager unavailable")
             return false
         }
-        if (!mgr.isWifiEnabled) {
-            Log.w(TAG, "WiFi disabled — scanner won't return results")
-            SourceHealth.record(
-                DetectionSource.WIFI, ok = false,
-                message = "WiFi disabled — enable in system settings"
-            )
-            // We still register the receiver so results arrive when the user enables WiFi.
-        } else {
-            SourceHealth.record(DetectionSource.WIFI, ok = true)
-        }
+        // Registered whatever the radio's state, so results arrive as soon as
+        // the user turns Wi-Fi or Location on.
         registerReceiver()
         running = true
         scanJob = scope.launch {
+            var refused = 0
             while (isActive) {
-                try {
+                val ok = try {
                     @Suppress("DEPRECATION")
-                    val ok = mgr.startScan()
-                    if (!ok) Log.d(TAG, "startScan returned false (throttled or radio busy)")
+                    mgr.startScan()
                 } catch (e: SecurityException) {
-                    Log.e(TAG, "SecurityException starting WiFi scan", e)
+                    Log.e(TAG, "SecurityException starting WiFi scan")
+                    false
                 }
+                refused = if (ok) 0 else refused + 1
+                recordHealth(mgr, refused)
                 delay(SCAN_INTERVAL_MS)
             }
         }
         Log.i(TAG, "WiFi scan started (interval=${SCAN_INTERVAL_MS}ms)")
         return true
+    }
+
+    /** What is known, this round, about whether results can arrive at all. */
+    private fun recordHealth(mgr: WifiManager, refused: Int) {
+        @Suppress("DEPRECATION")
+        val radioOff = !mgr.isWifiEnabled && !mgr.isScanAlwaysAvailable
+        val message = when {
+            radioOff -> "WiFi is off — turn it on to scan"
+            locationOff() -> "Location is off — Android gives no WiFi results without it"
+            refused >= REFUSALS_BEFORE_WARNING ->
+                "Android is refusing WiFi scans — only what the system itself scans is seen"
+            else -> null
+        }
+        SourceHealth.record(DetectionSource.WIFI, ok = message == null, message = message)
+    }
+
+    private fun locationOff(): Boolean {
+        val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return false
+        return !LocationManagerCompat.isLocationEnabled(lm)
     }
 
     fun stop() {
@@ -170,6 +198,8 @@ class WifiScanner(
 
     @SuppressLint("MissingPermission")
     private fun handleResults() {
+        // A broadcast already queued when the scan was stopped still arrives.
+        if (!running) return
         val mgr = wifiManager ?: return
         val results: List<ScanResult> = try {
             mgr.scanResults ?: emptyList()
@@ -196,12 +226,9 @@ class WifiScanner(
             val isMic = micEnabled() && MicTargets.couldBeMicWifi(bssid, ssid)
 
             if (isSurveillance || isMic) {
-                rssi.update(bssid, r.level)
-                val stationary = rssi.isStationary(bssid)
-
                 if (isSurveillance) {
                     val obs = ConfidenceEngine.WifiObservation(
-                        bssid = bssid, ssid = ssid, rssi = r.level, isStationary = stationary
+                        bssid = bssid, ssid = ssid, rssi = r.level, isStationary = false
                     )
                     val scored = ConfidenceEngine.scoreWifi(obs)
                     if (scored.score >= ALARM_THRESHOLD) {
@@ -219,7 +246,7 @@ class WifiScanner(
                 }
                 if (isMic) {
                     val obs = ConfidenceEngine.MicWifiObservation(
-                        bssid = bssid, ssid = ssid, rssi = r.level, isStationary = stationary
+                        bssid = bssid, ssid = ssid, rssi = r.level, isStationary = false
                     )
                     val scored = ConfidenceEngine.scoreMicWifi(obs)
                     if (scored.score >= ALARM_THRESHOLD) {
@@ -230,7 +257,8 @@ class WifiScanner(
                                 label = scored.label,
                                 score = scored.score,
                                 matchedMethods = scored.methods,
-                                rssi = r.level
+                                rssi = r.level,
+                                kind = scored.kind
                             )
                         )
                     }

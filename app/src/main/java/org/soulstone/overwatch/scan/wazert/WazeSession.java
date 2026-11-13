@@ -2,8 +2,10 @@ package org.soulstone.overwatch.scan.wazert;
 
 // Vendored from highway-radar-sabre-plus (MIT). See LICENSE in this directory.
 // Changed for OVERWATCH: package declaration, the user-report submission methods
-// are removed — OVERWATCH only reads alerts, it never reports — and the account
-// name and server session id are no longer written to the log.
+// are removed — OVERWATCH only reads alerts, it never reports — the account
+// name, the server session id and the server's error text are no longer written
+// to the log, and a login answered 408 or 429 no longer counts as a rejected
+// account.
 
 import android.os.SystemClock;
 import android.util.Log;
@@ -94,7 +96,8 @@ final class WazeSession {
                 // Informational / unknown (incl. the proto default code 0), the
                 // official ignores these; a normal 200 batch can legitimately carry
                 // one, so do NOT fail the whole refresh over it.
-                Log.w(TAG, "Ignoring non-fatal server error " + code + ": " + err.getDescription());
+                // The code only: the description is the server's text.
+                Log.w(TAG, "Ignoring non-fatal server error " + code);
             }
             if (el.hasLoginError()) throwForLoginError(el.getLoginError().getErrorType());
         }
@@ -172,7 +175,12 @@ final class WazeSession {
 
         WazeHttpClient.HttpResult r = http.post(url(WazeConstants.PATH_LOGIN),
                 body.getBytes(StandardCharsets.UTF_8), headers);
-        // A 4xx here means Waze no longer accepts these credentials (anonymous
+        // 408 and 429 say "slow down" or "try again", not "who are you": answering
+        // them by deleting the account and registering another is the opposite
+        // of what was asked. They used to be treated like every other 4xx.
+        if (r.code == 408 || r.code == 429)
+            throw new WazeExceptions.WazeOperationException("login HTTP " + r.code);
+        // Any other 4xx means Waze no longer accepts these credentials (anonymous
         // accounts get purged): classify as AccountRejected so the caller clears
         // the persisted account and re-registers instead of failing forever.
         if (r.code >= 400 && r.code < 500)

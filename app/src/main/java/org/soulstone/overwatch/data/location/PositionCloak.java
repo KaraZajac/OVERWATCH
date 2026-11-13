@@ -98,7 +98,16 @@ public final class PositionCloak {
     }
 
     private static double[] centre(long r, long c) {
-        return new double[]{ rowCentreLat(r), (c + 0.5) * lonStep(r) };
+        // The grid is not cut to the globe: the last column before the
+        // antimeridian has its centre up to half a cell past 180, and the last
+        // row before a pole past 90. Sent as it was, that is a longitude no
+        // server accepts, for anyone within a kilometre of the line (Taveuni,
+        // Chukotka). Wrapped, it is the same point.
+        double lat = Math.max(-90.0, Math.min(90.0, rowCentreLat(r)));
+        double lon = (c + 0.5) * lonStep(r);
+        if (lon > 180.0) lon -= 360.0;
+        else if (lon < -180.0) lon += 360.0;
+        return new double[]{ lat, lon };
     }
 
     private static boolean insideWithMargin(double lat, double lon, long r, long c) {

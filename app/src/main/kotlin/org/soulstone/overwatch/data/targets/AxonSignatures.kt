@@ -78,18 +78,17 @@ object AxonSignatures {
                 return Match(Kind.METROPOLIS, "Axon device (in-car tag)", "axon_metropolis")
             }
         }
+        // Service data counts as "with a serial" only when a serial is in it. Any
+        // other payload is the bare Axon id, which the last rule below scores.
         serviceData?.get(SVC_FE6B)?.let { data ->
-            if (data.isNotEmpty()) {
-                val serial = asciiSerial(data)
-                val what = if (serial?.startsWith("D01A") == true) "Axon body cam" else "Axon device"
-                return Match(Kind.SIG_SERIAL, if (serial != null) "$what ($serial)" else what, "axon_sig")
+            asciiSerial(data)?.let { serial ->
+                val what = if (serial.startsWith("D01A")) "Axon body cam" else "Axon device"
+                return Match(Kind.SIG_SERIAL, "$what ($serial)", "axon_sig")
             }
         }
         serviceData?.get(SVC_FE6C)?.let { data ->
-            if (data.isNotEmpty()) {
-                val serial = asciiSerial(data)
-                val label = if (serial != null) "Axon Signal trigger ($serial)" else "Axon Signal trigger"
-                return Match(Kind.SIG_SERIAL, label, "axon_sig")
+            asciiSerial(data)?.let { serial ->
+                return Match(Kind.SIG_SERIAL, "Axon Signal trigger ($serial)", "axon_sig")
             }
         }
         manufacturerData?.get(TASER_COMPANY_ID)?.let { data ->
@@ -107,7 +106,9 @@ object AxonSignatures {
         }
         val listed = serviceUuids.orEmpty() + serviceData?.keys.orEmpty()
         if (listed.any { it == SVC_FE6B || it == SVC_FE6C || it == SVC_FC81 }) {
-            return Match(Kind.SIG_UUID, "Axon device (Axon Bluetooth ID)", "axon_uuid")
+            val label = if (serviceData?.get(SVC_FE6C)?.isNotEmpty() == true) "Axon Signal trigger"
+                else "Axon device (Axon Bluetooth ID)"
+            return Match(Kind.SIG_UUID, label, "axon_uuid")
         }
         return null
     }

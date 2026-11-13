@@ -130,27 +130,32 @@ class DeflockClient(context: Context) {
     suspend fun fetchAround(lat: Double, lon: Double): FetchResult = withContext(Dispatchers.IO) {
         val cell = Cell.of(lat, lon)
         val key = cacheKeyFor(cell)
-        val cached = cachedJson(key)
+        // A cached file that no longer reads as a result (a write cut short) is a
+        // miss, not an empty area.
+        val cached = cachedJson(key)?.let { parse(it) }
         if (cached != null) {
             // No key in the log: it names the cell, and logcat outlives the scan.
             Log.d(TAG, "Camera cache hit")
-            return@withContext FetchResult.Success(parseSafely(cached))
+            return@withContext FetchResult.Success(cached)
         }
         val query = buildQuery(cell.south, cell.west, cell.north, cell.east)
-        val (body, lastError) = downloadFromAny(query)
-        if (body == null) {
+        val (download, lastError) = downloadFromAny(query)
+        if (download == null) {
             return@withContext FetchResult.Failed(lastError ?: "Network error")
         }
         // Scanning may have stopped while this request was in flight, and the stop
         // has already cleared the cache: don't leave a fresh trace behind it.
         ensureActive()
         try {
-            File(cacheDir, "$key.json").writeText(body)
+            File(cacheDir, "$key.json").writeText(download.body)
         } catch (e: Exception) {
             Log.w(TAG, "Camera cache not written: ${e.javaClass.simpleName}")
         }
-        FetchResult.Success(parseSafely(body))
+        FetchResult.Success(download.points)
     }
+
+    /** A reply that parsed as an Overpass result, and the text to cache. */
+    private class Download(val body: String, val points: List<SurveillancePoint>)
 
     private fun cacheKeyFor(cell: Cell): String {
         // One key per 0.05° grid cell, so moving around inside a cell doesn't
@@ -176,13 +181,24 @@ class DeflockClient(context: Context) {
             "node[\"highway\"=\"speed_camera\"]$bbox;);out body;"
     }
 
-    /** Try each endpoint in order until one returns 2xx. Returns body + last error message. */
-    private fun downloadFromAny(query: String): Pair<String?, String?> {
+    /**
+     * Try each endpoint in order until one returns a result. A 2xx is not enough:
+     * the body has to parse as one. Through v0.6.0 any 2xx body was cached and
+     * read as the area's cameras, so an error page served with a 200 gave an
+     * empty map and a healthy status row for the rest of the scan.
+     */
+    private fun downloadFromAny(query: String): Pair<Download?, String?> {
         var lastError: String? = null
         for (endpoint in ENDPOINTS) {
             val (body, err) = postQuery(endpoint, query)
-            if (body != null) return body to null
-            lastError = err
+            if (body == null) {
+                lastError = err
+                continue
+            }
+            val points = parse(body)
+            if (points != null) return Download(body, points) to null
+            Log.w(TAG, "$endpoint returned a 2xx that is not a result")
+            lastError = "Unreadable reply"
         }
         return null to lastError
     }
@@ -203,16 +219,7 @@ class DeflockClient(context: Context) {
             conn.outputStream.use { it.write(payload.toByteArray()) }
             val code = conn.responseCode
             if (code in 200..299) {
-                val body = conn.inputStream.bufferedReader().use { it.readText() }
-                // Overpass returns HTTP 200 with `{"remark": "runtime error: Query timed out..."}`
-                // when the query exceeded server-side limits. Body has elements:[]; treat as
-                // failure so we don't poison the 24h cache with empty results.
-                if (looksLikeOverpassTimeout(body)) {
-                    Log.w(TAG, "$endpoint returned 200 with timeout/runtime-limit remark")
-                    null to "Overpass timeout"
-                } else {
-                    body to null
-                }
+                conn.inputStream.bufferedReader().use { it.readText() } to null
             } else {
                 Log.w(TAG, "$endpoint returned $code")
                 null to "HTTP $code"
@@ -225,21 +232,37 @@ class DeflockClient(context: Context) {
         }
     }
 
-    private fun looksLikeOverpassTimeout(body: String): Boolean {
-        if (!body.contains("remark", ignoreCase = true)) return false
-        val lower = body.lowercase()
-        return lower.contains("timed out") ||
-            lower.contains("timeout") ||
-            lower.contains("runtime error") ||
-            lower.contains("runtime limit exceeded") ||
-            lower.contains("rate_limited")
+    /**
+     * Overpass answers HTTP 200 with `"remark": "runtime error: Query timed out..."`
+     * and whatever elements it had reached when a query ran past a server limit.
+     * That is a failure: cached, it would stand as the area's cameras for the scan.
+     * Only the reply's own top-level remark is read. The whole body used to be
+     * searched, so a camera whose tags held both "remark" and "timeout" would
+     * have failed its cell for good.
+     */
+    private fun isRuntimeError(root: JSONObject): Boolean {
+        val remark = root.optString("remark").lowercase()
+        return remark.contains("timed out") ||
+            remark.contains("timeout") ||
+            remark.contains("runtime error") ||
+            remark.contains("runtime limit exceeded") ||
+            remark.contains("rate_limited")
     }
 
-    private fun parseSafely(json: String): List<SurveillancePoint> {
-        if (json.isBlank()) return emptyList()
+    /**
+     * The cameras in a reply, or null when the reply is not a complete result: not
+     * JSON, a runtime-error remark, or no `elements` array (Overpass sends an empty
+     * one for an area with nothing in it, checked 2026-11-12).
+     */
+    private fun parse(json: String): List<SurveillancePoint>? {
+        if (json.isBlank()) return null
         return try {
             val root = JSONObject(json)
-            val elements = root.optJSONArray("elements") ?: return emptyList()
+            if (isRuntimeError(root)) {
+                Log.w(TAG, "Overpass reply carries a timeout/runtime-limit remark")
+                return null
+            }
+            val elements = root.optJSONArray("elements") ?: return null
             val out = ArrayList<SurveillancePoint>(elements.length())
             for (i in 0 until elements.length()) {
                 val el = elements.optJSONObject(i) ?: continue
@@ -275,7 +298,7 @@ class DeflockClient(context: Context) {
             // Class only: Android's org.json quotes its whole input in a syntax
             // error, and this input is every camera around you, with coordinates.
             Log.w(TAG, "Failed to parse Overpass response: ${e.javaClass.simpleName}")
-            emptyList()
+            null
         }
     }
 }

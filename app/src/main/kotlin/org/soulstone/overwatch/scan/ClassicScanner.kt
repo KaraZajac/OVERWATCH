@@ -11,6 +11,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Build
+import android.os.SystemClock
 import android.util.Log
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
@@ -35,11 +36,17 @@ import org.soulstone.overwatch.fusion.DetectionStore
  * settings run, and a module that answers without its name gets a name request,
  * which pages it and shows it this phone's Bluetooth address. Nothing is ever paired
  * or connected.
+ *
+ * The switch is read before every discovery, not only at Start: turning the skimmer
+ * check or HACKER off stops this from transmitting again, and a discovery it already
+ * has running is cancelled when the scan stops. Bluetooth being off only skips a
+ * round; the check resumes when it is back.
  */
 class ClassicScanner(
     private val context: Context,
     private val store: DetectionStore,
-    /** Read per result, so switching HACKER off silences it at once. */
+    /** Read before each discovery and for each result, so switching the check or
+     *  HACKER off stops both the asking and the listening at once. */
     private val enabled: () -> Boolean = { true }
 ) {
 
@@ -47,6 +54,9 @@ class ClassicScanner(
         private const val TAG = "ClassicScanner"
         private const val INTERVAL_MS = 180_000L
         private const val ALARM_THRESHOLD = 40
+        /** An inquiry runs about 12 seconds. A discovery still going later than
+         *  this was started by something else, the system's own Bluetooth page say. */
+        private const val OWN_DISCOVERY_MS = 15_000L
     }
 
     private val adapter: BluetoothAdapter? by lazy {
@@ -55,6 +65,8 @@ class ClassicScanner(
 
     private var job: Job? = null
     private var registered = false
+    /** When this scanner last started a discovery (elapsed-realtime ms), or 0. */
+    @Volatile private var discoveryStartedMs = 0L
 
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context?, intent: Intent?) {
@@ -79,8 +91,8 @@ class ClassicScanner(
     fun start(scope: CoroutineScope): Boolean {
         if (job != null) return true
         val a = adapter ?: return false
-        if (!a.isEnabled || !hasPermission()) {
-            Log.w(TAG, "Classic discovery unavailable (adapter off or permission missing)")
+        if (!hasPermission()) {
+            Log.w(TAG, "Classic discovery unavailable (permission missing)")
             return false
         }
         val filter = IntentFilter().apply {
@@ -94,7 +106,9 @@ class ClassicScanner(
         job = scope.launch {
             while (isActive) {
                 try {
-                    if (!a.isDiscovering) a.startDiscovery()
+                    if (enabled() && a.isEnabled && !a.isDiscovering && a.startDiscovery()) {
+                        discoveryStartedMs = SystemClock.elapsedRealtime()
+                    }
                 } catch (e: SecurityException) {
                     Log.w(TAG, "SecurityException starting discovery")
                 }
@@ -109,7 +123,14 @@ class ClassicScanner(
     fun stop() {
         job?.cancel()
         job = null
-        try { if (adapter?.isDiscovering == true) adapter?.cancelDiscovery() } catch (_: SecurityException) { }
+        // Cancel a discovery only if it is ours: one started from the system's
+        // Bluetooth page is somebody pairing headphones.
+        val started = discoveryStartedMs
+        discoveryStartedMs = 0L
+        val ours = started != 0L && SystemClock.elapsedRealtime() - started < OWN_DISCOVERY_MS
+        try {
+            if (ours && adapter?.isDiscovering == true) adapter?.cancelDiscovery()
+        } catch (_: SecurityException) { }
         if (registered) {
             try { context.unregisterReceiver(receiver) } catch (_: IllegalArgumentException) { }
             registered = false

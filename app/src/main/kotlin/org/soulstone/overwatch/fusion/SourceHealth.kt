@@ -19,7 +19,8 @@ object SourceHealth {
     data class Health(
         val status: Status = Status.UNKNOWN,
         val lastFetchMs: Long = 0L,
-        /** Short reason shown in the UI when status = FAILED. */
+        /** Shown on the source's row: the reason when status = FAILED, a note
+         *  under a source that is up otherwise. */
         val message: String? = null
     )
 

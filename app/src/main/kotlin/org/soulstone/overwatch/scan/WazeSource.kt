@@ -58,6 +58,10 @@ interface WazeSource {
     /** Distinguishes "no police reports in this area" from "couldn't reach the feed." */
     sealed class FetchResult {
         data class Success(val alerts: List<Alert>) : FetchResult()
-        data class Failed(val reason: String) : FetchResult()
+        /** [retrySoon]: the failure looks passing (no signal, a timeout, a server
+         *  error), so the scanner may ask again before the next regular poll. Left
+         *  false for anything asking sooner cannot fix or would make worse: a
+         *  rejected key, a spent quota, a backend that paces its own retries. */
+        data class Failed(val reason: String, val retrySoon: Boolean = false) : FetchResult()
     }
 }

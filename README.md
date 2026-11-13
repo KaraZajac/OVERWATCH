@@ -22,7 +22,7 @@ ID, Raven, the Penguin pack's maker ID and the online sources carry on.
 > [SOURCES.md §5.4](SOURCES.md)). The Axon advertise/fuzz code from one of
 > the reference projects is intentionally excluded.
 
-Website: **[overwatch.karazajac.io](https://overwatch.karazajac.io)**  ·  Latest release: [v0.6.0](https://github.com/KaraZajac/OVERWATCH/releases) (debug-signed APK, sideload).
+Website: **[overwatch.karazajac.io](https://overwatch.karazajac.io)**  ·  Latest release: [v0.6.1](https://github.com/KaraZajac/OVERWATCH/releases) (debug-signed APK, sideload).
 
 ---
 
@@ -36,7 +36,7 @@ Website: **[overwatch.karazajac.io](https://overwatch.karazajac.io)**  ·  Lates
   <img src="docs/img/overwatch-settings.png" width="240" alt="Settings" />
 </p>
 
-<p align="center"><sub>Live threat-map circle · source drill-down · settings — taken on v0.5.20 on an Android 16 emulator, so they don't show v0.6.0's Hacker and Tracker rows and toggles.</sub></p>
+<p align="center"><sub>Live threat-map circle · source drill-down · settings — taken on v0.5.20 on an Android 16 emulator, so they don't show v0.6.0's Hacker and Tracker rows and toggles, or v0.6.1's ignore bell and Ignored list.</sub></p>
 
 ---
 
@@ -144,15 +144,32 @@ is self-explanatory. The same map renders in a smaller floating overlay bubble
   and a ⌖ crosshair for your own position; tap it to open the bottom-sheet drill-down
   with per-source rows. DeFlock, Waze and aircraft rows carry coordinates
   and a tap-to-open Maps icon.
-- **Foreground notification**: rebuilt on every threat-tier change. Title
-  becomes `OVERWATCH  •  RED` (or whatever tier); text shows the top
-  detection's score + label. It sits on a low-importance channel, so it
-  updates silently and never pops up as a heads-up: the vibration is the alert.
+- **Foreground notification**: updated when the tier or the top detection's
+  line changes, at most once a second. Title becomes `OVERWATCH  •  RED` (or
+  whatever tier); text shows the top detection's score + label. It sits on a
+  low-importance channel, so it updates silently and never pops up as a
+  heads-up: the vibration is the alert.
 - **Vibration**: on upward tier transitions only. Short pulse for YELLOW,
   double for ORANGE, escalating triple for RED. Toggle in Settings → Alerts.
+  Since v0.6.1 one detection vibrates once per tier per minute, so a device
+  whose score sits on a boundary does not buzz each time it crosses; a
+  different detection reaching the tier, or the same one going higher, still
+  buzzes at once.
+- **Ignore list** (v0.6.1): every row in the drill-down has a crossed-out bell.
+  Tap it and that device, camera or aircraft stops raising the tier, vibrating
+  and showing in the lists, until you remove it under **Settings → Ignored**.
+  It is for your own glasses, your own doorbell, the camera on your street
+  (which stays on the map as a dot). A Bluetooth or Wi-Fi device is matched by
+  its address, and trackers and many wearables change theirs; when that
+  happens the device alerts again. For smart-home gear, glasses and trackers
+  the dialog therefore also offers every device of that kind (every "Smart
+  glasses", every "AirTag"), which hides other people's too. Waze reports
+  cannot be ignored, nor can an attack with no single transmitter behind it,
+  such as a pop-up flood. See [SOURCES.md §4.4](SOURCES.md).
 - **Per-source health**: when a scanner can't reach its data source, its row in
-  the drill-down says why in orange (e.g. `Overpass unreachable: HTTP 504`), so
-  a silent empty result and a real failure look different.
+  the drill-down says why in orange (e.g. `Overpass unreachable: HTTP 504`, or
+  `Bluetooth is off — turn it on to scan`), so a silent empty result and a real
+  failure look different.
 
 ---
 
@@ -167,6 +184,7 @@ ui/theme/Theme.kt                  Material 3 dark/light + threat colors
 service/DetectionService.kt        foreground service — owns scanners, notification, vibration
 service/OverlayManager.kt          WindowManager host for the floating overlay bubble
 scan/BleScanner.kt                 BLE callback scanner (also HACKER, TRACKER and drone Remote ID)
+scan/ScanStartBudget.kt            keeps Bluetooth scan starts under Android's silent limit
 scan/WifiScanner.kt                WifiManager poller + SCAN_RESULTS receiver (beacon spam, Wi-Fi Remote ID)
 scan/ClassicScanner.kt             opt-in Bluetooth Classic discovery for card skimmers
 scan/DeflockClient.kt              Overpass POST (deflock.org → overpass-api.de) + per-scan cell cache
@@ -181,18 +199,21 @@ scan/wazert/WazeRtClient.kt        backend 2 — Waze's own app protocol, anonym
 scan/wazert/WazeRtFetcher.java     session + account + rate limits for backend 2
 scan/wazert/*.java, proto/         vendored protocol layer + waze.proto (MIT, see credits)
 fusion/ConfidenceEngine.kt         scoring (BLE / WiFi / DeFlock / Waze / aircraft / drones / Commercial / Hacker / Tracker)
-fusion/RssiTracker.kt              rise-peak-fall stationary-signal detector
+fusion/RssiTracker.kt              spots the rise-peak-fall of passing a fixed transmitter (Bluetooth)
 fusion/BleSpamDetector.kt          Bluetooth pop-up spam: fixed templates, floods, one transmitter cycling devices
 fusion/DroneTracker.kt             joins one drone's Remote ID messages across adverts
 fusion/TrackerDwell.kt             how long each tracker has stayed in range
-fusion/DetectionStore.kt           in-memory dedup, 5-min retention, max-tier flow
+fusion/DetectionStore.kt           in-memory dedup, 5-min retention, max-tier flow, ignore filter
+fusion/IgnoreRule.kt               ignore-list rules: what one matches, what can be ignored, labels
+fusion/AlertGate.kt                decides when a rise in the tier is worth a vibration
 fusion/SourceHealth.kt             per-source OK/FAILED registry for the drill-down
 fusion/ThreatLevel.kt              4-tier enum + DetectionSource enum
 data/location/LocationProvider.kt  FusedLocationProviderClient wrapper
 data/location/PositionCloak.java   the 1 km grid square that is all ADS-B, OpenWeb Ninja and Waze learn of you
 data/cache/LocationTraces.kt       deletes the camera cache (and, if asked, map tiles) at stop and start
 data/settings/Settings.kt          SharedPreferences-backed StateFlow settings
-data/settings/SecureStore.kt       Keystore AES/GCM store for the Waze key + anonymous account
+data/settings/SecureStore.kt       Keystore AES/GCM store for the Waze key, anonymous account and ignore list
+data/settings/IgnoreList.kt        the user's ignore list, kept across restarts
 data/targets/                      BleOuis, WifiOuis, VendorOuis, RavenUuids, Patterns, Manufacturers, MicTargets,
                                    AxonSignatures, HackerTargets, EspressifOuis, TrackerTargets, RemoteId
 ```
@@ -215,6 +236,11 @@ used, and all three are handled:
   backend logged its account name; since v0.5.19 those lines carry the error's
   class only. One gap is outside the app's own code: the map library (osmdroid)
   logs a tile's number when that tile fails to download.
+
+One record is kept on purpose: the **ignore list** (v0.6.1). It holds the
+addresses and ids of what you ignored and the label each row showed, which
+between them say whose phone this is and where it lives, so it is stored
+encrypted (Android Keystore) and the app is excluded from Android's backups.
 
 The service uses `START_NOT_STICKY` — system kill doesn't auto-restart into a
 stuck state.
@@ -375,7 +401,9 @@ without an uninstall.
 Requested at runtime when you press START for the first time. If you
 permanently deny a required permission ("don't ask again"), an **Open app
 settings** button appears under START (and START itself opens the same page) so
-you can grant it manually.
+you can grant it manually. Location has to be **Precise**: Android gives no
+Wi-Fi results without it, and every distance is measured from your position. If
+you pick "Approximate", the app says so and START offers the change (v0.6.1).
 
 ---
 
@@ -414,6 +442,9 @@ Tap the gear icon in the top-right.
   to cache them.
 - **Alerts**:
   - Vibrate on threat escalation (default on)
+- **Ignored** (v0.6.1): what you have told OVERWATCH to stop alerting on, each
+  with a **Remove** button. Entries are added from the drill-down, with the
+  crossed-out bell beside a detection (see [How alerts work](#how-alerts-work)).
 - **Display over other apps**: floating threat-circle overlay (needs the
   special-access permission; the app bounces you to the system page to grant it).
 - **Appearance**: System / Dark / Light (default Dark)
@@ -453,7 +484,7 @@ These live under `REFERENCES/` (gitignored):
 ## Status
 
 Phases 1–5 (skeleton, BLE, WiFi, DeFlock, polish) complete and
-field-tested. Current release **v0.6.0**. Notable changes:
+field-tested. Current release **v0.6.1**. Notable changes:
 
 - v0.1.2 — Android 14+ foreground service type fix; NaN-coordinate filter on map data.
 - v0.1.3 — DeFlock CDN replaced by direct Overpass calls (Cloudflare-blocked).
@@ -486,6 +517,7 @@ field-tested. Current release **v0.6.0**. Notable changes:
 - v0.5.19 — **Two Waze privacy fixes, a camera map that loads reliably, and no server replies in the log.** **Restart scan to apply** now applies a Waze backend switch: v0.5.18's restart fix kept the running service, which had picked its backend when it was created, so switching from Direct to OpenWeb Ninja and restarting kept sending your grid square to Waze until a full Stop. The backend is now built at every Start. **Forget** now reaches a running scan: it wiped the stored account, but the scan carried on logging in as that account until Stop; now its next poll registers a new one (verified against v0.5.18's fetcher, which logged in again as the forgotten account). The camera map could stay empty: a location fix arriving during a fetch cancelled it and threw the reply away, which at Start, when the phone's cached position and its first live fix land within a second, could lose the first fetch; and a failed fetch was retried only after you had moved 1.5 km. In a test with the v0.5.18 scanner, a parked phone was still without cameras after 70 s either way. Now a fetch always finishes and a failure is retried after 60 s. The map also no longer checks you against the previous cell's box for a while after you cross into a new cell (0.64% of fixes at 38°N and 11.7% at 60°N had part of their 1.2 km circle outside it on simulated drives; now none below about 64°): it fetches the new cell as soon as your circle would reach past the loaded box. Logs: a malformed reply from Overpass, the aircraft feeds or OpenWeb Ninja was written to Android's log whole, with the positions of the cameras, aircraft or police around you in it, because Android's JSON parser quotes its entire input in a syntax error; the direct Waze backend logged its anonymous account name, and an unreadable stored account would have been logged with its password. Those lines now carry the error's class only. Detection: Flock Safety's own IEEE-registered MAC prefix, `b4:1e:52`, which neither Flock list ever carried, is now matched over BLE and WiFi and labelled "Flock Safety device"; like the other vendor OUIs it scores 40, YELLOW. Docs: SOURCES.md now lists Google Maps as a destination, for when you tap a row's map pin; the "Flock" OUI lists are described as what they are, radio-module makers' prefixes seen on Flock hardware, none registered to Flock; the hidden-camera OUIs carry their real owners (three are Espressif), and the Amazon and Google sets are documented as holding six prefixes registered to other companies; the aircraft registry's agency counts add up every spelling (DHS 306, Arizona DPS 67); SOURCES.md states the score of 40 below which a radio hit is never shown, and the OpenWeb Ninja prices as of October 2026; and the screenshots are labelled as v0.5.5 or earlier.
 - v0.5.20 — **Map detections follow you, and two dark-theme fixes.** A mapped camera or a Waze police report now leaves the screen as soon as you are out of its range. Until now each stayed for up to 5 minutes after you left it, still showing the distance it had when last in range: after a jump in position (the phone's cached location from somewhere else at Start, a GPS glitch, the end of a tunnel) the screen kept reading "Flock Safety @ 66m" with an orange ring 12 km away. Cameras and reports don't move, so both sources now re-score everything at every fix; cameras left behind are dropped before the new area's map arrives, and after a failed Waze poll the last reports still stay for 5 minutes. BLE, WiFi, Commercial and aircraft detections keep their 5-minute memory, since the app can't re-measure those between sightings. **The status-bar icons follow the app's theme**, not the phone's: the app defaults to dark, so a phone in light mode drew dark icons on the dark background. **The Settings back arrow shows in the dark theme**; it had been black on near-black since v0.1.0. **New screenshots** here and on the site, from an Android 16 emulator parked at Tysons Galleria in Virginia, replacing ones from v0.5.5.
 - v0.6.0 — **Two new sources, police drones, Axon by its own broadcast, and Flock rules that match real Flock devices.** **HACKER** flags gear that transmits at radios: a Flipper Zero by its own Bluetooth service (`0x3080`–`0x3083`, and its remote/BadUSB mode), nyanBOX, Bluetooth pop-up spam floods and the iOS crash advert, Wi-Fi beacon spam, the default hotspots of the WiFi Pineapple, ESP deauther, Bruce, GhostESP, O.MG and others, rogue-AP frameworks' default BSSIDs, and AxonCadabra's fake Axon trigger. An optional card-skimmer check (Bluetooth Classic discovery for HC-05-type modules) is off by default because it pages the modules it finds. **TRACKER** flags AirTags, Find My and Find Hub tags, SmartTags, Chipolo and DULT tags that say they are away from their owner, and Tile or Pebblebee tags once they have stayed near you 10 minutes. **Drones** join AIRCRAFT through their FAA Remote ID broadcast, over Bluetooth (including long range, where the phone supports it) and Wi-Fi beacons; the serial names the maker and often the model, so a BRINC Responder, a Skydio X10 or a DJI dock drone scores higher than a hobby drone, and the drone's own position puts it on the map. **Axon body cams are found by the tag they broadcast** (`AXJANUSBWCDEVICE`, from all-cameras-are-beacons' field captures), even on a randomised address and with the screen off, along with Axon's Bluetooth IDs and serials, its second MAC block and Utility's BodyWorn remotes. **Flock fixes:** the hotspot rule expected `Flock-` + 4 hex and matched none of the 803 real ones in flock-you's WiGLE data, which are `Flock-` + 6 hex ending in the BSSID; `0x09C8` is labelled as the Penguin battery pack it is, not Raven's maker; `Pigvision`, which no device was ever seen to use, is gone; Penguin, `FS-` and numeric names are anchored to the forms real devices use. The radio-module makers' prefixes seen on Flock hardware no longer alert on their own (they score 25, under the display floor), and Samsung's and Espressif's blocks are out of the list, so a Samsung TV or an ESP32 smart plug is no longer a "Flock" detection. **More vendors:** 18 more IEEE-verified blocks, among them Digital Ally, Utility, Kustom Signals and Stalker radar, Motorola Solutions, Federal Signal, Fusus, ELSAG, Neology and Genetec, with 28- and 36-bit blocks now matched; Ring's 13 and Blink's 6 blocks in COMMERCIAL; Ray-Ban Meta's own `0xFD5F`, while `0x058E`, which Quest headsets send, no longer reads as glasses. The source sheet scrolls, and a source whose network half fails (ADS-B) still lists what its radio half found. Also fixed: the Penguin "TN" serial check could read one byte past the end of a payload.
+- v0.6.1 — **An ignore list, and a bug hunt.** Every detection row has a crossed-out bell: tap it and that device, camera or aircraft stops raising the alert level, vibrating and showing in the lists until you remove it under **Settings → Ignored**. Devices are matched by address; because trackers and many wearables change theirs, the dialog also offers every device of a kind for smart-home gear, glasses and trackers, such as every "Smart glasses", which hides other people's too. It has not been tried against a real pair of Meta glasses. The list is stored encrypted on the phone. Waze reports, and attacks with no single transmitter behind them, cannot be ignored. **A crash:** with Bluetooth switched off, the next screen change or STOP crashed the app. The Bluetooth scan now follows the Bluetooth switch: its row says "Bluetooth is off" and the scan starts again by itself. **Scans that went quiet without saying so:** Android silently refuses a Bluetooth scan after too many starts in 30 s, and every screen on/off was a start. Now every start is budgeted, and the screen coming on is followed only once it has stayed on for 2 s (going off is still followed at once, because the full scan hears nothing from that moment). Android also sets aside a scan that has run too long: after 10 minutes (30 before Android 14) a scan with no filter hears only while some other app is scanning, and from Android 14 a filtered one is turned down to low power, which is the scan a phone in a pocket depends on. The app is not told. The scan is now started over every 8 minutes, and whenever the full scan has heard nothing at all for 2 minutes. Both limits were read in Android's source; neither was provoked on a phone. The Wi-Fi row now says when Wi-Fi or Location is off or Android is refusing scans, where it used to read OK and hear nothing. **False alerts:** the bonus for passing a fixed device (rise-peak-fall) fired on ordinary signal jitter and lifted weak matches into view; it now needs a real rise and fall over up to a minute, and Wi-Fi, scanned every 35 s, no longer gets it. Its numbers come from simulation, not field measurement. `Nest`, `Echo`, `Amazon` and `Ring` inside longer words ("AmazonBasics Mouse") no longer match. A device's highest score is held for 10 s so the circle does not flicker between tiers, and one detection vibrates once per tier per minute. **Missed alerts:** the 10-minute tracker rule now counts across screen-off time; it used to start again whenever the phone spent two minutes in a pocket. **Online sources:** an error page served with HTTP 200 is no longer read as "nothing here" by the camera map (which cached it), the Waze feed or the aircraft feed; an aircraft that has left goes at the next poll, where it used to hold its last distance and the alert level for five minutes; a Waze poll that fails for a passing reason is retried after 30 s, twice at most; a scan no longer starts from a cached location more than 2 minutes old; the direct Waze backend counts and saves a new account the moment it is registered, and a "slow down" reply no longer costs the account. **Drones** are one row each and show height above take-off, where they showed altitude above the ellipsoid labelled as height. Choosing "Approximate" location now gets a message that says what is wrong, and START offers Android's change-to-precise dialog where the app used to send you to its settings page. Every change, with what was and was not tested, is in [SOURCES.md](SOURCES.md).
 
 ## License
 

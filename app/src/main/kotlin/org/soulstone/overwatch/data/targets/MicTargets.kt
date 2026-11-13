@@ -153,16 +153,26 @@ object MicTargets {
     private val ALL_OUIS: Set<String> =
         OUIS_AMAZON + OUIS_GOOGLE + OUIS_HIDDEN_CAM + OUIS_RING + OUIS_BLINK + OUIS_GLASSES
 
+    /**
+     * Short everyday words. They count only as a word of their own ("Echo Dot",
+     * "Amazon Echo", "Google Nest Hub"), never inside a longer one: as plain
+     * substrings they named "Nestor's Buds" a Google Nest and an "AmazonBasics
+     * Mouse" an Echo. Case-sensitive.
+     */
+    private val BLE_NAME_WORDS: List<Pair<String, Family>> = listOf(
+        "Echo" to Family.ECHO,
+        "Amazon" to Family.ECHO,
+        "Nest" to Family.GOOGLE
+    )
+
+    /** "Ring" has to start the name as well: a "Galaxy Ring" is jewellery. */
+    private const val BLE_NAME_RING = "Ring"
+
     /** Case-sensitive substrings — distinct enough to avoid false positives. */
     private val BLE_NAME_HINTS: List<Pair<String, Family>> = listOf(
-        "Echo" to Family.ECHO,
         "echo-" to Family.ECHO,
         "FireTV" to Family.ECHO,
-        "Amazon" to Family.ECHO,
-        "Ring-" to Family.RING,
-        "Ring " to Family.RING,
         "Doorbell" to Family.RING,
-        "Nest" to Family.GOOGLE,
         "GoogleHome" to Family.GOOGLE,
         "Chromecast" to Family.GOOGLE,
         "Google-Home" to Family.GOOGLE,
@@ -184,6 +194,9 @@ object MicTargets {
         "rayban", "ray-ban", "ray ban", "heycyan"
     )
 
+    /** Set-up network names, matched at the start of the SSID in any case. Matched
+     *  anywhere, "Ring-" was in "Spring-Guest" and "Engineering-5G", "Ring_" in
+     *  "Catering_WiFi" and "Nest_" in "Honest_WiFi". */
     private val SSID_HINTS: List<Pair<String, Family>> = listOf(
         "Amazon-" to Family.ECHO,
         "Echo-" to Family.ECHO,
@@ -214,6 +227,12 @@ object MicTargets {
 
     fun matchBleName(name: String?): Match? {
         if (name.isNullOrBlank()) return null
+        for ((word, family) in BLE_NAME_WORDS) {
+            if (hasWord(name, word)) return Match(family, "name:$word")
+        }
+        if (hasWord(name, BLE_NAME_RING, atStartOnly = true)) {
+            return Match(Family.RING, "name:$BLE_NAME_RING")
+        }
         for ((needle, family) in BLE_NAME_HINTS) {
             if (name.contains(needle, ignoreCase = false)) {
                 return Match(family, "name:$needle")
@@ -229,11 +248,26 @@ object MicTargets {
     fun matchSsid(ssid: String?): Match? {
         if (ssid.isNullOrBlank()) return null
         for ((needle, family) in SSID_HINTS) {
-            if (ssid.contains(needle, ignoreCase = true)) {
+            if (ssid.startsWith(needle, ignoreCase = true)) {
                 return Match(family, "ssid:$needle")
             }
         }
         return null
+    }
+
+    /** True when [word] stands in [name] with no letter or digit before it and no
+     *  letter after it ("Nest Cam", "Nest-1A2B", "Nest1234"; not "Nestor"). */
+    private fun hasWord(name: String, word: String, atStartOnly: Boolean = false): Boolean {
+        var i = name.indexOf(word)
+        while (i >= 0) {
+            val end = i + word.length
+            val clearBefore = i == 0 || !name[i - 1].isLetterOrDigit()
+            val clearAfter = end == name.length || !name[end].isLetter()
+            if (clearBefore && clearAfter && (i == 0 || !atStartOnly)) return true
+            if (atStartOnly) return false
+            i = name.indexOf(word, i + 1)
+        }
+        return false
     }
 
     /**

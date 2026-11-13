@@ -81,7 +81,14 @@ class AircraftClient {
         for (base in endpoints) {
             val url = "$base/lat/${coord(pub[0])}/lon/${coord(pub[1])}/dist/$QUERY_RADIUS_NM"
             when (val r = get(url)) {
-                is Raw.Ok -> return@withContext FetchResult.Success(parse(r.body))
+                is Raw.Ok -> {
+                    // A 2xx is not yet an answer. Through v0.6.0 a body that did
+                    // not parse counted as "no aircraft", and the second feed
+                    // was never asked.
+                    val contacts = parse(r.body)
+                    if (contacts != null) return@withContext FetchResult.Success(contacts)
+                    lastError = "Unreadable reply"
+                }
                 is Raw.Err -> lastError = r.reason
             }
         }
@@ -127,11 +134,14 @@ class AircraftClient {
         }
     }
 
-    private fun parse(body: String): List<Contact> {
-        if (body.isBlank()) return emptyList()
+    /** The contacts in a reply, or null when it is not a result: not JSON, or no
+     *  aircraft array. Both feeds send an empty array for empty sky (adsb.lol as
+     *  `ac`, adsb.fi as `aircraft`; checked 2026-11-12). */
+    private fun parse(body: String): List<Contact>? {
+        if (body.isBlank()) return null
         return try {
             val root = JSONObject(body)
-            val arr = root.optJSONArray("ac") ?: root.optJSONArray("aircraft") ?: return emptyList()
+            val arr = root.optJSONArray("ac") ?: root.optJSONArray("aircraft") ?: return null
             val out = ArrayList<Contact>(arr.length())
             for (i in 0 until arr.length()) {
                 val a = arr.optJSONObject(i) ?: continue
@@ -148,8 +158,6 @@ class AircraftClient {
                         type = a.optString("t").trim().ifBlank { null },
                         lat = lat,
                         lon = lon,
-                        // alt_baro is "ground" (a string) for parked aircraft,
-                        // so optInt would quietly turn that into 0 ft.
                         // alt_baro is the string "ground" for parked aircraft,
                         // so optInt would quietly report that as 0 ft.
                         altitudeFt = if (a.opt("alt_baro") is Number) a.optInt("alt_baro") else null,
@@ -164,7 +172,7 @@ class AircraftClient {
             // Class only: Android's org.json quotes its whole input in a syntax
             // error, and this input is every aircraft around you, with positions.
             Log.w(TAG, "Failed to parse ADS-B response: ${e.javaClass.simpleName}")
-            emptyList()
+            null
         }
     }
 }

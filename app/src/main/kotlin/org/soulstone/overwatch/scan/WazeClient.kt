@@ -7,6 +7,7 @@ import java.net.URLEncoder
 import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneOffset
+import java.util.Locale
 import kotlin.math.cos
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -112,10 +113,8 @@ class WazeClient(
         val r = radiusMeters.toDouble().coerceAtLeast(BBOX_MIN_RADIUS_M) + PositionCloak.MAX_OFFSET_M
         val latDelta = r / 111_000.0
         val lonDelta = r / (111_000.0 * cos(Math.toRadians(cLat)).coerceAtLeast(0.01))
-        // Double.toString() is locale-independent (always '.'), so string-building
-        // the coordinates avoids any comma-decimal-separator surprise.
-        val bottomLeft = "${cLat - latDelta},${cLon - lonDelta}"
-        val topRight = "${cLat + latDelta},${cLon + lonDelta}"
+        val bottomLeft = "${coord(cLat - latDelta)},${coord(cLon - lonDelta)}"
+        val topRight = "${coord(cLat + latDelta)},${coord(cLon + lonDelta)}"
         // alert_types=POLICE is honored server-side (verified 2026-09-16) and
         // max_jams=0 drops the jam payload outright — together they cut a typical
         // response from ~18 KB to ~1.5 KB, which matters on cellular. max_alerts
@@ -138,7 +137,13 @@ class WazeClient(
             when (val code = conn.responseCode) {
                 in 200..299 -> {
                     val body = conn.inputStream.bufferedReader().use { it.readText() }
-                    FetchResult.Success(parsePolice(body))
+                    // A 2xx is not yet an answer: a captive portal or an error
+                    // page can come back as one. Through v0.6.0 anything unreadable
+                    // counted as "no police here", with a healthy status row.
+                    when (val alerts = parsePolice(body)) {
+                        null -> FetchResult.Failed("Unreadable reply", retrySoon = true)
+                        else -> FetchResult.Success(alerts)
+                    }
                 }
                 401, 403 -> {
                     Log.w(TAG, "OpenWeb Ninja rejected the API key ($code)")
@@ -150,23 +155,37 @@ class WazeClient(
                 }
                 else -> {
                     Log.w(TAG, "Waze feed returned $code")
-                    FetchResult.Failed("HTTP $code")
+                    // Only a server-side error is worth an early second try; any
+                    // other 4xx says the request itself is wrong.
+                    FetchResult.Failed("HTTP $code", retrySoon = code >= 500)
                 }
             }
         } catch (e: Exception) {
             // Class name only: some exception messages quote the request URL,
             // which carries the box, and logcat outlives the scan.
             Log.w(TAG, "Waze feed fetch failed: ${e.javaClass.simpleName}")
-            FetchResult.Failed(e.message ?: e.javaClass.simpleName)
+            FetchResult.Failed(e.message ?: e.javaClass.simpleName, retrySoon = true)
         } finally {
             conn.disconnect()
         }
     }
 
-    private fun parsePolice(body: String): List<Alert> {
-        if (body.isBlank()) return emptyList()
+    /** Always a '.' decimal and never an exponent: `Double.toString()` writes
+     *  0.0005 as "5.0E-4", which no server should be asked to parse. */
+    private fun coord(v: Double): String = String.format(Locale.US, "%.6f", v)
+
+    /**
+     * The police reports in a reply, or null when the reply is not one: not JSON,
+     * or JSON that says it is an error. An envelope with no alerts array is still
+     * read as "none here"; what this feed sends for an empty box has never been
+     * seen, so its absence is not taken for a failure.
+     */
+    private fun parsePolice(body: String): List<Alert>? {
+        if (body.isBlank()) return null
         return try {
-            val alerts = extractAlerts(JSONObject(body)) ?: return emptyList()
+            val root = JSONObject(body)
+            if (root.optString("status").equals("ERROR", ignoreCase = true)) return null
+            val alerts = extractAlerts(root) ?: return emptyList()
             val out = ArrayList<Alert>(alerts.length())
             for (i in 0 until alerts.length()) {
                 val a = alerts.optJSONObject(i) ?: continue
@@ -201,7 +220,7 @@ class WazeClient(
             // Class only: Android's org.json quotes its whole input in a syntax
             // error, and this input is every police report around you, with positions.
             Log.w(TAG, "Failed to parse Waze feed response: ${e.javaClass.simpleName}")
-            emptyList()
+            null
         }
     }
 

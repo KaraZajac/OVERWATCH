@@ -49,6 +49,10 @@ class WazeScanner(
         /** How long a poll's alerts stay scored if later polls fail: the
          *  DetectionStore's retention, which used to drop them. */
         private const val ALERTS_KEPT_MS = 5 * 60 * 1000L
+        /** Wait after a failure a backend marks as passing, and how many such
+         *  waits in a row before giving the regular interval its turn. */
+        private const val EARLY_RETRY_MS = 30_000L
+        private const val MAX_EARLY_RETRIES = 2
     }
 
     private var job: Job? = null
@@ -63,10 +67,22 @@ class WazeScanner(
             // Wait for the first fix so the opening poll fires as soon as we have
             // a location instead of after a full interval.
             locationProvider.location.first { it != null }
+            var earlyRetries = 0
             while (isActive) {
                 val fix = locationProvider.location.value
-                if (fix != null) pollOnce(fix)
-                delay(source.pollIntervalMs)
+                val retrySoon = fix != null && pollOnce(fix)
+                // A poll lost to a dead spot or a timeout is asked again shortly
+                // rather than a whole interval later: on the metered feed that
+                // interval is 4 minutes, and two of them outlast ALERTS_KEPT_MS, so
+                // one lost poll used to blank the reports for about three minutes.
+                // Twice at most, then back to the regular pace until a poll works.
+                if (retrySoon && earlyRetries < MAX_EARLY_RETRIES) {
+                    earlyRetries++
+                    delay(minOf(EARLY_RETRY_MS, source.pollIntervalMs))
+                } else {
+                    if (!retrySoon) earlyRetries = 0
+                    delay(source.pollIntervalMs)
+                }
             }
         }
         // Between polls, re-score the last poll's alerts at every fix, as the
@@ -98,19 +114,21 @@ class WazeScanner(
         Log.i(TAG, "WazeScanner stopped")
     }
 
-    private suspend fun pollOnce(fix: Location) {
+    /** One poll. True when it failed in a way worth asking again about soon. */
+    private suspend fun pollOnce(fix: Location): Boolean {
         if (!source.isConfigured) {
             SourceHealth.record(DetectionSource.WAZE, ok = false, message = source.unconfiguredReason)
-            return
+            return false
         }
 
-        when (val result = source.fetchPoliceNear(fix.latitude, fix.longitude, proximityMeters())) {
+        return when (val result = source.fetchPoliceNear(fix.latitude, fix.longitude, proximityMeters())) {
             is WazeSource.FetchResult.Failed -> {
                 SourceHealth.record(
                     DetectionSource.WAZE,
                     ok = false,
                     message = "${source.backendName} unreachable: ${result.reason}"
                 )
+                result.retrySoon
             }
             is WazeSource.FetchResult.Success -> {
                 SourceHealth.record(DetectionSource.WAZE, ok = true)
@@ -118,6 +136,7 @@ class WazeScanner(
                 alertsAtMs = System.currentTimeMillis()
                 // The fetch can take seconds: score from the latest fix.
                 emitProximityEvents(locationProvider.location.value ?: fix)
+                false
             }
         }
     }

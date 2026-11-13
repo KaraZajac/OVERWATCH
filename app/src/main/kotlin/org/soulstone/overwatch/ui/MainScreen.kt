@@ -22,12 +22,15 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -37,8 +40,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -52,12 +57,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import java.util.Locale
 import kotlin.math.cos
+import kotlin.math.roundToInt
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.BoundingBox
 import org.osmdroid.util.GeoPoint
@@ -66,6 +74,8 @@ import org.osmdroid.views.overlay.Marker
 import org.soulstone.overwatch.data.settings.Settings
 import org.soulstone.overwatch.fusion.DetectionEvent
 import org.soulstone.overwatch.fusion.DetectionSource
+import org.soulstone.overwatch.fusion.IgnoreRule
+import org.soulstone.overwatch.fusion.IgnoreRules
 import org.soulstone.overwatch.fusion.SourceHealth
 import org.soulstone.overwatch.fusion.ThreatLevel
 import org.soulstone.overwatch.scan.DeflockClient
@@ -80,11 +90,18 @@ fun MainScreen(
     events: List<DetectionEvent>,
     mapPoints: List<DeflockClient.SurveillancePoint>,
     userLocation: Location?,
+    /** Whether the running scan uses location at all. With only the radio
+     *  sources on it does not, and there is no fix to wait for. */
+    locating: Boolean = true,
     /** "Show within", in metres: what the map circle draws and the drill-down
      *  lists. The scanners evaluate at their own fixed radii, so it never changes
      *  a score or the tier. */
     detectionRadiusM: Int,
     onRadiusChange: (Int) -> Unit,
+    /** How many rules are on the ignore list, so the sheet can say that something
+     *  is being left out of it. */
+    ignoredCount: Int = 0,
+    onIgnore: (IgnoreRule) -> Unit = {},
     onStartStop: () -> Unit,
     onOpenSettings: () -> Unit,
     canStart: Boolean,
@@ -93,6 +110,9 @@ fun MainScreen(
     onOpenAppSettings: () -> Unit = {}
 ) {
     var showSheet by rememberSaveable { mutableStateOf(false) }
+    // The row the user asked to ignore, held as it was when they tapped it: the
+    // live event may be rescored or expire while the dialog is open.
+    var ignoreTarget by remember { mutableStateOf<DetectionEvent?>(null) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     Column(
@@ -102,6 +122,12 @@ fun MainScreen(
             // Background first, then insets: the colour still runs under the
             // status bar and the cutout, only the content is held clear.
             .windowInsetsPadding(WindowInsets.safeDrawing)
+            // The circle, the slider and the button need about 620 dp. A phone on
+            // its side, a split screen or a large font has less, and without this
+            // the START/STOP button was simply off the bottom with no way to
+            // reach it. When everything fits nothing changes: the column is still
+            // at least a screen tall, so the spacer below keeps the button down.
+            .verticalScroll(rememberScrollState())
             .padding(horizontal = 24.dp)
     ) {
         // Box (rather than Row + SpaceBetween) so the title is truly centered
@@ -142,6 +168,7 @@ fun MainScreen(
                 level = threat,
                 animating = running,
                 userLocation = userLocation,
+                locating = locating,
                 mapPoints = mapPoints,
                 events = events,
                 mapRadiusMeters = detectionRadiusM.toFloat(),
@@ -257,9 +284,159 @@ fun MainScreen(
                     fontFamily = FontFamily.Monospace
                 )
                 Spacer(Modifier.height(8.dp))
-                SourcesPanel(events = events.filter { it.visibleAt(detectionRadiusM.toFloat()) })
+                SourcesPanel(
+                    events = events.filter { it.visibleAt(detectionRadiusM.toFloat()) },
+                    onIgnoreRequest = { ignoreTarget = it }
+                )
+                if (ignoredCount > 0) {
+                    // Said here because an ignore list is easy to forget, and a
+                    // sheet that quietly shows less than is out there would be a lie.
+                    Text(
+                        text = "$ignoredCount on your ignore list: hidden here and not " +
+                            "counted. Review it in Settings.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
                 Spacer(Modifier.height(16.dp))
             }
+        }
+    }
+
+    ignoreTarget?.let { target ->
+        IgnoreDialog(
+            event = target,
+            onConfirm = { rule ->
+                onIgnore(rule)
+                ignoreTarget = null
+            },
+            onDismiss = { ignoreTarget = null }
+        )
+    }
+}
+
+/**
+ * Confirms an ignore and, for the sources that have kinds, asks how wide it goes.
+ *
+ * "Just this one" is a rule on the device's address. That is exact, but item
+ * trackers and some glasses and speakers swap their Bluetooth address every few
+ * minutes, and the rule cannot follow them. "Every one" is the only thing that
+ * sticks for those, at the price of hiding other people's as well, so the dialog
+ * says both things rather than picking for the user.
+ */
+@Composable
+private fun IgnoreDialog(
+    event: DetectionEvent,
+    onConfirm: (IgnoreRule) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val kindRule = remember(event) { IgnoreRules.kindRule(event, System.currentTimeMillis()) }
+    var everyOne by remember(event) { mutableStateOf(false) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surface,
+        title = {
+            Text(
+                text = "Stop alerting on this?",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace
+            )
+        },
+        text = {
+            Column {
+                // The row as it read when tapped, distance and all: two unnamed
+                // cameras differ only by that.
+                Text(
+                    text = event.label,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontSize = 13.sp,
+                    fontFamily = FontFamily.Monospace
+                )
+                Spacer(Modifier.height(10.dp))
+                if (kindRule == null) {
+                    DialogNote(
+                        when (event.source) {
+                            DetectionSource.DEFLOCK ->
+                                "This camera stops raising the alert level and leaves the " +
+                                    "list. It stays on the map."
+                            DetectionSource.AIRCRAFT ->
+                                "This aircraft stops raising the alert level and leaves the " +
+                                    "list and the map."
+                            else ->
+                                "Matched by its address. It stops raising the alert level, " +
+                                    "vibrating and showing in the list."
+                        }
+                    )
+                } else {
+                    IgnoreChoice(
+                        selected = !everyOne,
+                        title = "Just this one",
+                        note = "Matched by its address. Trackers and some glasses and " +
+                            "speakers change theirs every few minutes; if this one does, " +
+                            "it will alert again.",
+                        onClick = { everyOne = false }
+                    )
+                    IgnoreChoice(
+                        selected = everyOne,
+                        title = "Every \"${kindRule.label}\"",
+                        note = "Hides all of them, other people's included. For your own " +
+                            "gear when \"just this one\" does not stick.",
+                        onClick = { everyOne = true }
+                    )
+                }
+                Spacer(Modifier.height(6.dp))
+                DialogNote("Undo it any time in Settings, under Ignored.")
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    val now = System.currentTimeMillis()
+                    onConfirm(
+                        if (everyOne && kindRule != null) kindRule.copy(addedMs = now)
+                        else IgnoreRules.deviceRule(event, now)
+                    )
+                }
+            ) { Text("Ignore", fontFamily = FontFamily.Monospace) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel", fontFamily = FontFamily.Monospace) }
+        }
+    )
+}
+
+@Composable
+private fun DialogNote(text: String) {
+    Text(
+        text = text,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        fontSize = 11.sp,
+        fontFamily = FontFamily.Monospace
+    )
+}
+
+@Composable
+private fun IgnoreChoice(selected: Boolean, title: String, note: String, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.Top
+    ) {
+        // Null: the row owns the click, as in Settings' radio rows.
+        RadioButton(selected = selected, onClick = null)
+        Spacer(Modifier.width(8.dp))
+        Column {
+            Text(
+                text = title,
+                color = MaterialTheme.colorScheme.onSurface,
+                fontSize = 13.sp,
+                fontFamily = FontFamily.Monospace
+            )
+            DialogNote(note)
         }
     }
 }
@@ -269,6 +446,7 @@ private fun ThreatMapCircle(
     level: ThreatLevel,
     animating: Boolean,
     userLocation: Location?,
+    locating: Boolean,
     mapPoints: List<DeflockClient.SurveillancePoint>,
     events: List<DetectionEvent>,
     mapRadiusMeters: Float,
@@ -305,9 +483,19 @@ private fun ThreatMapCircle(
             PulsingDisc(
                 color = if (animating) activeColor else idleColor,
                 animating = animating,
-                label = if (animating) "WAITING FIX" else "IDLE",
-                labelColor = if (animating) Color.White
-                    else MaterialTheme.colorScheme.onSurfaceVariant
+                // A scan with only Bluetooth and Wi-Fi sources asks for no
+                // location; it said WAITING FIX from START to STOP.
+                label = when {
+                    !animating -> "IDLE"
+                    locating -> "WAITING FIX"
+                    else -> "SCANNING"
+                },
+                labelColor = when {
+                    !animating -> MaterialTheme.colorScheme.onSurfaceVariant
+                    // White on the yellow tier is 1.7:1, unreadable in daylight.
+                    level == ThreatLevel.YELLOW -> Color(0xFF1A1A1A)
+                    else -> Color.White
+                }
             )
         } else {
             // OSM map snapshot, centered on the user, with red ALPR pins and
@@ -448,6 +636,10 @@ private fun RadiusSlider(
     modifier: Modifier = Modifier
 ) {
     var live by remember(radiusM) { mutableFloatStateOf(radiusM.toFloat()) }
+    // The slider's stops are computed in floating point and land a hair under
+    // the round number (1399.9998), which toInt() showed and saved as 1399 m.
+    fun snapped(): Int = ((live / RADIUS_STEP_M).roundToInt() * RADIUS_STEP_M)
+        .coerceIn(Settings.RADIUS_MIN, Settings.RADIUS_MAX)
     Column(modifier = modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -460,7 +652,7 @@ private fun RadiusSlider(
                 fontFamily = FontFamily.Monospace
             )
             Text(
-                text = "${live.toInt()} m",
+                text = "${snapped()} m",
                 color = MaterialTheme.colorScheme.onBackground,
                 fontSize = 11.sp,
                 fontFamily = FontFamily.Monospace
@@ -469,12 +661,14 @@ private fun RadiusSlider(
         Slider(
             value = live,
             onValueChange = { live = it },
-            onValueChangeFinished = { onCommit(live.toInt()) },
+            onValueChangeFinished = { onCommit(snapped()) },
             valueRange = Settings.RADIUS_MIN.toFloat()..Settings.RADIUS_MAX.toFloat(),
-            steps = 48
+            steps = (Settings.RADIUS_MAX - Settings.RADIUS_MIN) / RADIUS_STEP_M - 1
         )
     }
 }
+
+private const val RADIUS_STEP_M = 100
 
 /** What the map's coloured dots mean. Five classes now share the circle, so
  *  without this the colours are just decoration. */
@@ -548,11 +742,11 @@ private fun StatusText(
 }
 
 @Composable
-private fun SourcesPanel(events: List<DetectionEvent>) {
+private fun SourcesPanel(events: List<DetectionEvent>, onIgnoreRequest: (DetectionEvent) -> Unit) {
     Column(modifier = Modifier.fillMaxWidth()) {
         DetectionSource.values().forEach { source ->
             val sourceEvents = events.filter { it.source == source }
-            SourceRow(source = source, events = sourceEvents)
+            SourceRow(source = source, events = sourceEvents, onIgnoreRequest = onIgnoreRequest)
             Spacer(Modifier.height(8.dp))
         }
     }
@@ -561,13 +755,17 @@ private fun SourcesPanel(events: List<DetectionEvent>) {
 /** User-facing label for a detection source. The internal enum stays MIC
  *  (mic-bearing devices is the technical concept) while the UI shows the
  *  friendlier "COMMERCIAL" — Nest/Ring/Echo are commercial smart-home gear. */
-private fun DetectionSource.displayLabel(): String = when (this) {
+internal fun DetectionSource.displayLabel(): String = when (this) {
     DetectionSource.MIC -> "COMMERCIAL"
     else -> name
 }
 
 @Composable
-private fun SourceRow(source: DetectionSource, events: List<DetectionEvent>) {
+private fun SourceRow(
+    source: DetectionSource,
+    events: List<DetectionEvent>,
+    onIgnoreRequest: (DetectionEvent) -> Unit
+) {
     val health by SourceHealth.flowFor(source).collectAsState()
     val unreachable = health.status == SourceHealth.Status.FAILED
 
@@ -593,7 +791,10 @@ private fun SourceRow(source: DetectionSource, events: List<DetectionEvent>) {
                 )
                 val maxScore = events.maxOfOrNull { it.score } ?: 0
                 val statusColor = when {
-                    unreachable -> MaterialTheme.colorScheme.onSurfaceVariant
+                    // Grey only when there is nothing to show. A source can be
+                    // half up (see below), and a red drone under a grey dot
+                    // read as "nothing here".
+                    unreachable && events.isEmpty() -> MaterialTheme.colorScheme.onSurfaceVariant
                     maxScore >= ThreatLevel.RED.minScore -> ThreatColors.Red
                     maxScore >= ThreatLevel.ORANGE.minScore -> ThreatColors.Orange
                     maxScore >= ThreatLevel.YELLOW.minScore -> ThreatColors.Yellow
@@ -618,39 +819,68 @@ private fun SourceRow(source: DetectionSource, events: List<DetectionEvent>) {
                 // drones' Remote ID still arrives by radio. Show what it has.
                 if (events.isNotEmpty()) {
                     Spacer(Modifier.height(4.dp))
-                    events.take(3).forEach { e -> EventRow(e) }
-                    if (events.size > 3) {
-                        Text(
-                            text = "+${events.size - 3} more",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontSize = 11.sp
-                        )
-                    }
+                    EventList(source, events, onIgnoreRequest)
                 }
-            } else if (events.isEmpty()) {
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    text = "no detections",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontSize = 11.sp
-                )
             } else {
-                Spacer(Modifier.height(4.dp))
-                events.take(3).forEach { e -> EventRow(e) }
-                if (events.size > 3) {
+                // A source that is up can still have something to say: the BLE
+                // scan is on its reduced filter list for a few seconds more.
+                health.message?.let { note ->
+                    Spacer(Modifier.height(4.dp))
                     Text(
-                        text = "+${events.size - 3} more",
+                        text = note,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+                Spacer(Modifier.height(4.dp))
+                if (events.isEmpty()) {
+                    Text(
+                        text = "no detections",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 11.sp
                     )
+                } else {
+                    EventList(source, events, onIgnoreRequest)
                 }
             }
         }
     }
 }
 
+/**
+ * A source's detections: the top three, and the rest behind a tap.
+ *
+ * The rest used to be a bare "+N more" with no way to see them. That was only a
+ * summary until rows could be ignored; a user's own doorbell is rarely one of the
+ * three highest scores in a street full of them, and it has to be reachable.
+ */
 @Composable
-private fun EventRow(e: DetectionEvent) {
+private fun EventList(
+    source: DetectionSource,
+    events: List<DetectionEvent>,
+    onIgnoreRequest: (DetectionEvent) -> Unit
+) {
+    var expanded by rememberSaveable(source) { mutableStateOf(false) }
+    val shown = if (expanded) events else events.take(COLLAPSED_ROWS)
+    shown.forEach { e -> EventRow(e, onIgnoreRequest) }
+    if (events.size > COLLAPSED_ROWS) {
+        Text(
+            text = if (expanded) "show fewer" else "+${events.size - COLLAPSED_ROWS} more",
+            color = MaterialTheme.colorScheme.onSurface,
+            fontSize = 11.sp,
+            fontFamily = FontFamily.Monospace,
+            modifier = Modifier
+                .clickable { expanded = !expanded }
+                .padding(vertical = 6.dp)
+        )
+    }
+}
+
+private const val COLLAPSED_ROWS = 3
+
+@Composable
+private fun EventRow(e: DetectionEvent, onIgnoreRequest: (DetectionEvent) -> Unit) {
     val ctx = LocalContext.current
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -671,8 +901,12 @@ private fun EventRow(e: DetectionEvent) {
                     // app holds the user's default geo: handler — Waze, etc. can
                     // intercept geo: intents and we don't want that here. Falls
                     // back to a generic browser intent if Maps isn't installed.
+                    // Fixed decimals: Double.toString() writes a coordinate
+                    // within 0.001 degrees of the equator or of Greenwich as
+                    // "-5.0E-4", which is not a place Maps can find.
                     val mapsUri = Uri.parse(
-                        "https://www.google.com/maps/search/?api=1&query=${e.lat},${e.lon}"
+                        "https://www.google.com/maps/search/?api=1&query=" +
+                            String.format(Locale.US, "%.6f,%.6f", e.lat, e.lon)
                     )
                     val mapsIntent = Intent(Intent.ACTION_VIEW, mapsUri)
                         .setPackage("com.google.android.apps.maps")
@@ -690,6 +924,19 @@ private fun EventRow(e: DetectionEvent) {
                 Icon(
                     Icons.Filled.Place,
                     contentDescription = "Open in Maps",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
+        if (IgnoreRules.canIgnore(e)) {
+            IconButton(
+                onClick = { onIgnoreRequest(e) },
+                modifier = Modifier.size(28.dp)
+            ) {
+                Icon(
+                    Icons.Filled.NotificationsOff,
+                    contentDescription = "Stop alerting on this",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(18.dp)
                 )

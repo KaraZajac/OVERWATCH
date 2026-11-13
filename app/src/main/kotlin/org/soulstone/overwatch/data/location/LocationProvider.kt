@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.location.Location
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import androidx.core.content.ContextCompat
 import com.google.android.gms.location.FusedLocationProviderClient
@@ -30,6 +31,9 @@ class LocationProvider(private val context: Context) {
         private const val TAG = "LocationProvider"
         private const val INTERVAL_MS = 15_000L
         private const val MIN_INTERVAL_MS = 5_000L
+        /** A cached fix older than this does not start a scan; the first live
+         *  one does, usually within seconds. */
+        private const val SEED_MAX_AGE_MS = 2 * 60_000L
     }
 
     private val client: FusedLocationProviderClient by lazy {
@@ -83,12 +87,16 @@ class LocationProvider(private val context: Context) {
             running = true
             client.requestLocationUpdates(request, callback, Looper.getMainLooper())
             // Seed with the cached lastLocation only if (a) we haven't already
-            // received a fresh fix from requestLocationUpdates and (b) we're
-            // still running by the time the listener fires. Otherwise the
-            // listener can race and either overwrite a fresh fix with a stale
-            // one or fire after stop().
+            // received a fresh fix from requestLocationUpdates, (b) we're still
+            // running by the time the listener fires and (c) it is recent.
+            // Otherwise the listener can race and either overwrite a fresh fix
+            // with a stale one or fire after stop(). (c) is new after v0.6.0: the
+            // cached position can be hours old and a city away, and the first
+            // polls go out the moment any fix exists. The paid Waze feed then
+            // spent its one request on the wrong place and showed nothing for
+            // the 4 minutes until its next.
             client.lastLocation.addOnSuccessListener { last ->
-                if (running && last != null && _location.value == null) {
+                if (running && last != null && _location.value == null && isRecent(last)) {
                     _location.value = last
                 }
             }
@@ -99,6 +107,11 @@ class LocationProvider(private val context: Context) {
             Log.e(TAG, "SecurityException starting location updates", e)
             return false
         }
+    }
+
+    private fun isRecent(fix: Location): Boolean {
+        val ageMs = (SystemClock.elapsedRealtimeNanos() - fix.elapsedRealtimeNanos) / 1_000_000L
+        return ageMs in 0..SEED_MAX_AGE_MS
     }
 
     fun stop() {

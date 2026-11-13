@@ -51,11 +51,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.soulstone.overwatch.data.settings.Settings
+import org.soulstone.overwatch.fusion.IgnoreRule
 import org.soulstone.overwatch.scan.wazert.WazeRtClient
 
 @Composable
 fun SettingsScreen(
     settings: Settings,
+    ignoreRules: List<IgnoreRule>,
+    onUnignore: (IgnoreRule) -> Unit,
+    overlayAllowed: Boolean,
     isRunning: Boolean,
     onRestart: () -> Unit,
     onBack: () -> Unit
@@ -125,8 +129,8 @@ fun SettingsScreen(
                     "modules gas-pump skimmers use, which BLE can't see. Unlike the rest " +
                     "of the app it is not just listening: a module that answers gets a " +
                     "name request, which shows it this phone's Bluetooth address. " +
-                    "Nothing is paired or connected. Off by default; takes effect on " +
-                    "the next Start."
+                    "Nothing is paired or connected. Off by default. Switching it off " +
+                    "stops it at once; switching it on takes effect on the next Start."
             )
         }
         Spacer(Modifier.height(8.dp))
@@ -217,6 +221,21 @@ fun SettingsScreen(
         SourceToggle("Vibrate on threat escalation", vibrate) { settings.setVibrateOnAlert(it) }
 
         Spacer(Modifier.height(16.dp))
+        SectionLabel("Ignored")
+        HelpText(
+            "Things you have told OVERWATCH to stop alerting on: your own glasses, " +
+                "the camera on your street. To add one, tap the circle while " +
+                "scanning, then the crossed-out bell beside a detection. Anything " +
+                "here is left out of the alert level, the vibration and the lists " +
+                "until you remove it. The list is stored encrypted on this phone."
+        )
+        if (ignoreRules.isEmpty()) {
+            HelpText("Nothing ignored.")
+        } else {
+            ignoreRules.forEach { rule -> IgnoredRow(rule, onRemove = { onUnignore(rule) }) }
+        }
+
+        Spacer(Modifier.height(16.dp))
         SectionLabel("Display over other apps")
         SourceToggle("Floating threat circle", overlay) { enabled ->
             settings.setOverlayEnabled(enabled)
@@ -233,7 +252,7 @@ fun SettingsScreen(
                 try { context.startActivity(intent) } catch (_: Exception) {}
             }
         }
-        if (overlay && !AndroidSettings.canDrawOverlays(context)) {
+        if (overlay && !overlayAllowed) {
             Text(
                 "Permission needed — system page should have opened. If not, grant manually under Apps → OVERWATCH → Display over other apps.",
                 fontSize = 11.sp,
@@ -254,6 +273,51 @@ fun SettingsScreen(
             settings.setThemeMode(Settings.ThemeMode.LIGHT)
         }
         Spacer(Modifier.height(24.dp))
+    }
+}
+
+/** One entry of the ignore list: what it is, how wide the rule goes, and a way back. */
+@Composable
+private fun IgnoredRow(rule: IgnoreRule, onRemove: () -> Unit) {
+    val scope = when (rule.match) {
+        // Most labels already end in the address; say it once.
+        IgnoreRule.Match.DEVICE ->
+            if (rule.label.contains(rule.identifier)) "this one only" else rule.identifier
+        IgnoreRule.Match.KIND -> "every one"
+    }
+    val added = remember(rule.addedMs) {
+        java.text.DateFormat.getDateInstance(java.text.DateFormat.MEDIUM)
+            .format(java.util.Date(rule.addedMs))
+    }
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f, fill = true).padding(end = 12.dp)) {
+            Text(
+                text = rule.label,
+                color = MaterialTheme.colorScheme.onBackground,
+                fontSize = 13.sp,
+                fontFamily = FontFamily.Monospace
+            )
+            Text(
+                text = "${rule.source.displayLabel()}  •  $scope  •  added $added",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 11.sp,
+                fontFamily = FontFamily.Monospace
+            )
+        }
+        Button(
+            onClick = onRemove,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                contentColor = MaterialTheme.colorScheme.onSurface
+            ),
+            shape = RoundedCornerShape(8.dp)
+        ) {
+            Text("Remove", fontSize = 13.sp, fontFamily = FontFamily.Monospace)
+        }
     }
 }
 

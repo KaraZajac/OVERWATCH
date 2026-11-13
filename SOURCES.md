@@ -116,8 +116,19 @@ which is why generic cameras are worth carrying.
   store's 5-minute expiry. After a jump in position (a cached first fix from
   somewhere else at Start, a GPS glitch, the end of a tunnel) the screen still
   read "@ 66m" with an orange ring 12 km away, as seen on an emulator.
-- A `200 OK` body containing `{"remark": "...timed out..."}` is treated as a
-  failure, so an Overpass timeout cannot poison the cache.
+- **A `200 OK` is not yet a result.** When a query runs past a server limit,
+  Overpass answers HTTP 200 with a top-level `"remark": "runtime error: Query
+  timed out…"` and whatever elements it had reached. That is a failure and is not
+  cached. Since v0.6.1 the reply must also parse as a result (JSON with an
+  `elements` array; Overpass sends an empty one for an area with nothing in it,
+  checked 2026-11-12), or the next endpoint is tried and the row reads
+  "Unreadable reply". Through v0.6.0 any other 2xx body, such as an error page
+  served with a 200, was cached and read as "no cameras here", with a healthy
+  status row, for the rest of the scan. The remark check now reads only the
+  reply's own `remark`; it used to search the whole body, so one camera whose
+  tags held both "remark" and "timeout" would have failed its cell for good. A
+  cache file that no longer parses (a write cut short) is a miss, not an empty
+  area.
 - **Dead:** `cdn.deflock.me/regions/*.json` — behind Cloudflare bot mitigation,
   unusable from a mobile HTTP client.
 
@@ -145,7 +156,13 @@ Both backends' reports are scored the same way. A poll's reports are kept and
 re-scored at every fix until the next poll: a report doesn't move, so its
 distance from the latest fix is always known, and one more than 2 km away drops
 out at once. If a poll fails, the last reports stay scored for 5 minutes, then
-go. Until v0.5.20 a report kept the distance and score of the poll that found it
+go. Since v0.6.1 a failure that looks passing (no network, a timeout, a 5xx, an
+unreadable reply) is asked again after 30 s, twice at most, before the regular
+interval resumes: on OpenWeb Ninja that interval is 4 minutes, so one lost poll
+used to blank the reports for about three minutes. A rejected key or any other
+4xx is never retried early, and the direct backend paces its own retries. An
+early retry that reaches OpenWeb Ninja is a billed request like any other.
+Until v0.5.20 a report kept the distance and score of the poll that found it
 until the store's 5-minute expiry: when the first fix at Start was the phone's
 cached position 12 km away, a report there read "@ 180m" for minutes, as seen on
 an emulator.
@@ -189,6 +206,20 @@ Verified behaviour (2026-09-16):
 - `URLEncoder` renders the bbox comma as `%2C`; the API parses that correctly.
 - Police alerts very often carry `alert_confidence: 0` and `alert_reliability: 0`,
   so the distance floor matters more than the crowd-trust bonuses.
+
+Since v0.6.1:
+
+- **A 2xx that is not a result is a failure.** A body that is not JSON, or JSON
+  with `"status": "ERROR"`, gives "Unreadable reply" on the WAZE row and an early
+  retry (§2.2). Through v0.6.0 it counted as "no police here", with a healthy
+  row. An envelope with no alerts array is still read as "none": what this feed
+  sends for an empty box has never been seen, so its absence is not taken for a
+  failure.
+- **Coordinates are written `%.6f` under `Locale.US`.** They were built with
+  `Double.toString()`, which is locale-safe but writes 0.0005 as `5.0E-4`. Only a
+  box with an edge within 0.001° (about 111 m) of the equator or the prime
+  meridian could produce that form, and whether the API accepts it was never
+  tested.
 
 #### 2.2b Direct — the Waze app's own protocol (opt-in)
 
@@ -234,7 +265,15 @@ emulator:
 - Anonymous-account registration is capped per device per day (10), so the
   account is persisted encrypted and reused, and a rejected account backs off
   30 s, doubling to 10 min, instead of spinning the register loop. (Until v0.5.18
-  the doubling stopped at 8 min.)
+  the doubling stopped at 8 min.) Since v0.6.1 a new account is counted and saved
+  the moment `/static` returns it, whatever becomes of the login and handshake
+  that follow. Through v0.6.0 that happened only after all three had worked, so a
+  registration followed by a rejected login was forgotten and replaced without
+  ever counting toward the cap: the one loop the cap exists to stop.
+- **A login answered 408 or 429 is not a rejected account** (v0.6.1). Those say
+  "try again" or "slow down"; through v0.6.0 they were handled like every other
+  4xx, by deleting the account and registering another. Whether Waze's login ever
+  sends either is not known; the change is the cautious reading.
 - **Forget** (Settings) wipes the stored account, and a running scan registers a
   new one at its next poll. Until v0.5.19 the scan carried on under the forgotten
   account until Stop: Settings forgets through a `WazeRtFetcher` of its own, and
@@ -281,6 +320,11 @@ fed the same 400,000 positions, old and new return bit-identical centres.)
 - **Metres, not degrees.** The longitude step is computed per latitude row, so
   cells are 1000 × 1000 m from the equator to 64°N in both hemispheres
   (checked at six cities). Adjacent rows are offset like bricks as a result.
+  The grid is not cut to the globe, so the last column before the antimeridian
+  has its centre up to half a cell past ±180°. Since v0.6.1 that centre is
+  wrapped (and a latitude clamped to ±90°) before it is sent; through v0.6.0
+  anyone within about a kilometre of the line (Taveuni, Chukotka) sent a
+  longitude no server accepts.
 - **150 m hysteresis.** Parked on an edge, GPS wander would flip between two
   squares and the flipping would itself pinpoint you. A square is kept until the
   device is 150 m past it; ±30 m wander across an edge never flips it.
@@ -311,7 +355,10 @@ unmodified apart from the package name, removal of the report-submission path,
 and a rewrite of the HTTP client from OkHttp to `HttpURLConnection`.
 `WazeRtFetcher.java` is OVERWATCH's own driver modelled on upstream's, carried
 under the same licence; `PositionCloak` is OVERWATCH's own and lives outside that
-directory. OVERWATCH reads alerts and never reports one.
+directory. OVERWATCH reads alerts and never reports one. `WazeSession.java` has
+three further changes, each recorded in its header: the account name and session
+id are not logged (v0.5.19), the server's error text is not logged, and the
+408/429 rule above (both v0.6.1).
 
 **Why not `live-map/api/georss`:** the endpoint every scraper used is fronted by
 Google's edge, which returns **HTTP 403** to automated clients. Tested 2026-07
@@ -356,6 +403,16 @@ ADSBexchange, adsb.fi, adsb.lol and airplanes.live do not filter.
   integer read reports that as 0 ft.
 - Rapid sequential queries across many metros get refused; the app polls once
   per minute from one point, well inside courtesy limits.
+- **A 2xx that does not parse falls through to the second feed** (v0.6.1). Both
+  feeds send an empty array for empty sky (adsb.fi as `aircraft`, adsb.lol as
+  `ac`; checked 2026-11-12), so a reply with neither array is not a result.
+  Through v0.6.0 it counted as "no aircraft" and `adsb.lol` was never asked.
+- **Each poll replaces the whole ADS-B set** (v0.6.1). An aircraft that has flown
+  out of range, landed or stopped circling goes at that poll. Through v0.6.0 each
+  one was submitted on its own and never withdrawn, so a helicopter that had left
+  kept its last distance, its map marker and the alert level for five more
+  minutes. A failed poll replaces nothing, so an outage still ends with the last
+  set ageing out. Drones are heard by radio and are not part of that set (§3.9).
 
 ### 2.4 Aircraft identity — ADSBexchange `basic-ac-db`
 
@@ -462,7 +519,7 @@ Silicon Labs, nine to Liteon and one to USI, all radio-module makers, and
 `d8:a0:d8` is unassigned. A hit is a module those makers also sell for
 everything else, so **since v0.6.0 a module prefix alone scores 25, under the
 display floor**: it shows only with a second signal, such as a Flock name, the
-Penguin pack's maker id or a rise-peak-fall. Until then it scored 40 and showed on
+Penguin pack's maker id or a pass (§4.2). Until then it scored 40 and showed on
 its own. v0.6.0 also dropped the three Espressif blocks (`48:e7:29`, `c8:c9:a3`,
 `a4:cf:12`), which every ESP32 gadget carries; SquachWatch and
 all-cameras-are-beacons retired them for the same reason. Flock Safety's own
@@ -483,7 +540,8 @@ flock-you observed it. None is registered to Flock Safety: by the IEEE registry
 they are 21 Liteon, 3 Silicon Labs and 2 USI, and `b8:35:32` is unassigned.
 v0.6.0 removed Samsung's `48:27:ea`, which would name a Samsung TV's Wi-Fi Direct
 network a Flock camera (SquachWatch left it out for that reason), and Espressif's
-`3c:71:bf` and `a4:cf:12`. As on BLE, a module prefix alone now scores 25; a real
+`3c:71:bf` and `a4:cf:12`. As on BLE, a module prefix alone now scores 25, and
+since v0.6.1 Wi-Fi has no pass bonus (§4.2), so here it never shows alone. A real
 Flock hotspot also carries its `Flock-XXXXXX` SSID (§3.6), which lifts it to 100.
 ```
 70:c9:4e  3c:91:80  d8:f3:bc  80:30:49  b8:35:32  14:5a:fc  74:4c:a1  08:3a:88
@@ -618,8 +676,11 @@ hotspots.
 
 ### 3.7 COMMERCIAL / consumer gear
 
-`data/targets/MicTargets.kt`. Families: `ECHO`, `RING`, `GOOGLE`, `SONOS`,
-`HIDDEN_CAM`, `GLASSES`.
+`data/targets/MicTargets.kt`. Families: `ECHO`, `RING`, `BLINK`, `GOOGLE`,
+`SONOS`, `HIDDEN_CAM`, `GLASSES`. Every family but `HIDDEN_CAM` is also a *kind*
+the ignore list can cover as a whole (§4.4); `HIDDEN_CAM` means "matched, but
+nothing says what it is", and a rule hiding all of those would hide the ones
+worth seeing.
 
 Bluetooth SIG company IDs — every one re-verified against the SIG
 assigned-numbers registry (4,035 entries) on 2026-09-21:
@@ -678,10 +739,21 @@ makes 21, so only Meta's `0x01AB` and Luxottica's `0x0D53` get a slot; Snap,
 Vuzix, Amazon, Google and Sonos wait for the screen. Until v0.6.0 the five
 glasses ids got slots and Axon none.
 
-Name tokens: the case-sensitive hints (`Spectacles`, `Ray-Ban`, `RayNeo`,
-`Vuzix`, `XREAL`, `Rokid`, plus the Echo/Ring/Nest set) and, matched
-case-insensitively against the lowercased name, `rayban`, `ray-ban`,
-`ray ban`, `heycyan`.
+Name tokens: the case-sensitive substrings (`Spectacles`, `Ray-Ban`, `RayNeo`,
+`Vuzix`, `XREAL`, `Rokid`, `echo-`, `FireTV`, `Doorbell`, `GoogleHome`,
+`Google-Home`, `Chromecast`) and, matched case-insensitively against the
+lowercased name, `rayban`, `ray-ban`, `ray ban`, `heycyan`.
+
+Four short everyday words are matched more narrowly since v0.6.1. `Echo`,
+`Amazon` and `Nest` count only as a word of their own (no letter or digit
+before, no letter after: "Echo Dot", "Nest-1A2B", not "Nestor"), and `Ring` only
+as such a word at the start of the name, because a "Galaxy Ring" is jewellery.
+Through v0.6.0 they were plain substrings (`Ring-` and `Ring ` for Ring), so
+"Nestor's Buds" was a Google Nest and an "AmazonBasics Mouse" an Echo.
+The set-up SSIDs (`Amazon-`, `Echo-`, `Ring-`, `Ring_`, `Nest_`, `GoogleHome`,
+`Chromecast`) are matched at the start of the SSID, in any case; matched
+anywhere, `Ring-` sat in "Spring-Guest" and "Engineering-5G" and `Nest_` in
+"Honest_WiFi". These examples were constructed to test the rule, not captured.
 
 **Credit:** the GLASSES identifier set is drawn from
 [Nearby Glasses](https://github.com/yjeanrenaud/yj_nearbyglasses) by
@@ -718,7 +790,8 @@ be labelled Amazon or Google gear when it is neither; a lone OUI hit scores 30, 
 it shows only very close and passing (§4.2).
 
 Weights: OUI 30, name 45, company id 30, service UUID 50, SSID 45; +10 when two
-or more methods agree on one device, +5 above −50 dBm, +8 for rise-peak-fall.
+or more methods agree on one device, +5 above −50 dBm, +8 for a pass (Bluetooth
+only, §4.2).
 Scores are **capped at 84** so a cluster of doorbells — or a passing pair of
 Ray-Bans — can never read as ALPR-grade certainty. RED is reserved for
 ALPR/Axon-grade evidence.
@@ -740,7 +813,7 @@ names the device.
 | `0xFE6B` service data with a serial | TASER International's SIG member UUID, carrying ASCII serials (`D01A…` on body cams) | 7 devices, one confirmed by eye | 80 |
 | `0xFE6C` service data with a serial | TASER International's other member UUID, the Axon Signal trigger layout | AxonCadabra's replay of a captured trigger; no real trigger has been captured. Serial `X87002FP4` is that tool and goes to HACKER (§3.10) | 80 |
 | `0x034D` manufacturer data | TASER International's company ID, counted only as `0x02` + nine uppercase letters/digits (`X870054FW`). `X87…` is the Axon Signal Vehicle per Blue2thprinting's serial map, `X85…` the Fleet power unit | 1 capture, on `00:25:DF`. ACAB's off-block `0x034D` advert without that shape is why the shape is required | 80 |
-| `0xFC81` / `0xFE6B` / `0xFE6C` listed, no payload | Axon Enterprise's / TASER International's member UUIDs | SIG registry (OUI-SPY AXEOFF keys on them) | 75 |
+| `0xFC81` / `0xFE6B` / `0xFE6C` listed, or carried as service data with no serial in it | Axon Enterprise's / TASER International's member UUIDs. A serial is a run of six or more uppercase letters and digits; through v0.6.0 any non-empty `0xFE6B` / `0xFE6C` payload scored as "with a serial" (80) | SIG registry (OUI-SPY AXEOFF keys on them) | 75 |
 | `BodyWorn Remote XXXX` name | Utility's body-cam activation remote; XXXX is the last two bytes of its MAC | 10 MACs on Utility's `00:09:BC`, one observer, 2025-08 | 80 |
 | MAC `00:25:df` | Axon Enterprise (IEEE) | 13 MACs in ACAB's serial logs | 80 |
 | MAC `d8:1f:65` | IEEE lists the holder as **Private** | 10 MACs field-attributed to Axon, five confirmed by eye, and no non-Axon device among ~21,000 scanned. If one ever appears, this entry must come out | 80 |
@@ -777,10 +850,19 @@ drone-as-first-responder flights beyond line of sight need standard (built-in)
 Remote ID, because add-on modules require line of sight (89.115).
 
 Decoded: the Basic ID (serial when its ID type is 1, ANSI/CTA-2063-A) and the
-Location message (latitude/longitude int32 × 10⁻⁷, altitude uint16 ÷ 2 − 1000 m,
-status). The System message also carries the operator's or take-off position;
-OVERWATCH ignores it. The drone's position is its own broadcast, put on the map
-as a violet dot; it is never logged and never leaves the phone.
+Location message (latitude/longitude int32 × 10⁻⁷, geodetic altitude and height
+each uint16 ÷ 2 − 1000 m, status). The System message also carries the
+operator's or take-off position; OVERWATCH ignores it. The drone's position is
+its own broadcast, put on the map as a violet dot; it is never logged and never
+leaves the phone.
+
+Since v0.6.1 the row reads "· 40 m up" from the **height** field (above take-off
+or the ground), and "· alt 1650 m" from the altitude only when no height is sent.
+Through v0.6.0 the altitude, which is measured from the WGS-84 ellipsoid, was
+labelled "m up", so a drone parked in Denver would have read "1609 m up". Also
+since v0.6.1 a drone is **one row**: it is keyed by its serial once it has sent
+one, and the row it had under its transmitter's address until then is withdrawn.
+The same drone heard over Bluetooth and Wi-Fi joins that row.
 
 **Telling police from hobby drones: only the serial prefix works.** The first
 four characters are the ICAO-assigned manufacturer code; the next is a length
@@ -818,11 +900,11 @@ COMMERCIAL.
 | AxonCadabra | `0xFE6C` service data carrying serial `X87002FP4`: its replay of one captured Axon Signal trigger. Reported here and **not** as Axon, even from `00:25:DF` (the Flipper ports spoof that too) | AxonCadabra `MainActivity.kt:38-46` | 75 |
 | iOS crash advert | Apple `0F 05 <flags> <action> <tag×3> 00 00 10 <len>` with `len` past the end of the payload. No real device sends a record that overruns its own advert | Momentum-Apps `ble_spam/protocols/continuity.c:406-425`; ESP32-Sour-Apple `sour-apple-esp32.ino:20-40` | 84 |
 | AppleJuice templates | `0F 05 C1 <action> 60 4C 95 00 00 10 …` (a fixed authentication tag) or AirPods `07 19 07 <model> 20 75 AA 30 01 00 00 45 12 12 12` (fixed bytes in the encrypted field) | AppleJuice `applejuice.ino:36-65` | 84 |
-| Pop-up spam flood | 40+ new addresses carrying pop-up adverts (Apple Proximity Pairing / Nearby Action, discoverable Fast Pair `0xFE2C`, Samsung `0x0075` buds/watch, Microsoft Swift Pair `0x0006`) within 10 s, after a 15 s warm-up at every scan (re)start | Momentum-Apps `ble_spam`; Bruce `ble_spam.cpp`; Mayhem `ui_blespam.cpp` | 84 |
+| Pop-up spam flood | 40+ new addresses carrying pop-up adverts (Apple Proximity Pairing / Nearby Action, discoverable Fast Pair `0xFE2C`, Samsung `0x0075` buds/watch, Microsoft Swift Pair `0x0006`) within 10 s, after a 15 s warm-up at every scan (re)start. An address is "new" until 2 minutes after it was **last** heard; through v0.6.0 the 2 minutes ran from its first sighting, so every device that simply stayed in range was counted as new again (40 real AirPods in one train carriage would have raised a flood every two minutes) | Momentum-Apps `ble_spam`; Bruce `ble_spam.cpp`; Mayhem `ui_blespam.cpp` | 84 |
 | One transmitter cycling devices | 4+ different Proximity Pairing models or Nearby Actions from one address within 10 s. Flipper's Apple modes keep one address per run; real AirPods have one model | `ble_spam.c:43-69, 232` | 84 |
 | Default access points | `Pineapple_…` (WiFi Pineapple setup network; it disappears after setup), `pwned…` (ESP deauther), `BruceNet` / `BruceShell` / `BRUCE-UDP` (Bruce), `GhostNet` (GhostESP), `blackmagic` (Flipper Wi-Fi dev board), `O.MG`, `Nugget AP`, `wifiduck`, `Exploit` (ESPloitV2 / WHID Cactus), `Evil Crow RF v2`, P4wnP1's emoji SSID. All renamable | Hak5 docs; esp8266_deauther; Bruce `config.h:64`; GhostESP `settings_manager.c:220-221`; blackmagic-esp32-s2 `nvs-config.c:14-15`; o.mg.lol; USB-Nugget; WiFiDuck; ESPloitV2; EvilCrowRF-V2; P4wnP1 `defaults.go:19-38` | 55 |
 | Evil-portal defaults | `Evil Portal`, `EvilPortal`, `EvilAP`, `NEMO Free WiFi`, `Evil-…` (Evil-M5Project, including `Evil‑NanoC6` with U+2011) | flipper-zero-evil-portal; GhostESP; m5stick-nemo; Evil-M5Project | 50 |
-| Rogue-AP default BSSIDs | `00:00:00:xx:xx:xx` (wifiphisher without `-iNM`/`-iAM`), `00:11:22:33:44:00` (eaphammer), `BC:F6:85:03:36:5B` (WiFi Pumpkin 3) | wifiphisher `interfaces.py:932-943`; eaphammer `hostapd.ini:25-27`; wifipumpkin3 `config.ini:59-61` | 70 |
+| Rogue-AP default BSSIDs | `00:00:00:xx:xx:xx` (wifiphisher without `-iNM`/`-iAM`; not the all-zero `00:00:00:00:00:00`, which is how a missing address is written, since v0.6.1), `00:11:22:33:44:00` (eaphammer), `BC:F6:85:03:36:5B` (WiFi Pumpkin 3) | wifiphisher `interfaces.py:932-943`; eaphammer `hostapd.ini:25-27`; wifipumpkin3 `config.ini:59-61` | 70 |
 | Beacon spam | In one scan, 3+ of: Rick-roll SSIDs, an RSN element listing one cipher twice (Android shows `[WPA2-PSK-CCMP+CCMP]`), or BSSIDs with the multicast bit set | esp8266_deauther `Attack.h:194-208`; Marauder `WiFiScan.cpp:9666-9714`; AOSP `InformationElementUtil` | 75 |
 | Many names, one BSSID | One BSSID advertising 5+ network names in one scan (Known Beacons, Karma). Untested on Android, so it may never fire | wifiphisher `knownbeacons.py` | 70 |
 | ESP32 Marauder wardrive decoy | A network named exactly `Flock` from an Espressif address (`EspressifOuis.kt`: all 374 Espressif MA-L blocks, IEEE CSV 2026-11-01). Marauder beacons it with camera-style elements; before v0.6.0 OVERWATCH would have scored it about 100 as a Flock camera | Marauder `WiFiScan.cpp` ~6459 | 55 |
@@ -862,6 +944,23 @@ rotates its address starts its 10 minutes again, which can delay an alert but
 never invent one. **Not matched:** Samsung `0xFD69` (Galaxy phones and earbuds in
 lost mode) and `0xFD59` (unregistered-tag onboarding).
 
+**The stay is counted across screen-off (v0.6.1).** The screen-off scan carries
+no tracker filter (§5.1), so with the phone in a pocket no tag is heard whether
+it is there or not. Through v0.6.0 that silence counted as the tag leaving: any
+pocket spell over 2 minutes started every count again, so a phone that was
+mostly in a pocket, which is when a planted tag matters, never reached the
+10-minute alert. Now the time the scanner could not hear trackers (screen off,
+Bluetooth off, no scan running) is left out of the gap. A tag heard before the
+phone went into the pocket and again when it came out is counted as there
+throughout; one first heard after the spell starts from zero. The cost is the
+opposite error: a tag that went away and came back within one pocket spell is
+counted as having stayed. The alert is still raised only while the screen is
+on, because that is the only time a tracker can be heard.
+
+Each make in the table is a *kind* for the ignore list (§4.4): tags rotate their
+address (an AirTag away from its owner about once a day), so a rule for one
+address soon stops matching.
+
 Android withholds iBeacon and Eddystone adverts from apps that declare
 `neverForLocation` on `BLUETOOTH_SCAN`, as OVERWATCH does, but its default
 deny-list exempts exactly Find Hub's frame types (AOSP `AdapterService`
@@ -899,10 +998,33 @@ field evidence, and rejected:
 
 Score 0–100 per observation; the on-screen tier is the **maximum live score**
 across all sources. Radio events (BLE, WiFi, Commercial, Hacker, Tracker, drones)
-and aircraft expire 5 minutes after they were last seen. The camera map and Waze reports sit at fixed,
+expire 5 minutes after they were last heard. The camera map and Waze reports sit at fixed,
 known positions, so they are re-scored at every fix and drop out as soon as they
 are out of range (§2.1, §2.2); until v0.5.20 they too stayed up to 5 minutes,
-with the distance they had when last in range.
+with the distance they had when last in range. ADS-B aircraft are replaced as a
+set at every poll since v0.6.1 (§2.3), and age out after 5 minutes only when the
+polls fail.
+
+**Peak hold (v0.6.1).** A radio device is re-scored at every advert, several
+times a second, and the strong-signal bonus switches at −50 dBm. A device a few
+dB either side of that line took the circle from RED to ORANGE and back at that
+rate. Each device's highest score is now held for 10 s after it was last
+reached; the row keeps the latest advert's label and signal strength. Sets that
+are replaced whole (camera map, Waze, ADS-B) are not held, so a distance-driven
+score always follows the latest fix.
+
+**Vibration (v0.6.1).** A rise in the tier vibrates, unless the detection behind
+it already vibrated for that tier or a higher one in the last 60 s
+(`fusion/AlertGate.kt`). A different detection reaching the tier, or the same
+one going higher than it has, always vibrates. Through v0.6.0 every upward
+crossing vibrated, so one camera a few metres either side of a distance band, or
+one device on a score boundary, buzzed again and again with nothing new to say.
+The notification is likewise posted only when its words change, and at most once
+a second; it used to be re-posted on every store update. Its level and its top
+detection are both taken from one reading of the list, so the pair that waits
+out that second is never half old and half new.
+
+Both numbers (10 s, 60 s) are choices, not measurements.
 
 ```
 GREEN      < 40    nothing credible
@@ -983,7 +1105,10 @@ orbiting 5 km away is still watching you.
   not an observer.
 - **Aircraft loitering** — +10. Surveillance aircraft orbit; airliners and
   medevac flights heading somewhere do not.
-- **Aircraft LADD** — +4. The operator asked public trackers to hide it.
+- **Aircraft LADD** — +4. The operator asked public trackers to hide it. Only
+  registry aircraft carry the flag, so it never meets the cap below; since
+  v0.6.1 the code adds it before the cap all the same, where through v0.6.0 it
+  was added after.
 - **Unidentified aircraft cap** — 69, the top of YELLOW. Behaviour-only evidence
   never reaches ORANGE, let alone RED; circling could still be news or survey
   work.
@@ -997,16 +1122,41 @@ orbiting 5 km away is still watching you.
   up, capped at 100. HACKER (§3.10), TRACKER (§3.11) and drones (§3.9) have their
   own tables and are capped at 84.
 - **Multi-method bonus** — +20 when two independent BLE/WiFi methods agree.
-- **Strong RSSI** (> −50 dBm) +10; **stationary** (rise-peak-fall) +15. COMMERCIAL
-  uses +10, +5 and +8 (§3.7).
+- **Strong RSSI** (> −50 dBm) +10; **pass** (rise-peak-fall, the code's
+  `stationary`, Bluetooth only) +15. COMMERCIAL uses +10, +5 and +8 (§3.7).
+- **What counts as a pass (v0.6.1)** — `fusion/RssiTracker.kt`. The signal of a
+  fixed transmitter rises, peaks and falls as you go by; a device you carry does
+  not do that. Readings are averaged into 1 s slots, the last 60 slots are cut
+  into thirds, and it is a pass when the middle third averages at least 8 dB
+  over the first third **and** over the last. It needs 6 slots and 3 readings in
+  each third; a device unheard for 90 s starts again.
+  The rule through v0.6.0 was flock-detection's, ported unchanged: among the
+  last 15 raw readings, the strongest is neither first nor last and stands 6 dB
+  over the weaker of those two. Android delivers every advert, several a second,
+  so 15 readings covered a few seconds, and in simulation ordinary 2–4 dB jitter
+  passed that test on 28–74% of checks with nobody moving. The +15 then lifted a bare module prefix (25) over the display floor on
+  noise alone.
+  **The new numbers are simulated, not measured** (log-distance path loss, 3 dB
+  jitter, 3–5 dB slow fading): standing still for ten minutes reads as a pass in
+  under 10% of runs at worst; walking past within 5 m in all of them, at 10 m
+  in about three in four; driving past at 13 m/s within 15 m in over nine in
+  ten. Faster passes give too few slots: at highway speed a roadside device is
+  in range for only a few seconds. A signal that really swells and fades by
+  8 dB while nobody moves (a body turning between phone and device) still reads
+  as a pass; signal strength alone cannot tell those apart.
+  **Wi-Fi has no pass bonus since v0.6.1.** A scan every 35 s gives three
+  readings in a minute and a half, which is three numbers, not a shape.
 - **Display floor** — a BLE, WiFi or COMMERCIAL hit scoring under 40 is dropped:
   it is never shown and never counts toward the tier (`ALARM_THRESHOLD` in
   `BleScanner` and `WifiScanner`).
-  Most single methods clear it alone. Three don't. A Penguin numeric name (15)
-  needs both a strong signal and a rise-peak-fall (15 + 10 + 15), and so does a
-  lone COMMERCIAL OUI or company id (30 + 5 + 8). So glasses that advertise only
-  Meta's or Luxottica's company id show only very close, as you pass them; a
-  matching name or the HeyCyan service UUID shows at any range the radio reaches.
+  Most single methods clear it alone. Three don't. A Flock module prefix (25)
+  shows on Bluetooth only with a pass (25 + 15), and on Wi-Fi never alone
+  (25 + 10). A Penguin numeric name (15) needs both a strong signal and a pass
+  (15 + 10 + 15), and so does a lone COMMERCIAL OUI or company id on Bluetooth
+  (30 + 5 + 8); on Wi-Fi a lone COMMERCIAL OUI (30 + 5) never shows. So glasses
+  that advertise only Meta's or Luxottica's company id show only very close, as
+  you pass them; a matching name, the HeyCyan service UUID, or Ray-Ban Meta's `0xFD5F`
+  (50) shows at any range the radio reaches.
 
 ### 4.3 Loiter detection
 
@@ -1019,6 +1169,46 @@ as low or slow.
 A registry hit is reported wherever it is, within 15 km. An *unregistered*
 aircraft is reported only when it is both loitering **and** within 8 km, so
 ordinary traffic passing overhead never raises an alert.
+
+### 4.4 The ignore list
+
+`fusion/IgnoreRule.kt`, `data/settings/IgnoreList.kt`; added in v0.6.1. The
+user's own gear (their glasses, their doorbell, the camera on their own street)
+is a detection every time they come home. Each row in a source's list has a
+crossed-out bell; rules are listed under **Settings → Ignored**, each with a
+Remove button.
+
+A rule belongs to one source and takes one of two forms:
+
+| Form | Matches | Offered for |
+|---|---|---|
+| This one | The row's key: a Bluetooth address, a BSSID, a camera's OSM node id, an aircraft's ICAO hex, a drone's serial | every row that can be ignored |
+| Every one of a kind | Every detection of that kind in that source | COMMERCIAL families except "possible hidden mic / cam" (§3.7), and TRACKER makes (§3.11) |
+
+- **Applied where detections enter the store**, so an ignored one is never
+  stored: it cannot raise the tier, vibrate, reach the notification or the
+  bubble, or show in a list. A rule added during a scan removes its detections
+  at once; a removed rule lets them back at the next sighting. An ignored camera
+  stays on the map as a dot, since the map draws the camera data, not the alerts.
+- **One source per rule.** The same doorbell heard over Bluetooth and over Wi-Fi
+  is two rows and takes two rules.
+- **A "this one" rule is only as stable as the address.** Trackers rotate theirs,
+  and so do many phones, earbuds and wearables. When the address changes, the
+  device alerts again; that is what "every one" is for, at the price of hiding
+  other people's devices of that kind too. Whether Ray-Ban Meta glasses keep one
+  address has not been tested on a real pair.
+- **What cannot be ignored.** A Waze report: it is gone within the hour and never
+  returns under the same id, so a rule would sit in the list doing nothing. A
+  HACKER finding with no transmitter behind it (a pop-up flood, beacon spam, a
+  crash advert): that is an attack under way, not a device somebody owns, and
+  the HACKER switch turns those off.
+- **Nothing a stranger broadcasts is trusted in the list.** A rule's label is the
+  row's text, which can include a name the device chose. Control characters are
+  removed and it is cut to 120 characters; the distance, altitude and "how long"
+  parts are dropped so it still reads right next week.
+- **Stored encrypted, on the phone only** (`SecureStore`, entry `ignore_list`):
+  the addresses of your own gear and the ids of the cameras on your own street
+  say between them whose phone this is and where it lives (§5.3).
 
 ---
 
@@ -1053,16 +1243,101 @@ So the scanner switches strategy on `ACTION_SCREEN_ON` / `ACTION_SCREEN_OFF`:
 Filter slots are a hardware resource and chipsets differ; a common allocation is
 16. Overflow is meant to fall back to software filtering, but since a scan that
 silently returns nothing is this app's worst failure mode, the list is capped at
-16 with surveillance signatures ordered ahead of consumer ones. The BLE row in
-the drill-down states the reduced mode while the screen is off rather than
-hiding it, and Flock ALPR coverage is unaffected in that window because the map
-source does not depend on the radio.
+16 with surveillance signatures ordered ahead of consumer ones. Flock ALPR
+coverage is unaffected in that window because the map source does not depend on
+the radio. The screen-off scan has no tracker filter either; how the ten-minute
+tracker rule counts across that gap is in §3.11.
+
+Through v0.6.0 this section said the BLE row "states the reduced mode while the
+screen is off". It did not. The scanner wrote a note for it ("Screen off —
+filtered scan…"), but a row drew a message only for a source that had failed,
+so the note was never on screen, and nobody reads a row with the screen off
+anyway. Since v0.6.1 a row shows a note under a source that is up, and the BLE
+row carries one in the single case where the reduced scan can be seen: it has
+outlasted the screen coming back on, which happens when a change of mode is
+held (§5.2).
+
+**Off is followed at once, on after 2 s (v0.6.1).** Changing mode means
+stopping one scan and starting another, and Android rations starts (§5.2). A
+screen that wakes for a notification and sleeps again is two changes in a few
+seconds. So when the screen comes on the scanner waits until it has stayed on
+for 2 s, and then switches only if the mode it is in is the wrong one: a brief
+wake costs no start. Going off is not waited for. The full scan delivers
+nothing from that moment, and the phone may be asleep before a delayed step
+would run, so that switch is made inside the screen-off broadcast. Through
+v0.6.0 every screen event, on or off, restarted the scan at once. Seen on the
+API 36 emulator: screen off to the filtered scan running in under a second,
+screen on to the full scan in 2.2 s, and no start at all for a wake of under a
+second.
+
+**The scanner follows the Bluetooth switch (v0.6.1).** With Bluetooth off,
+`startScan` and `stopScan` do not fail, they throw (`IllegalStateException: BT
+Adapter is not turned ON`). Through v0.6.0 nothing caught that: with Bluetooth
+off, the next screen change or STOP crashed the app (reproduced on an API 36
+emulator). And nothing listened for Bluetooth coming back, so the scan it took
+down stayed down until the next screen change, with the BLE row reading OK.
+Now the scanner follows the adapter's state. Off puts "Bluetooth is off — turn
+it on to scan" on the BLE row; on starts the scan again. A start that fails for
+another reason is retried after 5, 10, 20, 40 and then every 60 s, and the row
+says when. Before Android 12, Bluetooth results also need Location switched on;
+the row says that too and the scan resumes when Location is back. Those last
+two paths were not exercised: the emulator runs API 36 and its scans never
+failed.
 
 ### 5.2 Other limits worth knowing
 
-- **BLE start-rate limit** — 5 `startScan` calls per 30 s per app. Exceed it and
-  the scan *appears* to start but delivers nothing. Screen transitions are rare
-  enough to stay clear of it.
+- **BLE start-rate limit** — Android refuses a scan when the app's last five
+  finished scans all began within the last 30 s (`AppScanStats.isScanningTooFrequently`;
+  defaults 5 and 30 s, which a vendor can change; read in AOSP main 2026-11-12).
+  The refusal is silent. The framework's own comment is "don't report anything
+  to the app", so the scan *appears* to start and delivers nothing. Each change
+  of scan mode is a start, so three wake-and-sleep cycles inside 30 s get there:
+  "screen transitions are rare enough to stay clear of it", this document's
+  claim through v0.6.0, was wrong. Since v0.6.1 every start goes through
+  `scan/ScanStartBudget.kt`: at most 4 in any 31 s, counted for the whole
+  process so that a restarted service does not begin from nothing. A start over
+  budget is held and the running scan stays as it is meanwhile. With no scan
+  running the BLE row reads "Starting in Ns — Android limits how often a scan
+  can start". With the reduced scan still running after the screen has come
+  back on, the row stays up and carries the note "Full scan in Ns — Android
+  limits how often a scan can start": for those seconds prefixes, names, HACKER
+  and TRACKER are not matched. With the full scan still running after the
+  screen has gone off, nothing is heard, and the tracker clock (§3.11) is
+  stopped until the change is made. Seen on the API 36 emulator by switching
+  the screen on and off: four starts, the fifth held for 21 s, the note on the
+  row and gone again afterwards. The refusal itself was never provoked on a
+  device; the budget is there so that it cannot be. The count lives in memory:
+  a process that Android kills and restarts begins it again, and what catches a
+  refused start then is the next bullet's two-minute rule.
+- **BLE scan time limit** — a scan left running is not left alone either. When
+  one has run for the stack's limit, 30 minutes from Android 8.1 to 13 and 10
+  minutes from Android 14, `ScanManager.regularScanTimeout` sets it aside. A
+  scan with no filter becomes "opportunistic": it hears only while some other
+  app is scanning. A filtered scan was exempt up to Android 13; from 14 it is
+  turned down to `SCAN_MODE_LOW_POWER`, which listens for 140 ms in every
+  1400 where OVERWATCH's low-latency scan listens throughout. The app is told
+  neither, and a foreground service is not exempt. Through v0.6.0 that meant
+  the scan a pocketed phone depends on was at a tenth of its listening time
+  from the tenth minute until the next screen change, and a phone left on a
+  dashboard with the screen lit was hearing only what other apps' scans brought
+  in, with the BLE row reading OK both times. A scan that is stopped and
+  started gets its full time again, so since v0.6.1 the scanner looks at its
+  scan every 30 s and starts it over when it is 8 minutes old. It also starts
+  the full scan over when the screen is on and nothing at all has come from it
+  for 2 minutes, which is what a refused start, or a scan set aside sooner
+  than expected, looks like from the app. Each of these is one start against
+  the budget above. Both the stack's timer and the 30 s look stop counting
+  while the phone sleeps, and the 8 minutes are measured on a clock that does
+  not, so the scanner's restart can come early and never late. Read in AOSP
+  2026-11-13: `regularScanTimeout` in android-8.1.0_r1, 11.0.0_r1, 13.0.0_r1,
+  14.0.0_r1 and main, and the 10 minutes also in 15.0.0_r1
+  (`DEFAULT_SCAN_TIMEOUT_MILLIS`, a device-config value, `scan_timeout_millis`,
+  that a vendor can change). The set-aside itself was never provoked on a
+  device, and what a vendor's stack does was not looked at. What was seen, on
+  the API 36 emulator, is the scanner's side: with nothing to hear, the full
+  scan started over 120 s after it began, and with the screen off for nine
+  minutes the filtered scan was started over once, at 8 minutes, the stack's
+  own count of the app's scans going up by one.
 - **WiFi scan throttling** — since Android 9, foreground apps get 4 scans per
   2 minutes (background: 1 per 30 min). OVERWATCH polls every 35 s ≈ 3.4 per
   2 min, deliberately just under.
@@ -1072,6 +1347,14 @@ source does not depend on the radio.
   `SCAN_RESULTS_AVAILABLE_ACTION` and reads whatever the system last scanned, so
   when the trigger stops working the source degrades to system-paced results
   rather than failing.
+- **A Wi-Fi scan that cannot hear says so (v0.6.1).** With Wi-Fi off (and the
+  system's "Wi-Fi scanning" setting off too) or Location off, Android returns an
+  empty or old list and no error. Through v0.6.0 the WIFI row was set once at
+  Start and Location was never checked. It is now set every round: "WiFi is off
+  — turn it on to scan", "Location is off — Android gives no WiFi results
+  without it", or, after three scan requests refused in a row, "Android is
+  refusing WiFi scans — only what the system itself scans is seen". The row
+  clears by itself when the cause does.
 - **Promiscuous-mode tricks are not portable.** flock-you's `addr1` and
   wildcard-probe techniques need monitor mode; a userspace Android app sees only
   what `WifiManager` surfaces, which is BSSID and SSID.
@@ -1088,7 +1371,13 @@ source does not depend on the radio.
 - **Bluetooth Classic discovery** (the opt-in skimmer check) runs about 12 s every 3
   minutes; on many phones it pauses BLE results while it runs. Classic has no
   address randomisation, and devices that answer without their name get a name
-  request, which shows them the phone's Bluetooth address.
+  request, which shows them the phone's Bluetooth address. Since v0.6.1 the
+  switch is read before each discovery, so turning the check or HACKER off
+  stops the transmitting at once (through v0.6.0 it only stopped the listening
+  until the next Start); Bluetooth being off skips a round where it used to
+  cancel the check for the whole scan; and stopping cancels only a discovery
+  OVERWATCH began itself in the last 15 s, not one the system's Bluetooth page
+  is running to pair somebody's headphones.
 - **Android 14+ foreground-service types** are mandatory:
   `connectedDevice` for the radio scanners and `location` for the map/feed
   sources. Both are declared and both are passed at `startForeground` time.
@@ -1105,7 +1394,7 @@ system log could otherwise show roughly where the app has been used
 |---|---|---|
 | `cache/deflock/` | one file per ~5.5 km area scanned | every stop, and again at the next start |
 | `cache/osmdroid-tiles/cache.db` | OpenStreetMap tiles wherever the map was shown | same schedule, only if **Settings → Privacy → Delete map tiles when scanning stops** is on (default off) |
-| Android's log (logcat) | nothing positional and no account details: no coordinates, cell names, request URLs or Waze account name. v0.5.17 and earlier logged the exact fix on every camera-map fetch. v0.5.18 still quoted a malformed reply from Overpass, the aircraft feeds or OpenWeb Ninja whole (Android's org.json puts its entire input in a syntax error, so: the positions of the cameras, aircraft or police around you), and logged the direct backend's account name; since v0.5.19 those lines carry the error's class only | not the app's to delete: it lives in RAM, rotates, and clears on reboot. One gap remains outside the app's code: osmdroid logs a tile's number when that tile fails to download |
+| Android's log (logcat) | nothing positional and no account details: no coordinates, cell names, request URLs or Waze account name. v0.5.17 and earlier logged the exact fix on every camera-map fetch. v0.5.18 still quoted a malformed reply from Overpass, the aircraft feeds or OpenWeb Ninja whole (Android's org.json puts its entire input in a syntax error, so: the positions of the cameras, aircraft or police around you), and logged the direct backend's account name; since v0.5.19 those lines carry the error's class only. Since v0.6.1 the direct backend no longer logs the text of an error Waze's server sent, which is the server's to word | not the app's to delete: it lives in RAM, rotates, and clears on reboot. One gap remains outside the app's code: osmdroid logs a tile's number when that tile fails to download |
 
 Tiles stay by default because OpenStreetMap's tile usage policy asks apps to
 cache tiles rather than re-download them. They live in one SQLite database that
@@ -1113,6 +1402,15 @@ every MapView shares through osmdroid's static connection, and a MapView can
 still be attached when scanning stops. So the file is never deleted out from
 under it. Tiles are purged through that same connection, then `VACUUM` rewrites
 the file, so deleted rows don't linger in free pages.
+
+**The ignore list (v0.6.1) is the one record meant to stay.** It is kept until
+its rules are removed, across stops and restarts, and it holds what was ignored:
+device addresses, camera node ids, aircraft hex codes, and the label each row
+showed (§4.4). It is stored the way the Waze key is: AES-GCM under a key in the
+Android Keystore, in app-private preferences (`data/settings/SecureStore.kt`).
+The app is excluded from Android's backups (`allowBackup="false"`, empty
+extraction rules), so the list does not follow you to a new phone. Removing the
+last rule removes the entry.
 
 ### 5.4 What leaves the phone
 
@@ -1136,6 +1434,40 @@ OpenWeb Ninja boxes were centred exactly on it; before v0.5.16 Waze direct got i
 too. The location fix itself comes from Google Play services' fused provider;
 whether that consults Google's servers depends on the phone's location settings,
 not on OVERWATCH.
+
+Two things about that fix changed in v0.6.1. **A scan starts from a cached fix
+only if it is at most 2 minutes old**; otherwise the online sources wait for
+the first live one, usually seconds. Through v0.6.0 any last-known fix would
+do. It can be hours old and a city away, and the first polls go out the moment
+any fix exists: Overpass, the ADS-B feeds and Waze were asked about the place
+the phone last had a fix, and the paid Waze feed spent its one request there
+and showed nothing for the 4 minutes until its next.
+
+**The scan needs precise location**, as it always has: Android gives no Wi-Fi
+results without it, and "Approximate" is a position coarsened to an area of
+about 3 km² (Android's documentation), which every distance in §4.1 would then
+be measured from. What changed is the asking. Precise and approximate are now
+requested together, and someone who picks "Approximate" is told what is wrong:
+"OVERWATCH needs precise location — tap START and choose Precise", or, once
+Android has stopped offering the choice, "Location is set to approximate — open
+app settings and turn on precise location". Through v0.6.0 the message was the
+general "Tap START to grant Bluetooth, WiFi + location permissions".
+
+Which of the two messages applies cannot be asked of Android in the usual way.
+After "Approximate" is chosen, `shouldShowRequestPermissionRationale` answers
+false for precise location, the same answer it gives after "don't ask again",
+although the next request does show a dialog. (On the API 36 emulator the
+precise permission carries no user-set flag at that point; the approximate one
+does.) An app that trusts the answer sends the user to its settings page one
+step early, and OVERWATCH did until this was tried by hand. Now an approximate
+grant that has just been made counts as "can still ask", and one that survives
+a second request counts as final. Seen on the API 36 emulator, from a reset
+permission state: "Approximate" in the first dialog gives the first message;
+START then brings up Android's "Change OVERWATCH's location access from
+approximate to precise?"; "Change to precise location" starts the scan, and
+"Keep approximate location" gives the second message, after which no dialog is
+shown again. Precise is what the app measures with. What each online source is
+sent is still the table above.
 
 ## 6. Testing notes
 
@@ -1167,6 +1499,41 @@ with `adb shell dumpsys location | grep -m1 "last location"`, which prints the
 coordinates **and** an `et=` age — a large age means the fix did not land. A
 reboot resets the `appops` grant, and the argument order differs between the two
 methods, which is easy to transpose.
+
+**What the emulator is good for, and not.** It hears no Bluetooth advertisers,
+so nothing radio-driven can be seen end to end on it: no BLE detection, no
+pass bonus, no tracker stay, no vibration on a device whose score flaps. What it
+does show is the scanners' lifecycle under a running scan:
+
+```sh
+adb shell svc bluetooth disable|enable            # the BLE row, and the v0.6.0 crash
+adb shell svc wifi disable|enable                 # the WIFI row
+adb shell cmd location set-location-enabled false|true
+adb shell input keyevent KEYCODE_SLEEP|KEYCODE_WAKEUP    # scan mode changes
+adb shell appops set org.soulstone.overwatch SYSTEM_ALERT_WINDOW deny|allow
+adb shell dumpsys bluetooth_manager               # per app: scans started, and the last few
+adb logcat -s BleScanner                          # one line per scan start, and per start held
+```
+
+`dumpsys bluetooth_manager` is how to count scan starts against the limit in
+§5.2. Because nothing is ever heard, the full scan is started over every 2
+minutes there (the second rule under "BLE scan time limit" in §5.2), which is
+that rule seen working and nothing to worry about. The first-run permission
+dialogs can be replayed without reinstalling:
+
+```sh
+P=org.soulstone.overwatch
+adb shell am force-stop $P
+for perm in ACCESS_FINE_LOCATION ACCESS_COARSE_LOCATION; do
+  adb shell pm revoke $P android.permission.$perm
+  adb shell pm clear-permission-flags $P android.permission.$perm user-set user-fixed
+done
+```
+
+Scoring,
+parsing, the ignore rules, the pass rule and the alert gate have no Android in
+them and were tested on the JVM with the app's compiled classes; those tests are
+not in the repository yet.
 
 ---
 

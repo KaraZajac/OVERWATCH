@@ -26,6 +26,7 @@ import androidx.compose.runtime.setValue
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import org.soulstone.overwatch.data.cache.LocationTraces
+import org.soulstone.overwatch.data.settings.IgnoreList
 import org.soulstone.overwatch.data.settings.Settings
 import org.soulstone.overwatch.service.DetectionService
 import org.soulstone.overwatch.ui.MainScreen
@@ -53,12 +54,36 @@ class MainActivity : ComponentActivity() {
             }
         }.toTypedArray()
 
+    /**
+     * What to ask for: the required set, plus approximate location. Android 12
+     * wants the two location permissions asked for together (its documentation
+     * says a request for precise alone is ignored), and holding approximate is
+     * what lets a later request be the "change to precise?" dialog.
+     *
+     * Approximate is not in [requiredPermissions]: granting it is what happens
+     * when someone picks "Approximate", and that is not enough to scan with.
+     */
+    private val requestedPermissions: Array<String>
+        get() = requiredPermissions + Manifest.permission.ACCESS_COARSE_LOCATION
+
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { result ->
-        val allGranted = result.all { it.value }
+    ) { _ ->
+        // Read what is held, not what the dialog reported: the result also
+        // carries the approximate permission, which nothing here depends on.
+        val allGranted = checkAllPermissions()
+        val approximateNow = hasApproximateOnly()
+        // Approximate before this request and still approximate after it: the
+        // upgrade was offered and turned down, or Android no longer offers it.
+        val upgradeRefused = approximateOnly.value && approximateNow
         permissionsGranted.value = allGranted
-        permanentlyDenied.value = !allGranted && !anyMissingCanStillAsk()
+        approximateOnly.value = approximateNow
+        // "Approximate" chosen just now is not a refusal for good: the next
+        // request is Android's "change to precise?" dialog. The rationale check
+        // cannot be asked about it, since it answers false for precise location
+        // after that choice, the same as after "don't ask again".
+        val canStillAsk = anyMissingCanStillAsk() || approximateNow
+        permanentlyDenied.value = !allGranted && (upgradeRefused || !canStillAsk)
         if (allGranted) {
             // First-run path: user just granted everything, kick off scanning
             // immediately so they don't have to tap START a second time.
@@ -71,6 +96,13 @@ class MainActivity : ComponentActivity() {
      *  we can no longer prompt for it (user picked "don't ask again"). The UI
      *  swaps the START button's call-to-action for an "Open app settings" link. */
     private val permanentlyDenied = mutableStateOf(false)
+    /** True when location was granted as "Approximate". The scan needs precise:
+     *  Android hands over no WiFi results without it, and a camera's distance
+     *  means little from a position good to a few kilometres. */
+    private val approximateOnly = mutableStateOf(false)
+    /** Whether "display over other apps" is granted. Re-read on every resume,
+     *  because the only way to grant it is to leave for a system page. */
+    private val overlayAllowed = mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -81,7 +113,10 @@ class MainActivity : ComponentActivity() {
         LocationTraces.configureOsmdroid(this)
         permissionsGranted.value = checkAllPermissions()
         permanentlyDenied.value = false  // reset on activity create
+        approximateOnly.value = hasApproximateOnly()
+        overlayAllowed.value = AndroidSettings.canDrawOverlays(this)
         val settings = Settings.get(this)
+        val ignoreList = IgnoreList.get(this)
 
         // Android 15 (API 35) draws apps edge-to-edge whether or not they ask,
         // for anything targeting 35 — the old statusBarColor/navigationBarColor
@@ -123,16 +158,22 @@ class MainActivity : ComponentActivity() {
                         val maxScore by DetectionService.store.maxScore.collectAsState()
                         val mapPoints by DetectionService.mapPoints.collectAsState()
                         val userLocation by DetectionService.location.collectAsState()
+                        val locating by DetectionService.locating.collectAsState()
                         // The map shows exactly the radius the sources use —
                         // one setting, so the circle and the detection area can
                         // no longer disagree.
                         val detectionRadius by settings.detectionRadiusM.collectAsState()
+                        val ignoreRules by ignoreList.rules.collectAsState()
                         val granted by permissionsGranted
                         val denied by permanentlyDenied
+                        val approximate by approximateOnly
 
                         val message = when {
                             granted -> null
+                            denied && approximate ->
+                                "Location is set to approximate — open app settings and turn on precise location"
                             denied -> "Permissions permanently denied — open app settings to grant"
+                            approximate -> "OVERWATCH needs precise location — tap START and choose Precise"
                             else -> "Tap START to grant Bluetooth, WiFi + location permissions"
                         }
 
@@ -143,8 +184,16 @@ class MainActivity : ComponentActivity() {
                             events = events,
                             mapPoints = mapPoints,
                             userLocation = userLocation,
+                            locating = locating,
                             detectionRadiusM = detectionRadius,
                             onRadiusChange = { settings.setDetectionRadiusM(it) },
+                            ignoredCount = ignoreRules.size,
+                            onIgnore = { rule ->
+                                ignoreList.add(rule)
+                                // The device is on screen now; take it off and
+                                // let the tier settle without it.
+                                DetectionService.store.dropIgnored()
+                            },
                             canStart = true,
                             permissionMessage = message,
                             showOpenAppSettings = denied && !granted,
@@ -158,7 +207,7 @@ class MainActivity : ComponentActivity() {
                                     } else if (denied) {
                                         openAppSettings()
                                     } else {
-                                        permissionLauncher.launch(requiredPermissions)
+                                        permissionLauncher.launch(requestedPermissions)
                                     }
                                 }
                             },
@@ -171,8 +220,12 @@ class MainActivity : ComponentActivity() {
                         // Compose and the OS doesn't know about it.
                         BackHandler { screen = Screen.MAIN }
                         val running by DetectionService.running.collectAsState()
+                        val ignoreRules by ignoreList.rules.collectAsState()
                         SettingsScreen(
                             settings = settings,
+                            ignoreRules = ignoreRules,
+                            onUnignore = { ignoreList.remove(it) },
+                            overlayAllowed = overlayAllowed.value,
                             isRunning = running,
                             onRestart = {
                                 DetectionService.stop(this)
@@ -191,8 +244,20 @@ class MainActivity : ComponentActivity() {
         // User may have granted permissions in app settings while we were paused.
         val nowGranted = checkAllPermissions()
         permissionsGranted.value = nowGranted
+        approximateOnly.value = hasApproximateOnly()
         if (nowGranted) permanentlyDenied.value = false
+        // Likewise "display over other apps": the bubble's switch sends the user
+        // to that system page, and nothing else tells the service they are back.
+        overlayAllowed.value = AndroidSettings.canDrawOverlays(this)
+        DetectionService.recheckOverlay()
     }
+
+    private fun has(permission: String): Boolean =
+        ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
+
+    /** Location granted, but only as "Approximate". */
+    private fun hasApproximateOnly(): Boolean =
+        has(Manifest.permission.ACCESS_COARSE_LOCATION) && !has(Manifest.permission.ACCESS_FINE_LOCATION)
 
     private fun checkAllPermissions(): Boolean =
         requiredPermissions.all {

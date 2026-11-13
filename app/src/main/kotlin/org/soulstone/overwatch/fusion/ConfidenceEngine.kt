@@ -51,7 +51,7 @@ object ConfidenceEngine {
     const val HACKER_SCORE_CAP = 84
     const val W_HACK_FLIPPER = 60           // Flipper serial-profile UUID 0x3080–0x3083
     const val B_HACK_FLIPPER_NAME = 15      // "Flipper <name>"
-    const val B_HACK_FLIPPER_ADDR = 10      // 80:E1:26 / 80:E1:27
+    const val B_HACK_FLIPPER_ADDR = 10      // 80:E1:26
     const val W_HACK_FLIPPER_HID = 70       // BLE remote / BadUSB mode
     const val W_HACK_NYANBOX = 60
     const val W_HACK_AXONCADABRA = 75       // spoofed Axon Signal trigger
@@ -170,7 +170,9 @@ object ConfidenceEngine {
         val methods: String,
         val label: String,
         /** True if the BLE OUI specifically matched Axon (drives the "Axon body cam" labeling). */
-        val isAxon: Boolean
+        val isAxon: Boolean,
+        /** Set where an ignore rule can cover every device of the sort; see [DetectionEvent.kind]. */
+        val kind: DetectionKind? = null
     )
 
     fun scoreBle(obs: BleObservation): Scored {
@@ -308,6 +310,9 @@ object ConfidenceEngine {
         }
 
         if (obs.isLoitering) { score += 10f; tags.append("loitering ") }
+        // The operator asked public trackers to hide this airframe. Added before
+        // the cap below, which nothing may lift an unidentified aircraft over.
+        if (obs.isLadd) { score += 4f; tags.append("ladd ") }
         if (obs.isKnownLawEnforcement) {
             tags.append("known_le ")
         } else {
@@ -315,8 +320,6 @@ object ConfidenceEngine {
             score = minOf(score, AIRCRAFT_UNKNOWN_CAP.toFloat())
             tags.append("unidentified ")
         }
-        // The operator asked public trackers to hide this airframe.
-        if (obs.isLadd) { score += 4f; tags.append("ladd ") }
 
         val final = score.roundToInt().coerceIn(0, 100)
         val who = obs.owner
@@ -530,7 +533,10 @@ object ConfidenceEngine {
             ?: org.soulstone.overwatch.data.targets.MicTargets.Family.HIDDEN_CAM
         val familyLabel = org.soulstone.overwatch.data.targets.MicTargets.familyLabel(family)
         val nameSuffix = if (!obs.deviceName.isNullOrBlank()) " — ${obs.deviceName}" else ""
-        return Scored(score, methods.toString().trim(), "$familyLabel$nameSuffix (${obs.mac})", isAxon = false)
+        return Scored(
+            score, methods.toString().trim(), "$familyLabel$nameSuffix (${obs.mac})",
+            isAxon = false, kind = micKind(family)
+        )
     }
 
     fun scoreMicWifi(obs: MicWifiObservation): Scored {
@@ -566,8 +572,18 @@ object ConfidenceEngine {
             ?: org.soulstone.overwatch.data.targets.MicTargets.Family.HIDDEN_CAM
         val familyLabel = org.soulstone.overwatch.data.targets.MicTargets.familyLabel(family)
         val ssidSuffix = if (!obs.ssid.isNullOrBlank()) " — ${obs.ssid}" else ""
-        return Scored(score, methods.toString().trim(), "$familyLabel$ssidSuffix (${obs.bssid})", isAxon = false)
+        return Scored(
+            score, methods.toString().trim(), "$familyLabel$ssidSuffix (${obs.bssid})",
+            isAxon = false, kind = micKind(family)
+        )
     }
+
+    /** The family as something to ignore wholesale. HIDDEN_CAM has no kind: it is
+     *  the name for "matched, but nothing says what it is", and a rule that hid
+     *  every unidentified microphone would hide the ones worth seeing. */
+    private fun micKind(family: org.soulstone.overwatch.data.targets.MicTargets.Family): DetectionKind? =
+        if (family == org.soulstone.overwatch.data.targets.MicTargets.Family.HIDDEN_CAM) null
+        else DetectionKind(family.name, org.soulstone.overwatch.data.targets.MicTargets.familyLabel(family))
 
     fun scoreWifi(obs: WifiObservation): Scored {
         var score = 0

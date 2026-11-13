@@ -10,6 +10,7 @@ import android.content.pm.ServiceInfo
 import android.location.Location
 import android.os.Build
 import android.os.IBinder
+import android.os.SystemClock
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
@@ -23,14 +24,18 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import org.soulstone.overwatch.MainActivity
 import org.soulstone.overwatch.R
 import org.soulstone.overwatch.data.location.LocationProvider
 import org.soulstone.overwatch.data.cache.LocationTraces
+import org.soulstone.overwatch.data.settings.IgnoreList
 import org.soulstone.overwatch.data.settings.Settings
-import org.soulstone.overwatch.fusion.DetectionEvent
+import org.soulstone.overwatch.fusion.AlertGate
 import org.soulstone.overwatch.fusion.DetectionSource
 import org.soulstone.overwatch.fusion.DetectionStore
 import org.soulstone.overwatch.fusion.SourceHealth
@@ -53,10 +58,12 @@ import org.soulstone.overwatch.scan.WifiScanner
  * companion-object state flows directly.
  *
  * Responsibilities beyond scanner orchestration:
- *  - Updates the foreground notification on every threat-tier change so a
+ *  - Updates the foreground notification when what it says changes, so a
  *    locked-screen user sees escalations.
- *  - Vibrates on upward tier transitions (gated by Settings.vibrateOnAlert).
- *  - Resets [SourceHealth] on start/stop.
+ *  - Vibrates on upward tier transitions (gated by Settings.vibrateOnAlert and
+ *    by [AlertGate], so one device hovering on a boundary buzzes once).
+ *  - Resets [SourceHealth] on start/stop, and keeps the rows of the sources
+ *    that ride the radio scans in step with those scans.
  *
  * Returns START_NOT_STICKY so a system-killed service does not auto-restart
  * into a zombie state where the notification disappears but `_running` stays
@@ -68,6 +75,9 @@ class DetectionService : LifecycleService() {
         private const val TAG = "DetectionService"
         private const val CHANNEL_ID = "overwatch_detection"
         private const val NOTIFICATION_ID = 0xBEEF
+        /** At most one notification update in this long. Android drops updates
+         *  that come faster than a few a second, and may drop the last one. */
+        private const val NOTIFY_MIN_INTERVAL_MS = 1_000L
 
         const val ACTION_START = "org.soulstone.overwatch.action.START"
         const val ACTION_STOP = "org.soulstone.overwatch.action.STOP"
@@ -87,6 +97,12 @@ class DetectionService : LifecycleService() {
         private val _location = MutableStateFlow<Location?>(null)
         val location: StateFlow<Location?> = _location.asStateFlow()
 
+        /** True while the running scan has asked for location. A scan with only
+         *  the radio sources on never does, and the UI must not say it is
+         *  waiting for a fix that nothing requested. */
+        private val _locating = MutableStateFlow(false)
+        val locating: StateFlow<Boolean> = _locating.asStateFlow()
+
         fun start(context: Context) {
             val intent = Intent(context, DetectionService::class.java).apply {
                 action = ACTION_START
@@ -104,7 +120,18 @@ class DetectionService : LifecycleService() {
             }
             context.startService(intent)
         }
+
+        private val overlayNudge = MutableStateFlow(0)
+
+        /** Ask a running scan to look again at whether it may draw the floating
+         *  bubble. Called when the app comes back to the front, which is where
+         *  the user lands after granting "display over other apps". */
+        fun recheckOverlay() = overlayNudge.update { it + 1 }
     }
+
+    /** What the notification shows. Compared before posting, so a detection
+     *  re-heard with nothing new to say does not post again. */
+    private data class NotificationContent(val tier: ThreatLevel, val score: Int?, val label: String?)
 
     private lateinit var settings: Settings
     private lateinit var bleScanner: BleScanner
@@ -118,6 +145,8 @@ class DetectionService : LifecycleService() {
     private lateinit var overlayManager: OverlayManager
     private var pruneJob: Job? = null
     private var observerJob: Job? = null
+    private var alertJob: Job? = null
+    private var healthJob: Job? = null
     private var mapPointsJob: Job? = null
     private var locationJob: Job? = null
     private var overlayJob: Job? = null
@@ -127,12 +156,15 @@ class DetectionService : LifecycleService() {
     private var wazeStarted = false
     private var aircraftStarted = false
     private var classicStarted = false
-    /** Last threat tier the notification displayed; tracks upward transitions for vibration. */
-    private var lastNotifiedTier: ThreatLevel = ThreatLevel.GREEN
+    private val alertGate = AlertGate(nowMs = { SystemClock.elapsedRealtime() })
 
     override fun onCreate() {
         super.onCreate()
         settings = Settings.get(this)
+        // Before any scanner exists, so nothing the user has ignored is ever
+        // stored, scored or alerted on. The list outlives this service; a rule
+        // added mid-scan reaches the store through MainActivity.
+        store.ignored = IgnoreList.get(this)::matches
         // COMMERCIAL, HACKER, TRACKER and drone Remote ID ride the two radio
         // scanners; each is read per advert, so the switch is whatever Settings
         // says when the scan (re)starts.
@@ -195,14 +227,18 @@ class DetectionService : LifecycleService() {
         // its stop could clean up.
         LocationTraces.clearAsync(this, includeTiles = settings.clearTilesOnStop.value)
         SourceHealth.reset()
-        lastNotifiedTier = ThreatLevel.GREEN
+        // Nothing from an earlier scan may be standing when this one starts. A
+        // stop clears the store, but a result that was already on its way then
+        // could land after the clear, with nothing left running to prune it.
+        store.clear()
+        alertGate.reset()
         // Bring up the foreground notification BEFORE any scanner so we don't
         // accidentally call startForeground after work has already begun.
-        startInForeground(ThreatLevel.GREEN, topEvent = null)
+        startInForeground(NotificationContent(ThreatLevel.GREEN, null, null))
 
         if (settings.bleEnabled.value) {
             bleStarted = bleScanner.start()
-            if (!bleStarted) Log.w(TAG, "BleScanner.start() returned false (permission/adapter)")
+            if (!bleStarted) Log.w(TAG, "BleScanner.start() returned false (permission or no radio)")
         }
         if (settings.wifiEnabled.value) {
             wifiStarted = wifiScanner.start(lifecycleScope)
@@ -217,7 +253,17 @@ class DetectionService : LifecycleService() {
             val locOk = locationProvider.start()
             if (!locOk) {
                 Log.w(TAG, "LocationProvider.start() returned false (permission)")
+                // Say so on each row that needed it. Left alone they read as
+                // sources that looked and found nothing.
+                for ((source, on) in listOf(
+                    DetectionSource.DEFLOCK to settings.deflockEnabled.value,
+                    DetectionSource.WAZE to settings.wazeEnabled.value,
+                    DetectionSource.AIRCRAFT to settings.aircraftEnabled.value
+                )) {
+                    if (on) SourceHealth.record(source, ok = false, message = "Location permission missing")
+                }
             } else {
+                _locating.value = true
                 if (settings.deflockEnabled.value) {
                     deflockScanner.start(lifecycleScope); deflockStarted = true
                 }
@@ -246,22 +292,15 @@ class DetectionService : LifecycleService() {
             return
         }
 
-        // MIC, HACKER and TRACKER piggyback on the BLE/WiFi scanners. Surface their
-        // health so the user sees an explicit status row rather than a silent UNKNOWN.
-        val radioUp = bleStarted || wifiStarted
-        for ((source, on) in listOf(
-            DetectionSource.MIC to settings.micEnabled.value,
-            DetectionSource.HACKER to settings.hackerEnabled.value,
-            DetectionSource.TRACKER to settings.trackerEnabled.value
-        )) {
-            if (!on) continue
-            if (source == DetectionSource.TRACKER && !bleStarted) {
-                SourceHealth.record(source, ok = false, message = "Needs the BLE scanner enabled")
-            } else if (radioUp) {
-                SourceHealth.record(source, ok = true)
-            } else {
-                SourceHealth.record(source, ok = false, message = "Needs BLE or WiFi scanner enabled")
-            }
+        // MIC, HACKER and TRACKER piggyback on the BLE/WiFi scanners. Their rows
+        // follow those scans for as long as this one runs: a radio switched off
+        // halfway through takes them down with it, and back up when it returns.
+        healthJob?.cancel()
+        healthJob = lifecycleScope.launch {
+            SourceHealth.ble.combine(SourceHealth.wifi) { ble, wifi ->
+                (bleStarted && ble.status != SourceHealth.Status.FAILED) to
+                    (wifiStarted && wifi.status != SourceHealth.Status.FAILED)
+            }.distinctUntilChanged().collect { (bleUp, wifiUp) -> recordRiders(bleUp, wifiUp) }
         }
 
         _running.value = true
@@ -272,14 +311,38 @@ class DetectionService : LifecycleService() {
                 store.pruneExpired()
             }
         }
+        // The level alone decides a vibration. Collected apart from the
+        // notification below: that one is slowed down, and a buzz must not be.
+        alertJob?.cancel()
+        alertJob = lifecycleScope.launch {
+            store.threatLevel.collect { tier ->
+                val buzz = alertGate.onLevel(tier, store.events.value.firstOrNull())
+                if (buzz && settings.vibrateOnAlert.value) vibrateForTier(tier)
+            }
+        }
+        // The notification says the level and the top detection. A radio device
+        // is re-heard several times a second and the store emits each time, so
+        // post only when the words change, and not more than once a second.
+        // conflate() keeps the newest while the last post settles, so what ends
+        // up on the lock screen is always the latest.
+        //
+        // The level is worked out here from the same list the top detection is
+        // read from. The store publishes its list and its level one after the
+        // other; combined, the two gave a half-way pair at every change of
+        // level (the new detection under the old level, "GREEN" over a 90), and
+        // the pause below kept it on the lock screen for its full second.
         observerJob?.cancel()
         observerJob = lifecycleScope.launch {
-            // Watch threat tier + the top event together; rebuild the notification
-            // on either change. Vibrate only when the tier ratchets upward.
-            store.threatLevel.combine(store.events) { tier, events ->
-                tier to events.firstOrNull()
-            }.collect { (tier, top) ->
-                onTierChanged(tier, top)
+            store.events.map { events ->
+                val top = events.firstOrNull()
+                NotificationContent(
+                    ThreatLevel.fromScore(events.maxOfOrNull { it.score } ?: 0),
+                    top?.score, top?.label
+                )
+            }.distinctUntilChanged().conflate().collect { content ->
+                getSystemService(NotificationManager::class.java)
+                    ?.notify(NOTIFICATION_ID, buildNotification(content))
+                delay(NOTIFY_MIN_INTERVAL_MS)
             }
         }
 
@@ -306,11 +369,44 @@ class DetectionService : LifecycleService() {
 
         // Floating threat-circle overlay — observe the toggle and show/hide
         // accordingly. The OverlayManager re-checks SYSTEM_ALERT_WINDOW each
-        // show() so a denied/revoked permission silently no-ops.
+        // show() so a denied/revoked permission silently no-ops. The nudge
+        // re-runs it when the app returns to the front: the switch is turned on
+        // before the permission is granted, so the toggle alone never fires
+        // again once it has been.
         overlayJob?.cancel()
         overlayJob = lifecycleScope.launch {
-            settings.overlayEnabled.collect { enabled ->
-                if (enabled) overlayManager.show() else overlayManager.hide()
+            settings.overlayEnabled.combine(overlayNudge) { enabled, _ -> enabled }
+                .collect { enabled ->
+                    if (enabled) overlayManager.show() else overlayManager.hide()
+                }
+        }
+    }
+
+    /** Health rows for the sources that have no scan of their own. */
+    private fun recordRiders(bleUp: Boolean, wifiUp: Boolean) {
+        val bleOn = settings.bleEnabled.value
+        val wifiOn = settings.wifiEnabled.value
+        for ((source, on) in listOf(
+            DetectionSource.MIC to settings.micEnabled.value,
+            DetectionSource.HACKER to settings.hackerEnabled.value,
+            DetectionSource.TRACKER to settings.trackerEnabled.value
+        )) {
+            if (!on) continue
+            if (source == DetectionSource.TRACKER) {
+                when {
+                    bleUp -> SourceHealth.record(source, ok = true)
+                    !bleOn -> SourceHealth.record(source, ok = false, message = "Needs the BLE scanner enabled")
+                    else -> SourceHealth.record(source, ok = false, message = "BLE scan is not running — see BLE")
+                }
+            } else {
+                when {
+                    bleUp || wifiUp -> SourceHealth.record(source, ok = true)
+                    !bleOn && !wifiOn ->
+                        SourceHealth.record(source, ok = false, message = "Needs BLE or WiFi scanner enabled")
+                    else -> SourceHealth.record(
+                        source, ok = false, message = "BLE and WiFi scans are not running — see their rows"
+                    )
+                }
             }
         }
     }
@@ -329,6 +425,15 @@ class DetectionService : LifecycleService() {
             return
         }
         _running.value = false
+        // The watchers go first. Each reacts to what the lines below change, and
+        // a notification posted after stopForeground() would stay up for good.
+        pruneJob?.cancel(); pruneJob = null
+        observerJob?.cancel(); observerJob = null
+        alertJob?.cancel(); alertJob = null
+        healthJob?.cancel(); healthJob = null
+        mapPointsJob?.cancel(); mapPointsJob = null
+        locationJob?.cancel(); locationJob = null
+        overlayJob?.cancel(); overlayJob = null
         if (classicStarted) { classicScanner.stop(); classicStarted = false }
         if (bleStarted) { bleScanner.stop(); bleStarted = false }
         if (wifiStarted) { wifiScanner.stop(); wifiStarted = false }
@@ -341,15 +446,11 @@ class DetectionService : LifecycleService() {
         LocationTraces.clearAsync(this, includeTiles = settings.clearTilesOnStop.value)
         store.clear()
         SourceHealth.reset()
-        pruneJob?.cancel(); pruneJob = null
-        observerJob?.cancel(); observerJob = null
-        mapPointsJob?.cancel(); mapPointsJob = null
-        locationJob?.cancel(); locationJob = null
-        overlayJob?.cancel(); overlayJob = null
         overlayManager.hide()
         _mapPoints.value = emptyList()
         _location.value = null
-        lastNotifiedTier = ThreatLevel.GREEN
+        _locating.value = false
+        alertGate.reset()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             stopForeground(STOP_FOREGROUND_REMOVE)
         } else {
@@ -366,19 +467,6 @@ class DetectionService : LifecycleService() {
     override fun onBind(intent: Intent): IBinder? {
         super.onBind(intent)
         return null
-    }
-
-    private fun onTierChanged(tier: ThreatLevel, top: DetectionEvent?) {
-        // Re-issue the foreground notification with the current tier + top event
-        // so a locked-screen user sees the escalation even without opening the app.
-        val notification = buildNotification(tier, top)
-        val mgr = getSystemService(NotificationManager::class.java) ?: return
-        mgr.notify(NOTIFICATION_ID, notification)
-
-        if (tier.ordinal > lastNotifiedTier.ordinal && settings.vibrateOnAlert.value) {
-            vibrateForTier(tier)
-        }
-        lastNotifiedTier = tier
     }
 
     private fun vibrateForTier(tier: ThreatLevel) {
@@ -402,8 +490,8 @@ class DetectionService : LifecycleService() {
             getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
         }
 
-    private fun startInForeground(tier: ThreatLevel, topEvent: DetectionEvent?) {
-        val notification = buildNotification(tier, topEvent)
+    private fun startInForeground(content: NotificationContent) {
+        val notification = buildNotification(content)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             // Android 14+ requires the runtime type to cover every capability the
             // service uses. We declare both in the manifest; pass both here so
@@ -417,7 +505,8 @@ class DetectionService : LifecycleService() {
         }
     }
 
-    private fun buildNotification(tier: ThreatLevel, topEvent: DetectionEvent?): Notification {
+    private fun buildNotification(content: NotificationContent): Notification {
+        val tier = content.tier
         val openIntent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
@@ -426,8 +515,11 @@ class DetectionService : LifecycleService() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
         val title = "OVERWATCH  •  ${tier.name}"
-        val text = topEvent?.let { "${it.score}  •  ${it.label}" }
-            ?: getString(R.string.notification_text)
+        val text = if (content.score != null && content.label != null) {
+            "${content.score}  •  ${content.label}"
+        } else {
+            getString(R.string.notification_text)
+        }
         // Higher importance for ORANGE/RED so the system surfaces it more
         // aggressively (heads-up notification, etc.). The channel was created
         // with LOW; on supported versions this priority is best-effort.

@@ -30,6 +30,12 @@ class BleSpamDetector(private val nowMs: () -> Long = System::currentTimeMillis)
     data class Finding(val key: String, val label: String, val method: String)
 
     private val firstSeen = HashMap<String, Long>()
+    /** When each address last sent a pop-up advert. An address is forgotten
+     *  [FORGET_MS] after this, not after [firstSeen]: counted from the first
+     *  sighting, every device that simply stayed in range was dropped at two
+     *  minutes and counted as new again on its next advert, so 40 real AirPods
+     *  sharing a train carriage raised a flood alert every two minutes. */
+    private val lastSeen = HashMap<String, Long>()
     private val variants = HashMap<String, ArrayDeque<Pair<Long, Int>>>()
     private var warmUpUntil = 0L
     private var lastPrune = 0L
@@ -67,6 +73,7 @@ class BleSpamDetector(private val nowMs: () -> Long = System::currentTimeMillis)
 
         val variant = popupVariant(apple, manufacturerData, serviceData) ?: return null
         firstSeen.putIfAbsent(mac, now)
+        lastSeen[mac] = now
         val seq = variants.getOrPut(mac) { ArrayDeque() }
         seq.addLast(now to variant)
         while (seq.isNotEmpty() && now - seq.first().first > WINDOW_MS) seq.removeFirst()
@@ -86,7 +93,8 @@ class BleSpamDetector(private val nowMs: () -> Long = System::currentTimeMillis)
 
     private fun prune(now: Long) {
         lastPrune = now
-        firstSeen.entries.removeAll { now - it.value > FORGET_MS }
+        lastSeen.entries.removeAll { now - it.value > FORGET_MS }
+        firstSeen.keys.retainAll(lastSeen.keys)
         variants.entries.removeAll { (_, q) -> q.isEmpty() || now - q.last().first > WINDOW_MS }
     }
 

@@ -13,7 +13,9 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 /**
- * Tiny at-rest secret store for on-device credentials (the Waze API key).
+ * Tiny at-rest secret store for on-device credentials (the Waze API key, the
+ * anonymous Waze account) and for the ignore list, which names the user's own
+ * devices.
  *
  * Values are AES/GCM-encrypted with a key held in the Android Keystore (hardware
  * -backed where available and never exportable), and the ciphertext is kept in

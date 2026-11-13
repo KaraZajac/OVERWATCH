@@ -73,7 +73,8 @@ class WazeRtClient(
                 }
             )
         } catch (e: Exception) {
-            Log.w(TAG, "Waze RT fetch failed: ${e.message}")
+            // The status row gets the message; the log gets no server text.
+            Log.w(TAG, "Waze RT fetch failed: ${WazeRtFetcher.logSafe(e)}")
             WazeSource.FetchResult.Failed(e.message ?: e.javaClass.simpleName)
         }
     }

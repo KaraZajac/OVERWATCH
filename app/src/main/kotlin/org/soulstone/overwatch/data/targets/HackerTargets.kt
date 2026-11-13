@@ -141,6 +141,7 @@ object HackerTargets {
         val b = bssid?.lowercase() ?: return null
         val label = when {
             // wifiphisher: the 00:00:00 (Xerox) block unless -iNM / -iAM is given
+            b == "00:00:00:00:00:00" -> return null   // "no address", not an address
             b.startsWith("00:00:00:") -> "wifiphisher rogue AP (default address)"
             b == "00:11:22:33:44:00" -> "eaphammer rogue AP (default address)"
             b == "bc:f6:85:03:36:5b" -> "WiFi Pumpkin 3 rogue AP (default address)"
