@@ -717,13 +717,28 @@ microphones), but under an honest label.
   cheap TWS earbuds, speakers and toys. Matching it would label every one of
   those "Smart glasses". If distinctive name strings for those products
   surface, they belong in the name hints instead.
+- Service UUID `0xFE03` (Amazon), since v0.6.2. Through v0.6.1 this table
+  listed it as "Alexa Voice Service (Amazon Lab126)" and read it as an Echo, 50
+  points on its own, and on 2026-11-13 a pair of Sony WF-1000XM3 earbuds showed
+  on a real phone as "Amazon Echo / Ring". It is Amazon's "AMA" (Alexa Mobile
+  Accessory) service: what a device that talks *to* Alexa advertises so that
+  an Echo or the Alexa app can connect to it. Bestechnic's earbud SDK serves
+  it for its Alexa voice support (`ama_service_uuid_16 0xFE03`), Realtek's
+  RTL8762 Alexa Gadget sample advertises it, and Nordic's Amazon Sidewalk SDK
+  puts it in every Sidewalk endpoint's advertisement (`AMA_SERVICE_UUID_VAL
+  0xFE03` in `sid_ble_uuid.h`; `doc/sid_ble_advertising_format.md`): lights,
+  sensors, locks. The Sony earbuds show that headphones send it. Echo and Ring devices are the centrals at the other end of those
+  links (Novel Bits' Sidewalk guide: "The Bridges (i.e. echo devices or ring
+  devices) act as Bluetooth LE centrals"), so `0xFE03` names the gear around
+  an Echo, never the Echo. A device that advertises an Echo name still
+  matches by that name. Checked 2026-11-13 in nrfconnect/sdk-sidewalk and in
+  public copies of the BES2700 and RTL8762 SDKs on GitHub.
 
 Advertised service UUIDs (checked in **both** the service list and the
 service-data keys — HeyCyan frames have been seen carrying it either way):
 
 | UUID | Meaning | Family |
 |---|---|---|
-| `0000FE03-…` (16-bit `FE03`) | Alexa Voice Service (Amazon Lab126) | ECHO |
 | `0000FD5F-…` (16-bit `FD5F`) | Meta Platforms Technologies — the one signature specific to Ray-Ban Meta glasses (SquachWatch's captures). Added in v0.6.0 | GLASSES |
 | `7905FFF0-B5CE-4E99-A40F-4B1E122D00D0` | HeyCyan smart-glasses SDK primary service — Nilox Smart AI Glasses (sold by ALDI/Hofer) and other HeyCyan-based frames. Fixed on the software side, so it survives the randomised MACs and unstable names that defeat most glasses detection. | GLASSES |
 
@@ -731,13 +746,14 @@ Meta's other member UUIDs `0xFEB7` and `0xFEB8` and Snap's `0xFE45` (all SIG
 registered) count as GLASSES too, but weigh like a company id (30), and only when
 no company id matched: they are company-wide, not product-specific.
 
-The three exact service UUIDs are also in the screen-off `ScanFilter` set (§5.1),
+The two exact service UUIDs are also in the screen-off `ScanFilter` set (§5.1),
 ahead of the company ids, because they are exact signatures and are what should
 survive if the 16-slot list is trimmed. With COMMERCIAL and AIRCRAFT on it always
-is: 3 Axon + 1 Remote ID + 1 XUNTONG + 6 Raven + 3 service UUIDs + 7 company ids
-makes 21, so only Meta's `0x01AB` and Luxottica's `0x0D53` get a slot; Snap,
-Vuzix, Amazon, Google and Sonos wait for the screen. Until v0.6.0 the five
-glasses ids got slots and Axon none.
+is: 3 Axon + 1 Remote ID + 1 XUNTONG + 6 Raven + 2 service UUIDs + 7 company ids
+makes 20, so Meta's `0x01AB`, Luxottica's `0x0D53` and Snap's `0x03C2` get a
+slot; Vuzix, Amazon, Google and Sonos wait for the screen. Through v0.6.1
+`0xFE03` took a slot and Snap waited too; until v0.6.0 the five glasses ids got
+slots and Axon none.
 
 Name tokens: the case-sensitive substrings (`Spectacles`, `Ray-Ban`, `RayNeo`,
 `Vuzix`, `XREAL`, `Rokid`, `echo-`, `FireTV`, `Doorbell`, `GoogleHome`,
@@ -1238,7 +1254,7 @@ So the scanner switches strategy on `ACTION_SCREEN_ON` / `ACTION_SCREEN_OFF`:
 | Screen | Scan | Covers | Loses |
 |---|---|---|---|
 | on | unfiltered | everything — OUI, name, UUID, manufacturer | — |
-| off | filtered (≤16) | In order: Axon's body-cam tag, `0xFE6B` service data and `0x034D`; drone Remote ID (`0xFFFA` + `0x0D`, when AIRCRAFT is on); XUNTONG; Raven's five UUIDs and `1819`; then the Ray-Ban Meta, HeyCyan and Echo service UUIDs and the COMMERCIAL company ids as slots allow (§3.7) | OUI prefixes, name substrings, HACKER and TRACKER matching |
+| off | filtered (≤16) | In order: Axon's body-cam tag, `0xFE6B` service data and `0x034D`; drone Remote ID (`0xFFFA` + `0x0D`, when AIRCRAFT is on); XUNTONG; Raven's five UUIDs and `1819`; then the Ray-Ban Meta and HeyCyan service UUIDs and the COMMERCIAL company ids as slots allow (§3.7) | OUI prefixes, name substrings, HACKER and TRACKER matching |
 
 Filter slots are a hardware resource and chipsets differ; a common allocation is
 16. Overflow is meant to fall back to software filtering, but since a scan that

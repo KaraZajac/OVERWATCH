@@ -210,7 +210,7 @@ class BleScanner(
         }
         out.add(ScanFilter.Builder().setServiceUuid(ParcelUuid(RavenUuids.FW_1_1_FILTER)).build())
         if (micEnabled()) {
-            // Precise service UUIDs first (Ray-Ban Meta, HeyCyan glasses, Echo AVS):
+            // Precise service UUIDs first (Ray-Ban Meta, HeyCyan glasses):
             // they are exact signatures, so they outrank the broad company ids that
             // follow and are what should survive if the list is trimmed.
             for (uuid in MicTargets.SERVICE_UUIDS) {

@@ -69,8 +69,17 @@ object MicTargets {
     private val MFG_SNAP = 0x03C2          // Snap Inc. — Spectacles
     private val MFG_VUZIX = 0x060C         // Vuzix — enterprise / AR smart glasses
 
-    /** Echo/Alexa Voice Service GATT (FE03 — assigned to Amazon Lab126). */
-    private val UUID_AVS = UUID.fromString("0000fe03-0000-1000-8000-00805f9b34fb")
+    /*
+     * 0xFE03 is not matched, although it is Amazon's. It is the "AMA" service
+     * (Alexa Mobile Accessory): what an accessory that talks to Alexa
+     * advertises, so that an Echo or the Alexa app can connect to it. That is
+     * Alexa-enabled earbuds and headphones (Bestechnic's earbud SDK carries
+     * it), Alexa Gadgets, and Amazon Sidewalk's lights, sensors and locks
+     * (Nordic's Sidewalk SDK, sid_ble_uuid.h). Echo and Ring devices are the
+     * other end of those links and do not advertise it. Through v0.6.1 it was
+     * read as an Echo, at 50 on its own: a pair of Sony WF-1000XM3 earbuds
+     * showed as "Amazon Echo / Ring" on a real phone (2026-11-13).
+     */
 
     /**
      * HeyCyan smart-glasses SDK primary service. Fixed on the software side of
@@ -96,7 +105,7 @@ object MicTargets {
     )
 
     /** Every exact service UUID this object recognises, for screen-off ScanFilters. */
-    val SERVICE_UUIDS: Set<UUID> = setOf(UUID_RAYBAN_META, UUID_HEYCYAN, UUID_AVS)
+    val SERVICE_UUIDS: Set<UUID> = setOf(UUID_RAYBAN_META, UUID_HEYCYAN)
 
     /** Lab126 (Amazon — Echo, Ring, Fire TV) WiFi/BLE OUIs. All registered to
      *  Amazon except a8:51:5b, which is Samsung's; it is kept, so a Samsung
@@ -298,7 +307,6 @@ object MicTargets {
         return when {
             advertisedUuids.contains(UUID_RAYBAN_META) -> Family.GLASSES
             advertisedUuids.contains(UUID_HEYCYAN) -> Family.GLASSES
-            advertisedUuids.contains(UUID_AVS) -> Family.ECHO
             else -> null
         }
     }

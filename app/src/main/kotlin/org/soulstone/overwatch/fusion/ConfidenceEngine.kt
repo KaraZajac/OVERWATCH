@@ -101,7 +101,7 @@ object ConfidenceEngine {
     const val W_MIC_OUI = 30
     const val W_MIC_NAME = 45
     const val W_MIC_MFG = 30
-    const val W_MIC_SERVICE_UUID = 50   // AVS (Echo) or HeyCyan (glasses)
+    const val W_MIC_SERVICE_UUID = 50   // Ray-Ban Meta or HeyCyan (glasses)
     const val W_MIC_SSID = 45
     const val B_MIC_MULTI = 10
     const val B_MIC_STATIONARY = 8

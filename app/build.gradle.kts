@@ -15,8 +15,8 @@ android {
         applicationId = "org.soulstone.overwatch"
         minSdk = 26
         targetSdk = 35
-        versionCode = 38
-        versionName = "0.6.1"
+        versionCode = 39
+        versionName = "0.6.2"
     }
 
     // Fixed debug keystore committed to the repo (a debug key is non-secret — its
