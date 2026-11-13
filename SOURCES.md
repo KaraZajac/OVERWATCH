@@ -1450,8 +1450,15 @@ be measured from. What changed is the asking. Precise and approximate are now
 requested together, and someone who picks "Approximate" is told what is wrong:
 "OVERWATCH needs precise location — tap START and choose Precise", or, once
 Android has stopped offering the choice, "Location is set to approximate — open
-app settings and turn on precise location". Through v0.6.0 the message was the
-general "Tap START to grant Bluetooth, WiFi + location permissions".
+app settings and turn on precise location". Through v0.6.0 precise location was
+asked for alone, and "Approximate" was taken as a refusal for good: the app said
+"Permissions permanently denied — open app settings to grant", and START opened
+the settings page (the v0.6.0 release APK on the API 36 emulator, 2026-11-13).
+Android's documentation says a request for precise location alone is ignored
+from Android 12, and the Android 14 permission controller's source drops such a
+request without a dialog; on the API 36 emulator the dialog, with its choice of
+Precise or Approximate, appeared all the same. Asking for both is right either
+way.
 
 Which of the two messages applies cannot be asked of Android in the usual way.
 After "Approximate" is chosen, `shouldShowRequestPermissionRationale` answers
@@ -1459,7 +1466,7 @@ false for precise location, the same answer it gives after "don't ask again",
 although the next request does show a dialog. (On the API 36 emulator the
 precise permission carries no user-set flag at that point; the approximate one
 does.) An app that trusts the answer sends the user to its settings page one
-step early, and OVERWATCH did until this was tried by hand. Now an approximate
+step early, as v0.6.0 did. Now an approximate
 grant that has just been made counts as "can still ask", and one that survives
 a second request counts as final. Seen on the API 36 emulator, from a reset
 permission state: "Approximate" in the first dialog gives the first message;
