@@ -83,7 +83,7 @@ class WifiScanner(
     private var running = false
     private var scanJob: Job? = null
     private var receiverRegistered = false
-    private val drones = DroneTracker()
+    private val drones = DroneTracker(nowMs = { android.os.SystemClock.elapsedRealtime() })
 
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context?, intent: Intent?) {
@@ -101,12 +101,10 @@ class WifiScanner(
         val locOk = ContextCompat.checkSelfPermission(
             context, Manifest.permission.ACCESS_FINE_LOCATION
         ) == PackageManager.PERMISSION_GRANTED
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            val nearbyOk = ContextCompat.checkSelfPermission(
-                context, Manifest.permission.NEARBY_WIFI_DEVICES
-            ) == PackageManager.PERMISSION_GRANTED
-            return nearbyOk || locOk
-        }
+        // Precise location on every version. NEARBY_WIFI_DEVICES is declared
+        // "never for location", and Android hands scan results to no app on the
+        // strength of that alone; counted as enough here, the row would read OK
+        // and then blame Android's scan throttle for the empty results.
         return locOk
     }
 
@@ -326,8 +324,8 @@ class WifiScanner(
             buf.duplicate().get(bytes)
             val msgs = RemoteId.messagesFromWifiIe(bytes)
             if (msgs.isEmpty()) continue
-            val drone = drones.update(bssid, msgs)
-            BleScanner.submitDrone(store, drone, "wifi:$bssid", r.level)
+            val heard = drones.update(bssid, msgs)
+            BleScanner.submitDrone(store, heard, "wifi:$bssid", r.level)
             return
         }
     }

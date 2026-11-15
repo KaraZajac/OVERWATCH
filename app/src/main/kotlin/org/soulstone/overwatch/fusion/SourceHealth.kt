@@ -49,6 +49,12 @@ object SourceHealth {
         )
     }
 
+    /** Put back a state read earlier from [flowFor], for a note that was laid
+     *  over a row and is now lifted. */
+    fun restore(source: DetectionSource, health: Health) {
+        flows.getValue(source).value = health
+    }
+
     fun reset() {
         flows.values.forEach { it.value = Health() }
     }

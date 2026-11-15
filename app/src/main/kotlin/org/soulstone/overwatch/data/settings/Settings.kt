@@ -120,7 +120,9 @@ class Settings private constructor(
     }
 
     fun setWazeApiKey(v: String) {
-        val t = v.trim()
+        // Printable ASCII only. A key pasted from an email or a PDF can carry a
+        // line break or a non-breaking space inside it, which trim() leaves.
+        val t = v.filter { it.code in 0x21..0x7E }
         SecureStore.put(appContext, KEY_WAZE_API_KEY, t)
         _wazeApiKey.value = t
     }

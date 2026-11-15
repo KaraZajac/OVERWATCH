@@ -1,5 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Nothing leaves this phone in a backup or in a phone-to-phone transfer.
+     android:allowBackup="false" already says so, but from Android 12 it only
+     stops cloud backup for certain: a transfer to a new phone can still copy the
+     app's files unless they are excluded here. The settings file would arrive
+     with the encrypted ignore list and keys beside it and no key to read them. -->
 <data-extraction-rules>
     <cloud-backup>
+        <exclude domain="root" path="." />
+        <exclude domain="file" path="." />
+        <exclude domain="database" path="." />
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="external" path="." />
     </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" path="." />
+        <exclude domain="file" path="." />
+        <exclude domain="database" path="." />
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="external" path="." />
+    </device-transfer>
 </data-extraction-rules>

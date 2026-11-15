@@ -202,7 +202,8 @@ fun MainScreen(
                 running = running,
                 threat = threat,
                 score = score,
-                events = events.filter { it.visibleAt(detectionRadiusM.toFloat()) }
+                events = events.filter { it.visibleAt(detectionRadiusM.toFloat()) },
+                hidden = events.count { !it.visibleAt(detectionRadiusM.toFloat()) }
             )
         }
 
@@ -714,10 +715,15 @@ private fun StatusText(
     running: Boolean,
     threat: ThreatLevel,
     score: Int,
-    events: List<DetectionEvent>
+    events: List<DetectionEvent>,
+    /** Detections beyond "show within": weak ones, or they would be shown. */
+    hidden: Int
 ) {
     val text = when {
         !running -> "Idle — press START to begin scanning"
+        // Not "All clear" over a "Max score: 30": the score counts what the
+        // range hides, and so does the notification.
+        events.isEmpty() && hidden > 0 -> "Nothing in range ($hidden weak beyond it)"
         events.isEmpty() -> "All clear"
         threat == ThreatLevel.GREEN -> "Scanning… (${events.size} weak signals)"
         else -> {

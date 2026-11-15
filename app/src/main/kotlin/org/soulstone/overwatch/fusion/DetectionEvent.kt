@@ -13,7 +13,8 @@ package org.soulstone.overwatch.fusion
  * @param distanceMeters how far away it was when observed; null for radio-only sources, which
  *        have no position. The UI filters what it *shows* on this; it never filters what is
  *        *scored*, so the threat tier cannot move when the view range changes.
- * @param timestampMs wall-clock millis when this event was produced
+ * @param timestampMs when the store took this event in, on the store's own clock;
+ *        whatever the event was built with is replaced there
  * @param kind what sort of device this is, for the sources where a user can reasonably
  *        ask to ignore every one of them (COMMERCIAL families and TRACKER makes, whose
  *        Bluetooth addresses change, so a rule on one address does not last); null

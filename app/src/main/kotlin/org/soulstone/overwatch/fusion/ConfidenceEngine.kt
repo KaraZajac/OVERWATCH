@@ -398,8 +398,8 @@ object ConfidenceEngine {
 
     /**
      * A generic `man_made=surveillance` node is as likely to be a shop's CCTV
-     * as a street camera, so it peaks below the YELLOW line at any real
-     * distance and never drives the tier on its own.
+     * as a street camera, so it never goes above YELLOW: 55 on top of it, 46
+     * at 50 m, and under the YELLOW line (40) from about 130 m.
      */
     private val CAMERA_FALLOFF = arrayOf(
         0f to 55f, 50f to 46f, 150f to 38f, 300f to 30f, 800f to 22f, 3000f to 14f

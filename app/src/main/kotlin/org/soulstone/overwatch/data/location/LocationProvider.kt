@@ -114,6 +114,27 @@ class LocationProvider(private val context: Context) {
         return ageMs in 0..SEED_MAX_AGE_MS
     }
 
+    /** Forget the fix that is held, for one too old to be where the phone is.
+     *  The next one that arrives is published as usual. */
+    fun withdrawFix() {
+        _location.value = null
+    }
+
+    /** Ask for updates again, for when Location has been switched back on
+     *  mid-scan. A request made before it went off is meant to carry on by
+     *  itself; on the Android 16 emulator it did not (no GPS request was made
+     *  again, and no fix came for the rest of the scan). */
+    @SuppressLint("MissingPermission")
+    fun rerequest() {
+        if (!running || !hasPermission()) return
+        try {
+            client.removeLocationUpdates(callback)
+            client.requestLocationUpdates(request, callback, Looper.getMainLooper())
+        } catch (e: SecurityException) {
+            Log.w(TAG, "Could not ask for location updates again")
+        }
+    }
+
     fun stop() {
         if (!running) return
         client.removeLocationUpdates(callback)

@@ -20,6 +20,8 @@ import android.os.Handler
 import android.os.Looper
 import android.os.ParcelUuid
 import android.os.PowerManager
+import android.hardware.display.DisplayManager
+import android.view.Display
 import android.os.SystemClock
 import android.util.Log
 import androidx.core.content.ContextCompat
@@ -161,8 +163,10 @@ class BleScanner(
     /** Looks in on the running scan every [TEND_MS]. */
     private val tend = Runnable { tendScan() }
 
-    private val spam = BleSpamDetector()
-    private val drones = DroneTracker()
+    // On the clock that only runs forwards, like the two below. On the wall
+    // clock a correction backwards left every window open for as long as the step.
+    private val spam = BleSpamDetector(nowMs = { SystemClock.elapsedRealtime() })
+    private val drones = DroneTracker(nowMs = { SystemClock.elapsedRealtime() })
     private val trackerDwell = TrackerDwell(nowMs = { SystemClock.elapsedRealtime() })
 
     /**
@@ -264,9 +268,49 @@ class BleScanner(
         }
     }
 
-    private fun screenOn(): Boolean = try {
+    /**
+     * Whether the full scan would be delivered now: the phone is awake and a
+     * display is lit. The second half is for a call held to the ear. The
+     * proximity sensor then turns the display off while the phone stays
+     * "interactive" and no screen broadcast is sent, and the Bluetooth stack, as
+     * its scan manager is remembered from AOSP (not re-read for this, and not
+     * tried on a phone), goes by the display. Through v0.6.2 only the first half
+     * was asked, so for the length of the call the full scan stayed registered
+     * and heard nothing.
+     */
+    private fun screenOn(): Boolean = interactive() && displayOn()
+
+    private fun interactive(): Boolean = try {
         (context.getSystemService(Context.POWER_SERVICE) as? PowerManager)?.isInteractive != false
     } catch (e: Exception) { true }
+
+    private fun displayOn(): Boolean = try {
+        val displays = (context.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager)?.displays
+        displays.isNullOrEmpty() || displays.any { it.state == Display.STATE_ON }
+    } catch (e: Exception) { true }
+
+    /** What [displayOn] said at the last change, so that only a change counts:
+     *  this listener is also told of brightness and refresh-rate changes. */
+    private var displayWasOn = true
+
+    /** The display going off and on while the phone stays awake. An ordinary
+     *  screen off and on is left to the broadcasts in [stateReceiver]. */
+    private val displayListener = object : DisplayManager.DisplayListener {
+        override fun onDisplayAdded(displayId: Int) = Unit
+        override fun onDisplayRemoved(displayId: Int) = Unit
+        override fun onDisplayChanged(displayId: Int) {
+            val on = displayOn()
+            if (on == displayWasOn) return
+            displayWasOn = on
+            if (!wanted || !interactive()) return
+            handler.removeCallbacks(settle)
+            if (!on) {
+                if (scanning && !filteredMode) launchScan()
+            } else {
+                handler.postDelayed(settle, MODE_SETTLE_MS)
+            }
+        }
+    }
 
     /** The scan that is running is the one for the other screen state. */
     private fun wrongMode(): Boolean = scanning && filteredMode == screenOn()
@@ -562,12 +606,21 @@ class BleScanner(
         ContextCompat.registerReceiver(
             context, stateReceiver, filter, ContextCompat.RECEIVER_EXPORTED
         )
+        displayWasOn = displayOn()
+        try {
+            (context.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager)
+                ?.registerDisplayListener(displayListener, handler)
+        } catch (e: Exception) { Log.w(TAG, "No display listener: ${e.javaClass.simpleName}") }
         receiversRegistered = true
     }
 
     private fun unregisterReceivers() {
         if (!receiversRegistered) return
         try { context.unregisterReceiver(stateReceiver) } catch (_: IllegalArgumentException) { }
+        try {
+            (context.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager)
+                ?.unregisterDisplayListener(displayListener)
+        } catch (_: Exception) { }
         receiversRegistered = false
     }
 
@@ -836,8 +889,8 @@ class BleScanner(
     private fun checkDrone(mac: String, rssi: Int, serviceData: Map<java.util.UUID, ByteArray>?) {
         val msgs = RemoteId.messagesFromBle(serviceData?.get(RemoteId.BLE_SERVICE_UUID))
         if (msgs.isEmpty()) return
-        val drone = drones.update(mac, msgs)
-        submitDrone(store, drone, "ble:$mac", rssi)
+        val heard = drones.update(mac, msgs)
+        submitDrone(store, heard, "ble:$mac", rssi)
     }
 
     companion object {
@@ -865,13 +918,29 @@ class BleScanner(
         /** One for the process: the stack counts scan starts per app. */
         private val budget = ScanStartBudget(nowMs = { SystemClock.elapsedRealtime() })
 
+        /** How long a transmitter may go without naming its drone before the
+         *  drone is listed under the transmitter's address instead. A drone must
+         *  repeat its ID at least every 3 s (ASTM F3411). */
+        private const val DRONE_ID_WAIT_MS = 4_000L
+
         /**
          * One drone, from whichever radio heard it. Keyed by its serial when it has
          * sent one, so the same drone heard over Bluetooth and Wi-Fi is one row;
-         * keyed by [transmitter] until then.
+         * by its other ID (a registration, a session ID) when that is all it has
+         * sent; by [transmitter] when it has sent neither for [DRONE_ID_WAIT_MS].
+         *
+         * It is not listed at once under the transmitter. A legacy Bluetooth advert
+         * carries one message, so the first one heard is often the position, with
+         * the serial a second behind. Through v0.6.2 that first advert made a row
+         * of its own: it raised the level and buzzed before the serial arrived,
+         * and an ignore rule, which names the serial, could not match it. So a
+         * drone the user had ignored still alerted each time it was first heard.
+         *
          * The position is the drone's own broadcast; nothing about it is logged.
          */
-        fun submitDrone(store: DetectionStore, drone: RemoteId.Drone, transmitter: String, rssi: Int?) {
+        fun submitDrone(store: DetectionStore, heard: DroneTracker.Heard, transmitter: String, rssi: Int?) {
+            val drone = heard.drone
+            if (drone.id == null && heard.forMs < DRONE_ID_WAIT_MS) return
             val c = RemoteId.classify(drone.serial)
             val score = ConfidenceEngine.scoreDrone(c.tier)
             val id = drone.id
@@ -889,6 +958,12 @@ class BleScanner(
             // Until its serial arrives a drone is listed under the radio address
             // that carried it. Once it has one, that row is the same drone twice.
             if (id != null) store.remove(DetectionSource.AIRCRAFT, "rid:$transmitter")
+            // Likewise the row under a registration or session ID, once the
+            // serial that outranks it is known.
+            val other = drone.otherId
+            if (drone.serial != null && other != null && other != drone.serial) {
+                store.remove(DetectionSource.AIRCRAFT, "rid:$other")
+            }
             store.submit(
                 DetectionEvent(
                     source = DetectionSource.AIRCRAFT,

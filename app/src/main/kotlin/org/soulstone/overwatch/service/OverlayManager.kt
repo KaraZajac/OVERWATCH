@@ -211,6 +211,12 @@ class OverlayManager(
         return sqrt((dx * dx + dy * dy).toDouble()) < dismissHitRadius
     }
 
+    private fun onScreenX(x: Int): Int =
+        x.coerceIn(0, maxOf(0, context.resources.displayMetrics.widthPixels - bubbleSizePx))
+
+    private fun onScreenY(y: Int): Int =
+        y.coerceIn(0, maxOf(0, context.resources.displayMetrics.heightPixels - bubbleSizePx))
+
     /** Drag with raw coords; tap if movement stayed under [TAP_SLOP_PX]. */
     private inner class DragHandler(private val lp: WindowManager.LayoutParams) :
         View.OnTouchListener {
@@ -225,8 +231,12 @@ class OverlayManager(
         override fun onTouch(v: View, ev: MotionEvent): Boolean {
             return when (ev.action) {
                 MotionEvent.ACTION_DOWN -> {
-                    startX = lp.x
-                    startY = lp.y
+                    // From where the bubble is drawn, which after a rotation is
+                    // not where these say: Android keeps a window on the screen,
+                    // the numbers stay as they were, and the drag began with a
+                    // stretch in which nothing moved.
+                    startX = onScreenX(lp.x)
+                    startY = onScreenY(lp.y)
                     touchDownX = ev.rawX
                     touchDownY = ev.rawY
                     moved = false
@@ -240,8 +250,11 @@ class OverlayManager(
                         showDismissZone()
                     }
                     if (moved) {
-                        lp.x = startX + dx.toInt()
-                        lp.y = startY + dy.toInt()
+                        // Kept on the screen, so a drag past an edge leaves no
+                        // dead stretch on the way back, and the test for the X
+                        // below is made from where the bubble is.
+                        lp.x = onScreenX(startX + dx.toInt())
+                        lp.y = onScreenY(startY + dy.toInt())
                         try { wm.updateViewLayout(v, lp) } catch (_: Exception) {}
                         dismissView?.setHighlighted(isOverDismiss(lp.x, lp.y))
                     }

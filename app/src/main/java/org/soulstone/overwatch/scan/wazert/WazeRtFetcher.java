@@ -202,10 +202,26 @@ public final class WazeRtFetcher {
 
         // A new server session re-sends every active alert but sends no removal for
         // alerts that cleared while we were logged out, so a stale cache would show
-        // ghosts. Defer the clear until the first box succeeds, so a failure right
-        // after a re-login keeps serving the previous cache instead of blanking.
+        // ghosts. It is cleared once the new session has answered, not before, so a
+        // failure right after a re-login keeps serving the previous cache instead
+        // of blanking.
         boolean sessionChanged = session.currentServerSessionId() != sessionBefore;
         boolean cleared = false;
+
+        if (handshake != null) {
+            // The handshake's own MapDisplayed box is a real viewport query, and the
+            // nearest one; the server will not send those alerts again this session.
+            // So it is kept now, whatever becomes of the boxes below. Through v0.6.2
+            // it was kept only once the first box had answered: a first box that
+            // failed threw it away, the session lived on, and the reports nearest
+            // the user stayed missing until the next login.
+            if (sessionChanged) {
+                cache.clear();
+                cleared = true;
+            }
+            cache.submit(new AlertQueryResult(
+                    WazeRtCodec.parseAlerts(handshake), WazeRtCodec.parseRemovedAlertIds(handshake)));
+        }
 
         double[][] boxes = GeoBoxes.shrinkingBoxes(lon, lat, radiusMeters, SHRINK_STEPS);
         long deadline = SystemClock.elapsedRealtime() + QUERY_BUDGET_MS;
@@ -215,13 +231,6 @@ public final class WazeRtFetcher {
             if (sessionChanged && !cleared) {
                 cache.clear();
                 cleared = true;
-            }
-            if (handshake != null) {
-                // The handshake's own MapDisplayed box is a real viewport query and the
-                // server will not send those alerts again this session, so merge it.
-                cache.submit(new AlertQueryResult(
-                        WazeRtCodec.parseAlerts(handshake), WazeRtCodec.parseRemovedAlertIds(handshake)));
-                handshake = null;
             }
             cache.submit(new AlertQueryResult(
                     WazeRtCodec.parseAlerts(batch), WazeRtCodec.parseRemovedAlertIds(batch)));

@@ -95,10 +95,13 @@ class DeflockClient(context: Context) {
     data class Cell(val latIndex: Int, val lonIndex: Int) {
         val centreLat: Double get() = (latIndex + 0.5) * CELL_DEG
         val centreLon: Double get() = (lonIndex + 0.5) * CELL_DEG
-        val south: Double get() = centreLat - FETCH_RADIUS_DEG
-        val north: Double get() = centreLat + FETCH_RADIUS_DEG
-        val west: Double get() = centreLon - FETCH_RADIUS_DEG
-        val east: Double get() = centreLon + FETCH_RADIUS_DEG
+        val south: Double get() = (centreLat - FETCH_RADIUS_DEG).coerceAtLeast(-90.0)
+        val north: Double get() = (centreLat + FETCH_RADIUS_DEG).coerceAtMost(90.0)
+        // Held inside the map: the cell that touches the 180° line would
+        // otherwise ask for 180.025°, which is not a longitude. What lies past
+        // the line there (half a cell, on Taveuni or in Chukotka) goes unasked.
+        val west: Double get() = (centreLon - FETCH_RADIUS_DEG).coerceAtLeast(-180.0)
+        val east: Double get() = (centreLon + FETCH_RADIUS_DEG).coerceAtMost(180.0)
 
         /** True when this cell's box holds the whole circle of [radiusM] around the point. */
         fun holds(lat: Double, lon: Double, radiusM: Double): Boolean {

@@ -179,7 +179,9 @@ Header: X-API-Key: <the user's own key>
 **What OpenWeb Ninja learns.** The box is centred on the centre of the 1 km grid
 square from `PositionCloak` (§2.2b), never on the fix, and grown to ±(2000 + 919)
 m so the 2 km evaluation circle around the real position stays inside it. So the
-provider learns that square every 240 s, tied to your key. Until v0.5.18 the box
+provider learns that square every 240 s, tied to your key. Since v0.6.3 the
+request names itself `OVERWATCH`; with no `User-Agent` set, Android sent its
+own, which carries the phone's model and build. Until v0.5.18 the box
 was centred exactly on the fix. Checked with the shipping class on 2026-10-10:
 two positions 300 m apart in one square produce byte-identical requests.
 
@@ -560,9 +562,9 @@ wildcard-probe tricks are not portable to a userspace Android app.
 
 ### 3.3 Vendor OUIs — enterprise / municipal surveillance
 
-`data/targets/VendorOuis.kt`. All 37 verified against the IEEE registry (18
+`data/targets/VendorOuis.kt`. All 41 verified against the IEEE registry (18
 against the Wireshark `manuf` snapshot of 2026-08-28, Flock Safety's against
-hwdata 0.411 on 2026-10-11, the 18 added in v0.6.0 against the IEEE MA-L, MA-M and
+hwdata 0.411 on 2026-10-11, the 22 added in v0.6.0 against the IEEE MA-L, MA-M and
 MA-S CSVs of 2026-11-01), so a hit names the manufacturer directly. Checked by
 **both** the BLE and WiFi scanners. Since v0.6.0 a block can be 24 bits (MA-L), 28
 (MA-M) or 36 (MA-S), written `58:e8:76:c` and `70:b3:d5:52:1`; the longest match
@@ -829,8 +831,8 @@ names the device.
 | `0xFE6B` service data with a serial | TASER International's SIG member UUID, carrying ASCII serials (`D01A…` on body cams) | 7 devices, one confirmed by eye | 80 |
 | `0xFE6C` service data with a serial | TASER International's other member UUID, the Axon Signal trigger layout | AxonCadabra's replay of a captured trigger; no real trigger has been captured. Serial `X87002FP4` is that tool and goes to HACKER (§3.10) | 80 |
 | `0x034D` manufacturer data | TASER International's company ID, counted only as `0x02` + nine uppercase letters/digits (`X870054FW`). `X87…` is the Axon Signal Vehicle per Blue2thprinting's serial map, `X85…` the Fleet power unit | 1 capture, on `00:25:DF`. ACAB's off-block `0x034D` advert without that shape is why the shape is required | 80 |
-| `0xFC81` / `0xFE6B` / `0xFE6C` listed, or carried as service data with no serial in it | Axon Enterprise's / TASER International's member UUIDs. A serial is a run of six or more uppercase letters and digits; through v0.6.0 any non-empty `0xFE6B` / `0xFE6C` payload scored as "with a serial" (80) | SIG registry (OUI-SPY AXEOFF keys on them) | 75 |
 | `BodyWorn Remote XXXX` name | Utility's body-cam activation remote; XXXX is the last two bytes of its MAC | 10 MACs on Utility's `00:09:BC`, one observer, 2025-08 | 80 |
+| `0xFC81` / `0xFE6B` / `0xFE6C` listed, or carried as service data with no serial in it | Axon Enterprise's / TASER International's member UUIDs. A serial is a run of six or more uppercase letters and digits; through v0.6.0 any non-empty `0xFE6B` / `0xFE6C` payload scored as "with a serial" (80) | SIG registry (OUI-SPY AXEOFF keys on them) | 75 |
 | MAC `00:25:df` | Axon Enterprise (IEEE) | 13 MACs in ACAB's serial logs | 80 |
 | MAC `d8:1f:65` | IEEE lists the holder as **Private** | 10 MACs field-attributed to Axon, five confirmed by eye, and no non-Axon device among ~21,000 scanned. If one ever appears, this entry must come out | 80 |
 
@@ -879,6 +881,17 @@ labelled "m up", so a drone parked in Denver would have read "1609 m up". Also
 since v0.6.1 a drone is **one row**: it is keyed by its serial once it has sent
 one, and the row it had under its transmitter's address until then is withdrawn.
 The same drone heard over Bluetooth and Wi-Fi joins that row.
+
+**A drone waits for its ID (v0.6.3).** A legacy Bluetooth advert carries one
+message, so the first one heard from a drone is often its position, with the
+serial a second behind. Through v0.6.2 that first advert was listed at once
+under the transmitter's address: it raised the tier and vibrated before the
+serial arrived, and an ignore rule, which names the serial (§4.4), could not
+match it. A drone the user had ignored therefore still alerted each time it was
+first heard. A drone is now listed only once it has sent an ID, or after 4 s
+without one (ASTM F3411 has the ID repeated at least every 3 s). A drone that
+sends a registration or session ID first and its serial after is also one row
+now: the row under the other ID is withdrawn when the serial arrives.
 
 **Telling police from hobby drones: only the serial prefix works.** The first
 four characters are the ICAO-assigned manufacturer code; the next is a length
@@ -1021,6 +1034,19 @@ with the distance they had when last in range. ADS-B aircraft are replaced as a
 set at every poll since v0.6.1 (§2.3), and age out after 5 minutes only when the
 polls fail.
 
+**The store's clock (v0.6.3).** A detection is stamped when the store takes it
+in, on the clock that only runs forwards (`elapsedRealtime`), and replaces the
+row it renews. Through v0.6.2 each event carried a wall-clock stamp and the
+newer stamp won: a clock corrected backwards left every row frozen and
+unexpiring for the length of the step, and one corrected forwards emptied the
+list (and the next advert vibrated again). The spam detector and the drone
+tracker ran on the wall clock too, and are moved with it.
+
+**A source switched off mid-scan (v0.6.3).** COMMERCIAL, HACKER, TRACKER and
+drones are read per advert, so their switches apply at once. What the source had
+already found now goes with it; through v0.6.2 it stood, and held the tier, for
+the 5 minutes a detection is kept.
+
 **Peak hold (v0.6.1).** A radio device is re-scored at every advert, several
 times a second, and the strong-signal bonus switches at −50 dBm. A device a few
 dB either side of that line took the circle from RED to ORANGE and back at that
@@ -1035,6 +1061,12 @@ it already vibrated for that tier or a higher one in the last 60 s
 one going higher than it has, always vibrates. Through v0.6.0 every upward
 crossing vibrated, so one camera a few metres either side of a distance band, or
 one device on a score boundary, buzzed again and again with nothing new to say.
+Since v0.6.3 the vibration is marked as an alarm (`VibrationAttributes.USAGE_ALARM`;
+`AudioAttributes.USAGE_ALARM` before Android 13). Sent with no usage, as it was,
+Android treats a vibration as unimportant: by AOSP's vibration settings, as
+remembered and not re-read for this change, it is dropped in Battery Saver, and
+from Android 13 it follows the user's "media vibration" setting. Not tried on a
+phone in Battery Saver.
 The notification is likewise posted only when its words change, and at most once
 a second; it used to be re-posted on every store update. Its level and its top
 detection are both taken from one reading of the list, so the pair that waits
@@ -1246,7 +1278,7 @@ arrives.
 The catch is that **a `ScanFilter` cannot express an OUI prefix.** It can match
 an exact address, an exact name, a service UUID, or manufacturer data — and
 OUI-prefix matching is one of OVERWATCH's main BLE methods (Axon's two blocks,
-the 21 Flock module prefixes, the 37 vendor blocks). There is no filter that means "any MAC
+the 21 Flock module prefixes, the 41 vendor blocks). There is no filter that means "any MAC
 starting with these three octets", and no filter that means "any device".
 
 So the scanner switches strategy on `ACTION_SCREEN_ON` / `ACTION_SCREEN_OFF`:
@@ -1394,6 +1426,26 @@ failed.
   cancel the check for the whole scan; and stopping cancels only a discovery
   OVERWATCH began itself in the last 15 s, not one the system's Bluetooth page
   is running to pair somebody's headphones.
+- **A display that is off while the phone is awake (v0.6.3).** The scan mode
+  followed the screen broadcasts and `PowerManager.isInteractive`. On a call held
+  to the ear the proximity sensor turns the display off, the phone stays
+  interactive and no broadcast is sent; the Bluetooth stack's scan manager, as
+  remembered from AOSP (not re-read for this change), goes by display state, so
+  the full scan would have heard nothing for the length of the call. The mode
+  now also needs a display in `STATE_ON`, and a `DisplayListener` makes the
+  switch. **Not tested on a phone.**
+- **The spam flood rule after a deaf spell (v0.6.3).** The 15 s warm-up was
+  opened at Start and at a change to the full scan. It is now also opened
+  whenever the detector has seen no advert for 10 s: a full scan started over
+  after 2 quiet minutes, HACKER switched on mid-scan, and a held mode change all
+  resumed hearing with every device in range counted as new.
+- **No position (v0.6.3).** DEFLOCK, WAZE and AIRCRAFT report only when they
+  poll, and poll only from a fix. With Location switched off, or no fix to be
+  had, their rows read "no detections". After 45 s without a fix each row now
+  says so ("Location is off…", shown as failed for DEFLOCK and WAZE, or "No
+  location fix yet…"). A fix more than 5 minutes old, or any fix once Location
+  is off, is withdrawn, so no source goes on measuring from where the phone was.
+  Observed on the emulator; see §6.
 - **Android 14+ foreground-service types** are mandatory:
   `connectedDevice` for the radio scanners and `location` for the map/feed
   sources. Both are declared and both are passed at `startForeground` time.
@@ -1424,8 +1476,14 @@ its rules are removed, across stops and restarts, and it holds what was ignored:
 device addresses, camera node ids, aircraft hex codes, and the label each row
 showed (§4.4). It is stored the way the Waze key is: AES-GCM under a key in the
 Android Keystore, in app-private preferences (`data/settings/SecureStore.kt`).
-The app is excluded from Android's backups (`allowBackup="false"`, empty
-extraction rules), so the list does not follow you to a new phone. Removing the
+The app is excluded from Android's backups and from phone-to-phone transfer
+(`allowBackup="false"`, and since v0.6.3 extraction rules that exclude every
+storage domain from both; before that the rules were empty, and from Android 12
+`allowBackup` alone does not stop a transfer to a new phone on every device), so
+the list does not follow you to a new phone. A stored list that cannot be
+decrypted at launch is read again before the next change to it (v0.6.3);
+through v0.6.2 the list started empty and the first rule added was saved over
+the rest. Removing the
 last rule removes the entry.
 
 ### 5.4 What leaves the phone

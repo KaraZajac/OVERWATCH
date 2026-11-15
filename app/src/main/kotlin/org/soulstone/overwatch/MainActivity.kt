@@ -10,6 +10,7 @@ import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.provider.Settings as AndroidSettings
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
@@ -83,12 +84,34 @@ class MainActivity : ComponentActivity() {
         // cannot be asked about it, since it answers false for precise location
         // after that choice, the same as after "don't ask again".
         val canStillAsk = anyMissingCanStillAsk() || approximateNow
-        permanentlyDenied.value = !allGranted && (upgradeRefused || !canStillAsk)
+        // "Cannot ask" is also what Android answers for a permission that was
+        // never refused: a dialog closed by a tap beside it (Android 11 and
+        // later) is not a refusal. Read alone, that sent a first-time user who
+        // had dismissed the dialog to app settings for good. A refusal that is
+        // final shows one of two ways: Android was willing to explain before
+        // this request and is not now (the second "Don't allow"), or the
+        // request came straight back with no dialog shown.
+        val noDialog = SystemClock.elapsedRealtime() - askedAtMs < NO_DIALOG_MS
+        val refusedForGood = !canStillAsk && (couldAskBefore || noDialog)
+        permanentlyDenied.value = !allGranted && (upgradeRefused || refusedForGood)
         if (allGranted) {
             // First-run path: user just granted everything, kick off scanning
             // immediately so they don't have to tap START a second time.
             DetectionService.start(this)
         }
+    }
+
+    /** When the permission request went out, and whether Android would then
+     *  explain any missing permission (true once it has been refused once). */
+    private var askedAtMs = 0L
+    private var couldAskBefore = false
+
+    private fun askForPermissions() {
+        askedAtMs = SystemClock.elapsedRealtime()
+        couldAskBefore = requiredPermissions.any {
+            !has(it) && ActivityCompat.shouldShowRequestPermissionRationale(this, it)
+        }
+        permissionLauncher.launch(requestedPermissions)
     }
 
     private val permissionsGranted = mutableStateOf(false)
@@ -168,12 +191,19 @@ class MainActivity : ComponentActivity() {
                         val denied by permanentlyDenied
                         val approximate by approximateOnly
 
+                        val startError by DetectionService.startError.collectAsState()
+
                         val message = when {
-                            granted -> null
+                            running -> null
+                            // Why the last START started nothing, if it did not.
+                            granted -> startError
                             denied && approximate ->
                                 "Location is set to approximate — open app settings and turn on precise location"
                             denied -> "Permissions permanently denied — open app settings to grant"
                             approximate -> "OVERWATCH needs precise location — tap START and choose Precise"
+                            // Notifications are asked for from Android 13.
+                            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU ->
+                                "Tap START to grant Bluetooth, WiFi, location and notification permissions"
                             else -> "Tap START to grant Bluetooth, WiFi + location permissions"
                         }
 
@@ -207,7 +237,7 @@ class MainActivity : ComponentActivity() {
                                     } else if (denied) {
                                         openAppSettings()
                                     } else {
-                                        permissionLauncher.launch(requestedPermissions)
+                                        askForPermissions()
                                     }
                                 }
                             },
@@ -285,6 +315,8 @@ class MainActivity : ComponentActivity() {
     private enum class Screen { MAIN, SETTINGS }
 
     private companion object {
+        /** A permission request answered faster than this showed no dialog. */
+        const val NO_DIALOG_MS = 400L
         // androidx's own navigation-bar scrims, which only Android 8–9 draw
         // (EdgeToEdge.DefaultLightScrim / DefaultDarkScrim aren't public).
         val LIGHT_SCRIM = Color.argb(0xe6, 0xFF, 0xFF, 0xFF)

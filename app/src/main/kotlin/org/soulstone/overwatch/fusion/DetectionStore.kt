@@ -48,18 +48,22 @@ class DetectionStore(
         val peak = peaks[id]
         // The row keeps this advert's label and signal strength either way; only
         // the score, and the reasons that explain it, are the held ones.
-        val shown = if (peak != null && event.score < peak.score && now - peak.atMs < PEAK_HOLD_MS) {
-            event.copy(score = peak.score, matchedMethods = peak.methods)
-        } else {
-            peaks[id] = Peak(event.score, event.matchedMethods, now)
-            event
-        }
+        val held = peak != null && event.score < peak.score && now - peak.atMs < PEAK_HOLD_MS
+        if (!held) peaks[id] = Peak(event.score, event.matchedMethods, now)
+        // Stamped here, on this store's clock, and put in place of the row it
+        // renews. Through v0.6.2 the event's own wall-clock stamp decided which
+        // of two was the newer and when a row was too old: a clock set back left
+        // every row frozen and unexpiring for the length of the step, and one set
+        // forward emptied the list.
+        val shown = event.copy(
+            score = if (held) peak!!.score else event.score,
+            matchedMethods = if (held) peak!!.methods else event.matchedMethods,
+            timestampMs = now
+        )
         val cutoff = now - retentionMs
-        val merged = (_events.value + shown)
-            .filter { it.timestampMs >= cutoff }
-            .groupBy { it.source to it.key }
-            .map { (_, list) -> list.maxByOrNull { it.timestampMs }!! }
-            .sortedByDescending { it.score }
+        val merged = (_events.value.filter {
+            it.timestampMs >= cutoff && !(it.source == event.source && it.key == event.key)
+        } + shown).sortedByDescending { it.score }
         _events.value = merged
         recompute(merged)
     }
@@ -78,11 +82,12 @@ class DetectionStore(
      *  ID ("rid:") from the radio scanners, and a poll must not clear a drone. */
     @Synchronized
     fun replaceKeyed(source: DetectionSource, keyPrefix: String, events: List<DetectionEvent>) {
-        val cutoff = nowMs() - retentionMs
+        val now = nowMs()
+        val cutoff = now - retentionMs
         val kept = _events.value.filter {
             it.timestampMs >= cutoff && !(it.source == source && it.key.startsWith(keyPrefix))
         }
-        val merged = (kept + events.filterNot(ignored).distinctBy { it.key })
+        val merged = (kept + events.filterNot(ignored).distinctBy { it.key }.map { it.copy(timestampMs = now) })
             .sortedByDescending { it.score }
         _events.value = merged
         recompute(merged)

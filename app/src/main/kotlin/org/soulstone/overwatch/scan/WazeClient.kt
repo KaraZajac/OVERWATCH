@@ -79,6 +79,11 @@ class WazeClient(
          *  toward are already fetched by the time the precise proximity filter
          *  (applied in the scanner) starts including them. */
         private const val BBOX_MIN_RADIUS_M = 800.0
+        private const val USER_AGENT = "OVERWATCH (+github.com/KaraZajac/OVERWATCH)"
+
+        /** [key] with everything but printable ASCII removed: what an HTTP
+         *  header value may hold, and all an API key is made of. */
+        fun headerSafe(key: String): String = key.filter { it.code in 0x21..0x7E }
     }
 
     override val backendName: String = "OpenWeb Ninja"
@@ -87,7 +92,7 @@ class WazeClient(
     private val cloak = PositionCloak()
 
     /** True when the user has entered an API key. False → source is unconfigured. */
-    override val isConfigured: Boolean get() = apiKey().isNotBlank()
+    override val isConfigured: Boolean get() = headerSafe(apiKey()).isNotEmpty()
 
     override val unconfiguredReason: String =
         "OpenWeb Ninja API key not set — add it in Settings"
@@ -113,8 +118,10 @@ class WazeClient(
         val r = radiusMeters.toDouble().coerceAtLeast(BBOX_MIN_RADIUS_M) + PositionCloak.MAX_OFFSET_M
         val latDelta = r / 111_000.0
         val lonDelta = r / (111_000.0 * cos(Math.toRadians(cLat)).coerceAtLeast(0.01))
-        val bottomLeft = "${coord(cLat - latDelta)},${coord(cLon - lonDelta)}"
-        val topRight = "${coord(cLat + latDelta)},${coord(cLon + lonDelta)}"
+        // Held inside the map: next to the 180° line or a pole the sums run past
+        // it, and 180.02 is not a longitude.
+        val bottomLeft = "${coord((cLat - latDelta).coerceAtLeast(-90.0))},${coord((cLon - lonDelta).coerceAtLeast(-180.0))}"
+        val topRight = "${coord((cLat + latDelta).coerceAtMost(90.0))},${coord((cLon + lonDelta).coerceAtMost(180.0))}"
         // alert_types=POLICE is honored server-side (verified 2026-09-16) and
         // max_jams=0 drops the jam payload outright — together they cut a typical
         // response from ~18 KB to ~1.5 KB, which matters on cellular. max_alerts
@@ -126,14 +133,20 @@ class WazeClient(
                 "&max_alerts=200&max_jams=0&alert_types=POLICE"
         )
 
-        val conn = (url.openConnection() as HttpURLConnection).apply {
-            connectTimeout = TIMEOUT_MS
-            readTimeout = TIMEOUT_MS
-            requestMethod = "GET"
-            setRequestProperty("X-API-Key", apiKey())
-            setRequestProperty("Accept", "application/json")
-        }
+        val conn = url.openConnection() as HttpURLConnection
         try {
+            conn.connectTimeout = TIMEOUT_MS
+            conn.readTimeout = TIMEOUT_MS
+            conn.requestMethod = "GET"
+            // Inside the try, and the key cleaned first: a header value with a
+            // line break or other control character in it is refused with an
+            // exception, which out here ended the app, and whose message can
+            // quote the value. A key pasted from a wrapped line carries one.
+            conn.setRequestProperty("X-API-Key", headerSafe(apiKey()))
+            conn.setRequestProperty("Accept", "application/json")
+            // A fixed name. Left unset, Android sends its own, which names the
+            // phone's model and build to the service next to the user's key.
+            conn.setRequestProperty("User-Agent", USER_AGENT)
             when (val code = conn.responseCode) {
                 in 200..299 -> {
                     val body = conn.inputStream.bufferedReader().use { it.readText() }
@@ -164,7 +177,8 @@ class WazeClient(
             // Class name only: some exception messages quote the request URL,
             // which carries the box, and logcat outlives the scan.
             Log.w(TAG, "Waze feed fetch failed: ${e.javaClass.simpleName}")
-            FetchResult.Failed(e.message ?: e.javaClass.simpleName, retrySoon = true)
+            // The same on the row: the message can quote the URL or a header.
+            FetchResult.Failed(e.javaClass.simpleName, retrySoon = true)
         } finally {
             conn.disconnect()
         }

@@ -8,6 +8,10 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.location.Location
+import android.location.LocationManager
+import android.media.AudioAttributes
+import android.os.VibrationAttributes
+import androidx.core.location.LocationManagerCompat
 import android.os.Build
 import android.os.IBinder
 import android.os.SystemClock
@@ -83,7 +87,7 @@ class DetectionService : LifecycleService() {
         const val ACTION_STOP = "org.soulstone.overwatch.action.STOP"
 
         /** Single shared store — UI observes this. */
-        val store: DetectionStore = DetectionStore()
+        val store: DetectionStore = DetectionStore(nowMs = { SystemClock.elapsedRealtime() })
 
         private val _running = MutableStateFlow(false)
         val running: StateFlow<Boolean> = _running.asStateFlow()
@@ -121,6 +125,18 @@ class DetectionService : LifecycleService() {
             context.startService(intent)
         }
 
+        /** Why the last START did not start a scan, for the main screen; null
+         *  when it did, or before the first. */
+        private val _startError = MutableStateFlow<String?>(null)
+        val startError: StateFlow<String?> = _startError.asStateFlow()
+
+        /** How long without a fix before the row of a source that needs one says so. */
+        private const val FIX_WAIT_MS = 45_000L
+        /** A fix this old is no longer a position. The same span a detection is
+         *  kept for, so a camera and the fix that placed it go together. */
+        private const val FIX_STALE_MS = 5 * 60_000L
+        private const val LOCATION_WATCH_MS = 15_000L
+
         private val overlayNudge = MutableStateFlow(0)
 
         /** Ask a running scan to look again at whether it may draw the floating
@@ -150,6 +166,12 @@ class DetectionService : LifecycleService() {
     private var mapPointsJob: Job? = null
     private var locationJob: Job? = null
     private var overlayJob: Job? = null
+    private var ridersOffJob: Job? = null
+    private var locationWatchJob: Job? = null
+    /** Whether Location was on at the watch's last look. */
+    private var locationWasOn = true
+    /** The rows carrying a no-location note, with what each said before it. */
+    private val locationNotes = HashMap<DetectionSource, Pair<SourceHealth.Health, String>>()
     private var bleStarted = false
     private var wifiStarted = false
     private var deflockStarted = false
@@ -287,10 +309,27 @@ class DetectionService : LifecycleService() {
             aircraftStarted
         if (!anyStarted) {
             Log.w(TAG, "No scanner started — endScanning + stopSelf")
+            // Say why on the main screen. Without it START put the notification
+            // up, took it down again and left the button as it was.
+            val anyOn = settings.bleEnabled.value || settings.wifiEnabled.value || needsLocation
+            _startError.value = if (!anyOn) {
+                "Nothing to scan with — turn on BLE, WiFi or an online source in Settings"
+            } else {
+                "No scanner could start — check that Bluetooth or WiFi is on"
+            }
             endScanning()
+            // Not left to endScanning(): nothing counts as started, so it returns
+            // before it reaches the notification.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+            } else {
+                @Suppress("DEPRECATION")
+                stopForeground(true)
+            }
             stopSelf()
             return
         }
+        _startError.value = null
 
         // MIC, HACKER and TRACKER piggyback on the BLE/WiFi scanners. Their rows
         // follow those scans for as long as this one runs: a radio switched off
@@ -301,6 +340,32 @@ class DetectionService : LifecycleService() {
                 (bleStarted && ble.status != SourceHealth.Status.FAILED) to
                     (wifiStarted && wifi.status != SourceHealth.Status.FAILED)
             }.distinctUntilChanged().collect { (bleUp, wifiUp) -> recordRiders(bleUp, wifiUp) }
+        }
+
+        // The four switches that are read per advert apply at once. Turned off,
+        // what the source had already found goes too: left alone it stood, and
+        // held the level, for the five minutes a detection is kept.
+        ridersOffJob?.cancel()
+        ridersOffJob = lifecycleScope.launch {
+            launch { settings.micEnabled.collect { if (!it) store.clearSource(DetectionSource.MIC) } }
+            launch { settings.hackerEnabled.collect { if (!it) store.clearSource(DetectionSource.HACKER) } }
+            launch { settings.trackerEnabled.collect { if (!it) store.clearSource(DetectionSource.TRACKER) } }
+            launch {
+                settings.aircraftEnabled.collect {
+                    if (!it) store.replaceKeyed(DetectionSource.AIRCRAFT, "rid:", emptyList())
+                }
+            }
+        }
+        locationWatchJob?.cancel()
+        if (_locating.value) {
+            locationWasOn = true
+            locationWatchJob = lifecycleScope.launch {
+                val since = SystemClock.elapsedRealtime()
+                while (true) {
+                    delay(LOCATION_WATCH_MS)
+                    watchLocation(since)
+                }
+            }
         }
 
         _running.value = true
@@ -411,6 +476,60 @@ class DetectionService : LifecycleService() {
         }
     }
 
+    /**
+     * Keeps the rows of the sources that need a position honest about not
+     * having one. They only report when they poll, and they only poll from a
+     * fix: with Location switched off, or no fix to be had, they sat at "no
+     * detections" with nothing to say that they were not looking.
+     *
+     * A fix older than [FIX_STALE_MS] (or any fix, once Location is off) is
+     * withdrawn, so no source goes on measuring from where the phone was.
+     */
+    private fun watchLocation(sinceMs: Long) {
+        val locationOn = try {
+            val lm = getSystemService(Context.LOCATION_SERVICE) as? LocationManager
+            lm == null || LocationManagerCompat.isLocationEnabled(lm)
+        } catch (e: Exception) { true }
+        if (locationOn && !locationWasOn) locationProvider.rerequest()
+        locationWasOn = locationOn
+        val fix = locationProvider.location.value
+        if (fix != null) {
+            val ageMs = (SystemClock.elapsedRealtimeNanos() - fix.elapsedRealtimeNanos) / 1_000_000L
+            if (!locationOn || ageMs > FIX_STALE_MS) locationProvider.withdrawFix()
+        }
+        val missing = locationProvider.location.value == null
+        val waited = SystemClock.elapsedRealtime() - sinceMs >= FIX_WAIT_MS
+        for ((source, on) in listOf(
+            DetectionSource.DEFLOCK to deflockStarted,
+            DetectionSource.WAZE to wazeStarted,
+            DetectionSource.AIRCRAFT to aircraftStarted
+        )) {
+            if (!on) continue
+            val now = SourceHealth.flowFor(source).value
+            val noted = locationNotes[source]
+            // Something else has written the row since: it has a fix and polled.
+            if (noted != null && now.message != noted.second) locationNotes.remove(source)
+            if (missing && waited) {
+                // AIRCRAFT also lists drones, which the radios hear without a
+                // position, so its row stays up and carries a note instead.
+                val drones = source == DetectionSource.AIRCRAFT
+                val note = when {
+                    !locationOn && drones -> "Location is off — aircraft are not checked, drones still are"
+                    !locationOn -> "Location is off — turn it on for this source"
+                    else -> "No location fix yet — waiting for one"
+                }
+                if (now.message != note) {
+                    val before = locationNotes[source]?.first ?: now
+                    locationNotes[source] = before to note
+                    SourceHealth.record(source, ok = locationOn || drones, message = note)
+                }
+            } else if (!missing && locationNotes.containsKey(source)) {
+                // Back to what it said before, until its next poll says better.
+                SourceHealth.restore(source, locationNotes.remove(source)!!.first)
+            }
+        }
+    }
+
     /** A fresh client for the backend Settings names now. A new direct client
      *  restores the stored anonymous account, so a Forget also takes effect here. */
     private fun newWazeSource(): WazeSource = when (settings.wazeBackend.value) {
@@ -434,6 +553,9 @@ class DetectionService : LifecycleService() {
         mapPointsJob?.cancel(); mapPointsJob = null
         locationJob?.cancel(); locationJob = null
         overlayJob?.cancel(); overlayJob = null
+        ridersOffJob?.cancel(); ridersOffJob = null
+        locationWatchJob?.cancel(); locationWatchJob = null
+        locationNotes.clear()
         if (classicStarted) { classicScanner.stop(); classicStarted = false }
         if (bleStarted) { bleScanner.stop(); bleStarted = false }
         if (wifiStarted) { wifiScanner.stop(); wifiStarted = false }
@@ -479,7 +601,20 @@ class DetectionService : LifecycleService() {
             )
             ThreatLevel.GREEN -> return
         }
-        try { v.vibrate(effect) } catch (e: Exception) { Log.w(TAG, "vibrate failed: ${e.message}") }
+        // Marked as an alarm. With no usage given Android treats a vibration as
+        // unimportant: it is dropped in Battery Saver, and from Android 13 it
+        // follows the "media vibration" setting. The buzz is the alert here.
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                v.vibrate(effect, VibrationAttributes.createForUsage(VibrationAttributes.USAGE_ALARM))
+            } else {
+                @Suppress("DEPRECATION")
+                v.vibrate(
+                    effect,
+                    AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).build()
+                )
+            }
+        } catch (e: Exception) { Log.w(TAG, "vibrate failed: ${e.message}") }
     }
 
     private fun currentVibrator(): Vibrator? =

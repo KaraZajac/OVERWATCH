@@ -10,19 +10,22 @@ import org.soulstone.overwatch.data.targets.RemoteId
  */
 class DroneTracker(private val nowMs: () -> Long = System::currentTimeMillis) {
 
-    private class Entry(val drone: RemoteId.Drone, var lastSeen: Long)
+    private class Entry(val drone: RemoteId.Drone, val firstSeen: Long, var lastSeen: Long)
+
+    /** A transmitter's drone, and how long it has been heard for. */
+    class Heard(val drone: RemoteId.Drone, val forMs: Long)
 
     private val byKey = HashMap<String, Entry>()
 
     /** Fold [messages] into the drone heard as [key] (a MAC or BSSID) and return it. */
     @Synchronized
-    fun update(key: String, messages: List<ByteArray>): RemoteId.Drone {
+    fun update(key: String, messages: List<ByteArray>): Heard {
         val now = nowMs()
         byKey.entries.removeAll { now - it.value.lastSeen > FORGET_MS }
-        val e = byKey.getOrPut(key) { Entry(RemoteId.Drone(), now) }
+        val e = byKey.getOrPut(key) { Entry(RemoteId.Drone(), now, now) }
         e.lastSeen = now
         for (m in messages) RemoteId.apply(e.drone, m)
-        return e.drone
+        return Heard(e.drone, now - e.firstSeen)
     }
 
     @Synchronized

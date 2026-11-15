@@ -39,6 +39,8 @@ class BleSpamDetector(private val nowMs: () -> Long = System::currentTimeMillis)
     private val variants = HashMap<String, ArrayDeque<Pair<Long, Int>>>()
     private var warmUpUntil = 0L
     private var lastPrune = 0L
+    /** When [observe] last ran, for any advert. */
+    private var lastObserved = 0L
 
     @Synchronized
     fun restartWarmUp() {
@@ -60,6 +62,13 @@ class BleSpamDetector(private val nowMs: () -> Long = System::currentTimeMillis)
         serviceData: Map<UUID, ByteArray>?
     ): Finding? {
         val now = nowMs()
+        // Deaf for a whole window, however that came about (a scan started over
+        // after a silence, HACKER switched on mid-scan, a mode change that was
+        // held back): what is heard next is everything in range at once, which is
+        // what a flood looks like. The scanner's own restartWarmUp() calls cover
+        // the starts it knows of; this covers the rest.
+        if (now - lastObserved > WINDOW_MS) warmUpUntil = maxOf(warmUpUntil, now + WARM_UP_MS)
+        lastObserved = now
         if (now - lastPrune > PRUNE_EVERY_MS) prune(now)
 
         if (apple != null) {

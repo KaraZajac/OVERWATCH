@@ -53,39 +53,84 @@ object SecureStore {
         return generator.generateKey()
     }
 
-    /** Encrypt + persist [value] under [name]. Empty string clears the entry. */
-    fun put(context: Context, name: String, value: String) {
+    /** What [read] found. */
+    sealed interface Read {
+        /** Nothing is stored under the name. */
+        object Absent : Read
+        class Value(val text: String) : Read
+        /** Something is stored and it could not be decrypted this time. It may
+         *  be readable later, so it is not the same as nothing. */
+        object Unreadable : Read
+    }
+
+    /**
+     * Encrypt + persist [value] under [name]. Empty string clears the entry.
+     * False when it could not be stored.
+     *
+     * Synchronized with [read]: the first use creates the key, and two threads
+     * doing that at once (the Waze account is saved off the main thread) could
+     * each make one, leaving what the first had encrypted unreadable.
+     */
+    @Synchronized
+    fun put(context: Context, name: String, value: String): Boolean {
         val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         if (value.isEmpty()) {
             prefs.edit { remove(name) }
-            return
+            return true
         }
-        try {
-            val cipher = Cipher.getInstance(TRANSFORMATION)
-            cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey())
-            val ct = cipher.doFinal(value.toByteArray(Charsets.UTF_8))
-            // Prepend the (12-byte) IV so decryption is self-contained.
-            val blob = Base64.encodeToString(cipher.iv + ct, Base64.NO_WRAP)
-            prefs.edit { putString(name, blob) }
+        return try {
+            prefs.edit { putString(name, encrypt(value)) }
+            true
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to store secret '$name': ${e.message}")
+            if (!keyIsGone(e)) {
+                Log.w(TAG, "Failed to store secret '$name': ${e.javaClass.simpleName}")
+                return false
+            }
+            // The key itself is lost for good (Android says so by these two
+            // exceptions), and with it everything stored under it. Without a
+            // new one nothing could ever be saved again.
+            try {
+                KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }.deleteEntry(KEY_ALIAS)
+                prefs.edit { putString(name, encrypt(value)) }
+                Log.w(TAG, "Keystore key was lost; made a new one")
+                true
+            } catch (e2: Exception) {
+                Log.w(TAG, "Failed to store secret '$name': ${e2.javaClass.simpleName}")
+                false
+            }
         }
     }
 
+    private fun keyIsGone(e: Exception): Boolean =
+        e is java.security.UnrecoverableKeyException ||
+            e is android.security.keystore.KeyPermanentlyInvalidatedException
+
+    private fun encrypt(value: String): String {
+        val cipher = Cipher.getInstance(TRANSFORMATION)
+        cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey())
+        val ct = cipher.doFinal(value.toByteArray(Charsets.UTF_8))
+        // Prepend the (12-byte) IV so decryption is self-contained.
+        return Base64.encodeToString(cipher.iv + ct, Base64.NO_WRAP)
+    }
+
     /** Decrypt the value stored under [name], or null if absent/undecryptable. */
-    fun get(context: Context, name: String): String? {
+    fun get(context: Context, name: String): String? = (read(context, name) as? Read.Value)?.text
+
+    /** [get], telling "nothing stored" from "stored, but not readable now". */
+    @Synchronized
+    fun read(context: Context, name: String): Read {
         val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        val blob = prefs.getString(name, null) ?: return null
+        val blob = prefs.getString(name, null) ?: return Read.Absent
         return try {
             val bytes = Base64.decode(blob, Base64.NO_WRAP)
             val iv = bytes.copyOfRange(0, IV_LEN)
             val ct = bytes.copyOfRange(IV_LEN, bytes.size)
             val cipher = Cipher.getInstance(TRANSFORMATION)
             cipher.init(Cipher.DECRYPT_MODE, getOrCreateKey(), GCMParameterSpec(GCM_TAG_BITS, iv))
-            String(cipher.doFinal(ct), Charsets.UTF_8)
+            Read.Value(String(cipher.doFinal(ct), Charsets.UTF_8))
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to read secret '$name': ${e.message}")
-            null
+            Log.w(TAG, "Failed to read secret '$name': ${e.javaClass.simpleName}")
+            Read.Unreadable
         }
     }
 }

@@ -8,7 +8,7 @@ package org.soulstone.overwatch.data.targets
  * prefixes seen on Flock hardware a hit identifies the maker directly, and the
  * drill-down label can say so. 19 were verified against the Wireshark manuf
  * snapshot of 2026-08-28 (Flock Safety's, added in v0.5.19, against hwdata 0.411);
- * the 18 added in v0.6.0 against the IEEE MA-L, MA-M and MA-S CSVs of 2026-11-01.
+ * the 22 added in v0.6.0 against the IEEE MA-L, MA-M and MA-S CSVs of 2026-11-01.
  *
  * **Block sizes.** An MA-L block is 24 bits ("xx:xx:xx"); MA-M is 28 bits and MA-S
  * 36, written here with the extra nibble(s) after a colon ("58:e8:76:c",
